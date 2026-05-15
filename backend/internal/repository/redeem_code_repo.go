@@ -79,8 +79,9 @@ func (r *redeemCodeRepository) GetByID(ctx context.Context, id int64) (*service.
 }
 
 func (r *redeemCodeRepository) GetByCode(ctx context.Context, code string) (*service.RedeemCode, error) {
+	code = strings.TrimSpace(code)
 	m, err := r.client.RedeemCode.Query().
-		Where(redeemcode.CodeEQ(code)).
+		Where(redeemcode.CodeEqualFold(code)).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {

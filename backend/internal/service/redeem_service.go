@@ -268,16 +268,23 @@ func (s *RedeemService) releaseRedeemLock(ctx context.Context, code string) {
 
 // Redeem 使用兑换码
 func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (*RedeemCode, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		s.incrementRedeemErrorCount(ctx, userID)
+		return nil, ErrRedeemCodeNotFound
+	}
+
 	// 检查限流
 	if err := s.checkRedeemRateLimit(ctx, userID); err != nil {
 		return nil, err
 	}
 
 	// 获取分布式锁，防止同一兑换码并发使用
-	if !s.acquireRedeemLock(ctx, code) {
+	lockCode := strings.ToUpper(code)
+	if !s.acquireRedeemLock(ctx, lockCode) {
 		return nil, ErrRedeemCodeLocked
 	}
-	defer s.releaseRedeemLock(ctx, code)
+	defer s.releaseRedeemLock(ctx, lockCode)
 
 	// 查找兑换码
 	redeemCode, err := s.redeemRepo.GetByCode(ctx, code)
@@ -467,6 +474,10 @@ func (s *RedeemService) GetByID(ctx context.Context, id int64) (*RedeemCode, err
 
 // GetByCode 根据Code获取兑换码
 func (s *RedeemService) GetByCode(ctx context.Context, code string) (*RedeemCode, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, ErrRedeemCodeNotFound
+	}
 	redeemCode, err := s.redeemRepo.GetByCode(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("get redeem code: %w", err)

@@ -1,0 +1,29 @@
+server:
+    host: 127.0.0.1
+    port: 8081
+    mode: release
+database:
+    host: 192.168.30.96
+    port: 5432
+    user: root
+    password: Ccx.123456
+    dbname: mydatabase
+    sslmode: disable
+redis:
+    host: 192.168.30.96
+    port: 7369
+    password: a68a13d025e64c9f9f0daf91f828152a
+    db: 0
+    enable_tls: false
+jwt:
+    secret: 86596301d677af82da207c839da5fbd4fc8782ddb0672f1281c196accf2e9396
+    expire_hour: 24
+default:
+    user_concurrency: 5
+    user_balance: 0
+    api_key_prefix: sk-
+    rate_multiplier: 1
+rate_limit:
+    requests_per_minute: 60
+    burst_size: 10
+timezone: Asia/Shanghai

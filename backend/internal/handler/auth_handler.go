@@ -158,12 +158,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-
 	// Turnstile 验证（邮箱验证码注册场景避免重复校验一次性 token）
 	if err := h.authService.VerifyTurnstileForRegister(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c), req.VerifyCode); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+
+	req.Email = strings.TrimSpace(req.Email)
+	req.VerifyCode = strings.TrimSpace(req.VerifyCode)
+	req.PromoCode = strings.TrimSpace(req.PromoCode)
+	req.InvitationCode = strings.TrimSpace(req.InvitationCode)
+	req.AffCode = strings.TrimSpace(req.AffCode)
 
 	_, user, err := h.authService.RegisterWithVerification(
 		c.Request.Context(),
@@ -511,6 +516,15 @@ type ValidateInvitationCodeResponse struct {
 	ErrorCode string `json:"error_code,omitempty"`
 }
 
+type ValidateAffiliateCodeRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
+type ValidateAffiliateCodeResponse struct {
+	Valid     bool   `json:"valid"`
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
 // ValidateInvitationCode 验证邀请码（公开接口，注册前调用）
 // POST /api/v1/auth/validate-invitation-code
 func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
@@ -528,9 +542,17 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	code := strings.TrimSpace(req.Code)
+	if code == "" {
+		response.Success(c, ValidateInvitationCodeResponse{
+			Valid:     false,
+			ErrorCode: "INVITATION_CODE_NOT_FOUND",
+		})
+		return
+	}
 
 	// 验证邀请码
-	redeemCode, err := h.redeemService.GetByCode(c.Request.Context(), req.Code)
+	redeemCode, err := h.redeemService.GetByCode(c.Request.Context(), code)
 	if err != nil {
 		response.Success(c, ValidateInvitationCodeResponse{
 			Valid:     false,
@@ -574,6 +596,20 @@ type ForgotPasswordResponse struct {
 
 // ForgotPassword 请求密码重置
 // POST /api/v1/auth/forgot-password
+func (h *AuthHandler) ValidateAffiliateCode(c *gin.Context) {
+	var req ValidateAffiliateCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	valid, errorCode := h.authService.ValidateAffiliateCode(c.Request.Context(), req.Code)
+	response.Success(c, ValidateAffiliateCodeResponse{
+		Valid:     valid,
+		ErrorCode: errorCode,
+	})
+}
+
 func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	var req ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

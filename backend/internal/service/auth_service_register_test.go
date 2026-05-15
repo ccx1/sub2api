@@ -179,6 +179,10 @@ func (s *emailCacheStub) IncrNotifyCodeUserRate(ctx context.Context, userID int6
 }
 
 func newAuthService(repo *userRepoStub, settings map[string]string, emailCache EmailCache) *AuthService {
+	return newAuthServiceWithRedeemRepo(repo, settings, emailCache, nil)
+}
+
+func newAuthServiceWithRedeemRepo(repo *userRepoStub, settings map[string]string, emailCache EmailCache, redeemRepo RedeemCodeRepository) *AuthService {
 	cfg := &config.Config{
 		JWT: config.JWTConfig{
 			Secret:     "test-secret",
@@ -203,7 +207,7 @@ func newAuthService(repo *userRepoStub, settings map[string]string, emailCache E
 	return NewAuthService(
 		nil, // entClient
 		repo,
-		nil, // redeemRepo
+		redeemRepo,
 		nil, // refreshTokenCache
 		cfg,
 		settingService,
@@ -214,6 +218,28 @@ func newAuthService(repo *userRepoStub, settings map[string]string, emailCache E
 		nil, // defaultSubAssigner
 		nil, // affiliateService
 	)
+}
+
+type registerInvitationRedeemRepoStub struct {
+	redeemRepoStub
+	code       *RedeemCode
+	lookupCode string
+	usedID     int64
+	usedBy     int64
+}
+
+func (s *registerInvitationRedeemRepoStub) GetByCode(ctx context.Context, code string) (*RedeemCode, error) {
+	s.lookupCode = code
+	if s.code == nil || code != s.code.Code {
+		return nil, ErrRedeemCodeNotFound
+	}
+	return s.code, nil
+}
+
+func (s *registerInvitationRedeemRepoStub) Use(ctx context.Context, id, userID int64) error {
+	s.usedID = id
+	s.usedBy = userID
+	return nil
 }
 
 func TestAuthService_Register_Disabled(t *testing.T) {
@@ -390,6 +416,34 @@ func TestAuthService_Register_Success(t *testing.T) {
 	require.Equal(t, 2, user.Concurrency)
 	require.Len(t, repo.created, 1)
 	require.True(t, user.CheckPassword("password"))
+}
+
+func TestAuthService_RegisterWithVerification_TrimsInvitationCode(t *testing.T) {
+	repo := &userRepoStub{nextID: 9}
+	redeemRepo := &registerInvitationRedeemRepoStub{
+		code: &RedeemCode{
+			ID:     77,
+			Code:   "INVITE123",
+			Type:   RedeemTypeInvitation,
+			Status: StatusUnused,
+		},
+	}
+	service := newAuthServiceWithRedeemRepo(repo, map[string]string{
+		SettingKeyRegistrationEnabled:                 "true",
+		SettingKeyInvitationCodeEnabled:               "true",
+		SettingKeyEmailVerifyEnabled:                  "false",
+		SettingKeyAuthSourceDefaultEmailGrantOnSignup: "false",
+	}, nil, redeemRepo)
+
+	token, user, err := service.RegisterWithVerification(context.Background(), " user@test.com ", "password", "", "", " INVITE123 ", "")
+
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+	require.NotNil(t, user)
+	require.Equal(t, "INVITE123", redeemRepo.lookupCode)
+	require.Equal(t, int64(77), redeemRepo.usedID)
+	require.Equal(t, int64(9), redeemRepo.usedBy)
+	require.Equal(t, "user@test.com", repo.created[0].Email)
 }
 
 func TestAuthService_ValidateToken_ExpiredReturnsClaimsWithError(t *testing.T) {

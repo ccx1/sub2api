@@ -29,11 +29,11 @@ const (
 
 // jitteredTTL 返回带随机抖动的 TTL，防止缓存雪崩
 func jitteredTTL() time.Duration {
-	// 只做“减法抖动”，确保实际 TTL 不会超过 billingCacheTTL（避免上界预期被打破）。
 	if billingCacheJitter <= 0 {
 		return billingCacheTTL
 	}
-	jitter := time.Duration(rand.IntN(int(billingCacheJitter)))
+	// 改用 int64，因为 time.Duration 底层就是 int64
+	jitter := time.Duration(rand.Int64N(int64(billingCacheJitter)))
 	return billingCacheTTL - jitter
 }
 

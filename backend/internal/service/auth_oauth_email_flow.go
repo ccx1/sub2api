@@ -341,7 +341,7 @@ func (s *AuthService) oauthEmailFlowClient(ctx context.Context) *dbent.Client {
 
 func (s *AuthService) loadOAuthRegistrationInvitation(ctx context.Context, invitationCode string) (*RedeemCode, error) {
 	if client := s.oauthEmailFlowClient(ctx); client != nil {
-		entity, err := client.RedeemCode.Query().Where(redeemcode.CodeEQ(invitationCode)).Only(ctx)
+		entity, err := client.RedeemCode.Query().Where(redeemcode.CodeEqualFold(invitationCode)).Only(ctx)
 		if err != nil {
 			if dbent.IsNotFound(err) {
 				return nil, ErrRedeemCodeNotFound

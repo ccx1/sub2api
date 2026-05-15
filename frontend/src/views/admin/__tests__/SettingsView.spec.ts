@@ -981,4 +981,24 @@ describe("admin SettingsView wechat connect controls", () => {
       }),
     );
   });
+
+  it("saves affiliate switch from registration settings", async () => {
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    await wrapper
+      .get('[data-testid="registration-affiliate-enabled"]')
+      .setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        affiliate_enabled: false,
+      }),
+    );
+  });
 });

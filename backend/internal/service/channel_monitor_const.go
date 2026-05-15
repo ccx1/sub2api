@@ -116,10 +116,10 @@ var (
 		"CHANNEL_MONITOR_INVALID_INTERVAL", "interval_seconds must be in [15, 3600]",
 	)
 	ErrChannelMonitorInvalidEndpoint = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_ENDPOINT", "endpoint must be a valid https URL",
+		"CHANNEL_MONITOR_INVALID_ENDPOINT", "endpoint must be a valid http or https URL",
 	)
 	ErrChannelMonitorEndpointScheme = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_ENDPOINT_SCHEME", "endpoint must use https scheme",
+		"CHANNEL_MONITOR_ENDPOINT_SCHEME", "endpoint must use http or https scheme",
 	)
 	ErrChannelMonitorEndpointPath = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_ENDPOINT_PATH", "endpoint must be base origin only (no path/query/fragment)",
