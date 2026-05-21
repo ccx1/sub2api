@@ -175,6 +175,7 @@ const { copyToClipboard: clipboardCopy } = useClipboard()
 const copiedIndex = ref<number | null>(null)
 const activeTab = ref<string>('unix')
 const activeClientTab = ref<string>('claude')
+const codexModelProvider = 'iCode'
 
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
@@ -530,7 +531,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
   // config.toml content
-  const configContent = `model_provider = "OpenAI"
+  const configContent = `model_provider = "${codexModelProvider}"
 model = "gpt-5.4"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
@@ -540,8 +541,8 @@ windows_wsl_setup_acknowledged = true
 model_context_window = 1000000
 model_auto_compact_token_limit = 900000
 
-[model_providers.OpenAI]
-name = "OpenAI"
+[model_providers.${codexModelProvider}]
+name = "${codexModelProvider}"
 base_url = "${baseUrl}"
 wire_api = "responses"
 requires_openai_auth = true`
@@ -569,7 +570,7 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
   // config.toml content with WebSocket v2
-  const configContent = `model_provider = "OpenAI"
+  const configContent = `model_provider = "${codexModelProvider}"
 model = "gpt-5.4"
 review_model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
@@ -579,8 +580,8 @@ windows_wsl_setup_acknowledged = true
 model_context_window = 1000000
 model_auto_compact_token_limit = 900000
 
-[model_providers.OpenAI]
-name = "OpenAI"
+[model_providers.${codexModelProvider}]
+name = "${codexModelProvider}"
 base_url = "${baseUrl}"
 wire_api = "responses"
 supports_websockets = true

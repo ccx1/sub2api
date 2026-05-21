@@ -1485,20 +1485,24 @@
                 <Toggle v-model="form.promo_code_enabled" />
               </div>
 
-              <!-- Invitation Code -->
+              <!-- Affiliate Code -->
               <div
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div>
                   <label class="font-medium text-gray-900 dark:text-white">{{
-                    t("admin.settings.registration.invitationCode")
+                    t("admin.settings.features.affiliate.enabled")
                   }}</label>
                   <p class="text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.registration.invitationCodeHint") }}
+                    {{ t("admin.settings.features.affiliate.enabledHint") }}
                   </p>
                 </div>
-                <Toggle v-model="form.invitation_code_enabled" />
+                <Toggle
+                  v-model="form.affiliate_enabled"
+                  data-testid="registration-affiliate-enabled"
+                />
               </div>
+
               <!-- Password Reset - Only show when email verification is enabled -->
               <div
                 v-if="form.email_verify_enabled"
@@ -5147,18 +5151,6 @@
             </p>
           </div>
           <div class="space-y-5 p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {{ t('admin.settings.features.affiliate.enabled') }}
-                </label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('admin.settings.features.affiliate.enabledHint') }}
-                </p>
-              </div>
-              <Toggle v-model="form.affiliate_enabled" />
-            </div>
-
             <div v-if="form.affiliate_enabled" class="space-y-6">
               <div>
                 <label class="input-label">

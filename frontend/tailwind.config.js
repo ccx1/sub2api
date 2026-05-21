@@ -5,82 +5,78 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 主色调 - Teal/Cyan 青色系
         primary: {
-          50: '#f0fdfa',
-          100: '#ccfbf1',
-          200: '#99f6e4',
-          300: '#5eead4',
-          400: '#2dd4bf',
-          500: '#14b8a6',
-          600: '#0d9488',
-          700: '#0f766e',
-          800: '#115e59',
-          900: '#134e4a',
-          950: '#042f2e'
+          50: '#eef6f1',
+          100: '#dcebe1',
+          200: '#bfd8c6',
+          300: '#97bda6',
+          400: '#6e9e83',
+          500: '#4c7d64',
+          600: '#3f6854',
+          700: '#345446',
+          800: '#2c4439',
+          900: '#263730',
+          950: '#141d1a'
         },
-        // 辅助色 - 深蓝灰
         accent: {
-          50: '#f8fafc',
-          100: '#f1f5f9',
-          200: '#e2e8f0',
-          300: '#cbd5e1',
-          400: '#94a3b8',
-          500: '#64748b',
-          600: '#475569',
-          700: '#334155',
-          800: '#1e293b',
-          900: '#0f172a',
-          950: '#020617'
+          50: '#fff5f1',
+          100: '#ffe7de',
+          200: '#ffd0bd',
+          300: '#ffb194',
+          400: '#f38a6e',
+          500: '#e16d4f',
+          600: '#c5563b',
+          700: '#a24632',
+          800: '#7b372a',
+          900: '#5f2c23',
+          950: '#341610'
         },
-        // 深色模式背景
         dark: {
-          50: '#f8fafc',
-          100: '#f1f5f9',
-          200: '#e2e8f0',
-          300: '#cbd5e1',
-          400: '#94a3b8',
-          500: '#64748b',
-          600: '#475569',
-          700: '#334155',
-          800: '#1e293b',
-          900: '#0f172a',
-          950: '#020617'
+          50: '#f5f5f3',
+          100: '#ebebe8',
+          200: '#d7d6d1',
+          300: '#b5b4ad',
+          400: '#8b8a81',
+          500: '#6b6a61',
+          600: '#56554e',
+          700: '#45443e',
+          800: '#2f2f2b',
+          900: '#21211e',
+          950: '#171714'
         }
       },
       fontFamily: {
         sans: [
+          '"Segoe UI Variable"',
+          'Aptos',
+          '"Segoe UI"',
+          '"PingFang SC"',
+          '"Microsoft YaHei"',
           'system-ui',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
-          'Helvetica Neue',
-          'Arial',
-          'PingFang SC',
-          'Hiragino Sans GB',
-          'Microsoft YaHei',
           'sans-serif'
         ],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+        mono: ['ui-monospace', '"Cascadia Code"', '"SFMono-Regular"', 'Consolas', 'monospace']
       },
       boxShadow: {
-        glass: '0 8px 32px rgba(0, 0, 0, 0.08)',
-        'glass-sm': '0 4px 16px rgba(0, 0, 0, 0.06)',
-        glow: '0 0 20px rgba(20, 184, 166, 0.25)',
-        'glow-lg': '0 0 40px rgba(20, 184, 166, 0.35)',
-        card: '0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06)',
-        'card-hover': '0 10px 40px rgba(0, 0, 0, 0.08)',
-        'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+        glass: '0 18px 40px rgba(23, 23, 20, 0.08)',
+        'glass-sm': '0 10px 24px rgba(23, 23, 20, 0.06)',
+        glow: '0 10px 30px rgba(63, 104, 84, 0.18)',
+        'glow-lg': '0 18px 44px rgba(63, 104, 84, 0.22)',
+        card: '0 12px 32px rgba(23, 23, 20, 0.06), 0 1px 2px rgba(23, 23, 20, 0.08)',
+        'card-hover': '0 22px 48px rgba(23, 23, 20, 0.12), 0 4px 12px rgba(23, 23, 20, 0.08)',
+        'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.12)'
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-        'gradient-primary': 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)',
-        'gradient-dark': 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-        'gradient-glass':
-          'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+        'gradient-primary': 'linear-gradient(135deg, #4c7d64 0%, #345446 100%)',
+        'gradient-accent': 'linear-gradient(135deg, #f38a6e 0%, #c5563b 100%)',
+        'gradient-dark': 'linear-gradient(135deg, #2f2f2b 0%, #171714 100%)',
+        'surface-grid':
+          'linear-gradient(rgba(63, 104, 84, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(63, 104, 84, 0.06) 1px, transparent 1px)',
+        'panel-wash':
+          'radial-gradient(at 0% 0%, rgba(76, 125, 100, 0.14) 0px, transparent 45%), radial-gradient(at 100% 100%, rgba(225, 109, 79, 0.12) 0px, transparent 40%)',
         'mesh-gradient':
-          'radial-gradient(at 40% 20%, rgba(20, 184, 166, 0.12) 0px, transparent 50%), radial-gradient(at 80% 0%, rgba(6, 182, 212, 0.08) 0px, transparent 50%), radial-gradient(at 0% 50%, rgba(20, 184, 166, 0.08) 0px, transparent 50%)'
+          'radial-gradient(at 20% 10%, rgba(76, 125, 100, 0.12) 0px, transparent 45%), radial-gradient(at 80% 0%, rgba(225, 109, 79, 0.08) 0px, transparent 40%), linear-gradient(rgba(63, 104, 84, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(63, 104, 84, 0.04) 1px, transparent 1px)'
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out',
@@ -118,8 +114,8 @@ export default {
           '100%': { backgroundPosition: '200% 0' }
         },
         glow: {
-          '0%': { boxShadow: '0 0 20px rgba(20, 184, 166, 0.25)' },
-          '100%': { boxShadow: '0 0 30px rgba(20, 184, 166, 0.4)' }
+          '0%': { boxShadow: '0 10px 24px rgba(63, 104, 84, 0.16)' },
+          '100%': { boxShadow: '0 16px 34px rgba(63, 104, 84, 0.24)' }
         }
       },
       backdropBlur: {
