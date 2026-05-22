@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>储值卡充值跳转页</title>
+  <style>
+    :root {
+      --bg-start: #fff7ed;
+      --bg-end: #fff;
+      --panel: rgba(255, 255, 255, 0.92);
+      --line: rgba(148, 163, 184, 0.24);
+      --text-main: #172554;
+      --text-sub: #475569;
+      --text-soft: #64748b;
+      --accent: #f97316;
+      --accent-strong: #ea580c;
+      --badge: #7c2d12;
+      --shadow: 0 18px 50px rgba(15, 23, 42, 0.10);
+      --radius: 24px;
+      --font-main: "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-main);
+      color: var(--text-main);
+      background:
+        radial-gradient(circle at top left, rgba(249, 115, 22, 0.18), transparent 26%),
+        linear-gradient(180deg, var(--bg-start), var(--bg-end));
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 36px 0 48px;
+    }
+
+    .hero,
+    .footer {
+      backdrop-filter: blur(12px);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 28px 28px 24px;
+      margin-bottom: 20px;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -40px;
+      top: -48px;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(249, 115, 22, 0.28), transparent 66%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 237, 213, 0.92);
+      color: var(--badge);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 18px 0 12px;
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.05;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      color: var(--text-sub);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .meta-chip {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(249, 115, 22, 0.18);
+      color: var(--text-soft);
+      font-size: 13px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      display: block;
+      width: 100%;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(249, 115, 22, 0.35);
+      box-shadow: 0 24px 45px rgba(234, 88, 12, 0.14);
+    }
+
+    .card:focus-visible {
+      outline: 3px solid rgba(249, 115, 22, 0.26);
+      outline-offset: 3px;
+    }
+
+    .card-tag {
+      display: inline-block;
+      margin-bottom: 16px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(249, 115, 22, 0.12);
+      color: var(--badge);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .card-title {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .card-desc {
+      min-height: 48px;
+      margin: 0 0 22px;
+      color: var(--text-sub);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .card-action {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--accent-strong);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .footer {
+      margin-top: 20px;
+      padding: 18px 20px;
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .empty {
+      padding: 28px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px dashed rgba(249, 115, 22, 0.28);
+      color: var(--text-sub);
+      text-align: center;
+    }
+
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 24px, 1120px); padding-top: 24px; }
+      .hero { padding: 22px 20px; }
+      .card { padding: 18px; }
+      .card-title { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <span class="eyebrow">欢迎购买iCode兑换码</span>
+      <h1 id="page-title">兑换码购买</h1>
+      <p id="page-subtitle" class="hero-copy"></p>
+      <div class="hero-meta">
+        <span class="meta-chip" id="open-mode-chip"></span>
+        <span class="meta-chip" id="frame-mode-chip"></span>
+      </div>
+    </section>
+
+    <section id="cards" class="cards" aria-label="兑换码购买列表"></section>
+
+    <section class="footer">
+      <div id="page-hint"></div>
+      <div id="page-footer"></div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script>
+    const config = window.PAY_PAGE_CONFIG || {}
+    const openMode = normalizeOpenMode(config.openMode)
+    const cardsContainer = document.getElementById('cards')
+    const isInIframe = window.self !== window.top
+
+    document.getElementById('page-title').textContent = config.pageTitle || '储值卡充值'
+    document.getElementById('page-subtitle').textContent =
+      config.pageSubtitle || '请选择要跳转的储值卡页面。'
+    document.getElementById('page-hint').textContent =
+      config.pageHint || '修改 payHtml/config.js 中的 items 即可替换卡片内容。'
+    document.getElementById('page-footer').textContent =
+      config.footerText || '点击卡片后将跳转到配置中的充值地址。'
+    document.getElementById('open-mode-chip').textContent = `跳转方式：${modeLabel(openMode)}`
+    document.getElementById('frame-mode-chip').textContent =
+      isInIframe ? '当前运行：iframe 内' : '当前运行：独立页面'
+
+    if (!Array.isArray(config.items) || config.items.length === 0) {
+      cardsContainer.innerHTML = '<div class="empty">当前没有可用的充值卡，请先配置 payHtml/config.js。</div>'
+    } else {
+      const fragment = document.createDocumentFragment()
+      config.items.forEach(function (item, index) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'card'
+        button.innerHTML = [
+          `<span class="card-tag">${escapeHtml(item.tag || ('套餐 ' + (index + 1)))}</span>`,
+          `<h2 class="card-title">${escapeHtml(item.name || '未命名套餐')}</h2>`,
+          `<p class="card-desc">${escapeHtml(item.desc || '请在配置文件中补充说明文字。')}</p>`,
+          '<div class="card-action"><span>立即前往</span><span>→</span></div>',
+        ].join('')
+        button.addEventListener('click', function () {
+          if (!item.url) {
+            window.alert('当前卡片未配置跳转地址，请先修改 payHtml/config.js。')
+            return
+          }
+          openTarget(item.url, normalizeOpenMode(item.openMode || openMode))
+        })
+        fragment.appendChild(button)
+      })
+      cardsContainer.appendChild(fragment)
+    }
+
+    function openTarget(url, mode) {
+      const openers = {
+        top: function () { return navigateWindow(window.top, url) },
+        parent: function () { return navigateWindow(window.parent, url) },
+        self: function () { return navigateWindow(window, url) },
+        'new-tab': function () { return !!window.open(url, '_blank') },
+      }
+
+      if (openers[mode] && openers[mode]()) return
+      if (navigateWindow(window.top, url)) return
+      if (navigateWindow(window.parent, url)) return
+      if (navigateWindow(window, url)) return
+      window.open(url, '_blank')
+    }
+
+    function navigateWindow(targetWindow, url) {
+      try {
+        if (!targetWindow || !targetWindow.location) return false
+        targetWindow.location.href = url
+        return true
+      } catch (error) {
+        return false
+      }
+    }
+
+    function normalizeOpenMode(mode) {
+      return ['top', 'parent', 'self', 'new-tab'].indexOf(mode) >= 0 ? mode : 'top'
+    }
+
+    function modeLabel(mode) {
+      return {
+        top: '顶层窗口',
+        parent: '父级窗口',
+        self: '当前 iframe',
+        'new-tab': '新标签页',
+      }[mode] || '顶层窗口'
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+    }
+  </script>
+</body>
+</html>

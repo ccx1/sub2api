@@ -1,0 +1,42 @@
+{
+  "sub2api": {
+    "api_base_url": "http://127.0.0.1:8081/api/v1",
+    "timeout_seconds": 30,
+    "auth": {
+      "mode": "login",
+      "token": "",
+      "admin_api_key": "",
+      "login": {
+        "email": "admin@example.com",
+        "password": "请改成真实密码",
+        "turnstile_token": "",
+        "totp_code": ""
+      }
+    }
+  },
+  "products": {
+    "balance_50": {
+      "label": "50元余额卡",
+      "redeem": {
+        "count": 10,
+        "type": "balance",
+        "value": 50,
+        "expires_in_days": 30
+      }
+    },
+    "subscription_30d": {
+      "label": "30天订阅卡",
+      "redeem": {
+        "count": 5,
+        "type": "subscription",
+        "value": 1,
+        "group_id": 1,
+        "validity_days": 30,
+        "expires_in_days": 30
+      }
+    }
+  },
+  "output": {
+    "directory": "outputs"
+  }
+}

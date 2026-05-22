@@ -37,7 +37,7 @@ function injectPublicSettings(backendUrl: string): Plugin {
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
-  const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
+  const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:10888'
   const devPort = Number(env.VITE_DEV_PORT || 3000)
 
   return {

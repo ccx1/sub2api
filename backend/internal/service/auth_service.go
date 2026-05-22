@@ -430,6 +430,34 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	return s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
+func (s *AuthService) ValidateAffiliateCode(ctx context.Context, rawCode string) (bool, string) {
+	code := strings.ToUpper(strings.TrimSpace(rawCode))
+	if code == "" {
+		return false, "AFFILIATE_CODE_NOT_FOUND"
+	}
+	if s == nil || s.affiliateService == nil {
+		return false, "AFFILIATE_CODE_DISABLED"
+	}
+	if !s.affiliateService.IsEnabled(ctx) {
+		return false, "AFFILIATE_CODE_DISABLED"
+	}
+	if !isValidAffiliateCodeFormat(code) {
+		return false, "AFFILIATE_CODE_INVALID"
+	}
+
+	summary, err := s.affiliateService.repo.GetAffiliateByCode(ctx, code)
+	if err != nil {
+		if errors.Is(err, ErrAffiliateProfileNotFound) {
+			return false, "AFFILIATE_CODE_NOT_FOUND"
+		}
+		return false, "AFFILIATE_CODE_INVALID"
+	}
+	if summary == nil || summary.UserID <= 0 {
+		return false, "AFFILIATE_CODE_NOT_FOUND"
+	}
+	return true, ""
+}
+
 // Login 用户登录，返回JWT token
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
 	// 查找用户

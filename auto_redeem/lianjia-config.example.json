@@ -1,0 +1,35 @@
+{
+  "lianjia": {
+    "endpoint": "https://pay.ldxp.cn/merchantApi/GoodsCardStorage/add",
+    "goods_list_endpoint": "https://pay.ldxp.cn/merchantApi/Goods/list",
+    "timeout_seconds": 30,
+    "auth": {
+      "mode": "cookie",
+      "cookie": "请填写浏览器里抓到的完整 Cookie"
+    },
+    "merchant_token": "请填写 merchant-token",
+    "origin": "https://pay.ldxp.cn",
+    "referer_template": "https://pay.ldxp.cn/merchant/goods/goods_card_storage_add?goods_id={goods_id}",
+    "goods_list_referer": "https://pay.ldxp.cn/merchant/goods/list?is_proxy=0",
+    "accept_language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
+    "first": 0,
+    "remove_repeat": 0,
+    "extra_headers": {}
+  },
+  "products": {
+    "balance_50": {
+      "label": "50元余额卡",
+      "listing": {
+        "goods_id": 278372
+      }
+    },
+    "subscription_30d": {
+      "label": "30天订阅卡",
+      "listing": {
+        "group_id": 1,
+        "goods_id": 278374
+      }
+    }
+  }
+}
