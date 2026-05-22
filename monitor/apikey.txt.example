@@ -1,0 +1,9 @@
+# 正式文件请命名为 apikey.txt
+# 支持三种写法：
+# 1. 名称,APIKey
+# 2. 名称 APIKey
+# 3. 只有 APIKey，名称会自动脱敏
+
+alice,sk-replace_alice_key
+bob sk-replace_bob_key
+sk-replace_plain_key
