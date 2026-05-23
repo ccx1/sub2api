@@ -185,8 +185,22 @@ def _to_unicode(value):
     if value is None:
         return u""
     try:
-        return unicode(value)  # noqa: F821
+        unicode_type = unicode  # noqa: F821
+        bytes_type = str
     except NameError:
         return str(value)
-    except UnicodeDecodeError:
-        return unicode(str(value), "utf-8", "ignore")  # noqa: F821
+
+    if isinstance(value, unicode_type):
+        return value
+    if isinstance(value, bytes_type):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.decode("utf-8", "ignore")
+    try:
+        return unicode_type(value)
+    except Exception:
+        try:
+            return unicode_type(str(value), "utf-8", "ignore")
+        except Exception:
+            return unicode_type(repr(value), "utf-8", "ignore")

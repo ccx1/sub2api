@@ -97,6 +97,19 @@
 - `listing.group_id` 可选，但建议填上
 - 如果填了，脚本会校验它和 `sub2api-config.json` 中同产品的 `redeem.group_id` 一致
 
+通知配置也放在 `lianjia-config.json`：
+
+```json
+"notification": {
+  "dingtalk_webhook": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
+  "keyword": "Token使用"
+}
+```
+
+说明：
+- `dingtalk_webhook` 不建议写进示例配置或提交到仓库，放在你本地真实配置即可
+- 关键词会自动拼进消息正文，满足钉钉机器人的关键词校验
+
 ### 3. 两份配置之间的关系
 
 推荐让同一个 `product_key` 同时出现在两份配置里：
@@ -218,6 +231,11 @@ Copy-Item .\auto_redeem\lianjia-config.example.json .\auto_redeem\lianjia-config
 ```
 
 服务器定时任务建议直接调用这个脚本。
+
+执行通知：
+- `auto_restock.py` 执行结束后会自动发送一条钉钉通知
+- 成功/失败都会发
+- 通知内容包含：执行时间、主机名、是否 dry-run、阈值、每个产品的处理结果
 
 ## 建议
 

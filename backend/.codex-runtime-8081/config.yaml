@@ -1,0 +1,917 @@
+﻿# Sub2API Configuration File
+# Sub2API 閰嶇疆鏂囦欢
+#
+# Copy this file to /etc/sub2api/config.yaml and modify as needed
+# 澶嶅埗姝ゆ枃浠跺埌 /etc/sub2api/config.yaml 骞舵牴鎹渶瑕佷慨鏀?#
+# Documentation / 鏂囨。: https://github.com/Wei-Shaw/sub2api
+
+# =============================================================================
+# Server Configuration
+# 鏈嶅姟鍣ㄩ厤缃?# =============================================================================
+server:
+  # Bind address (0.0.0.0 for all interfaces)
+  # 缁戝畾鍦板潃锛?.0.0.0 琛ㄧず鐩戝惉鎵€鏈夌綉缁滄帴鍙ｏ級
+  host: "0.0.0.0"
+  # Port to listen on
+  # 鐩戝惉绔彛
+  port: 10888
+  # Mode: "debug" for development, "release" for production
+  # 杩愯妯″紡锛?debug" 鐢ㄤ簬寮€鍙戯紝"release" 鐢ㄤ簬鐢熶骇鐜
+  mode: "release"
+  # Frontend base URL used to generate external links in emails (e.g. password reset)
+  # 鐢ㄤ簬鐢熸垚閭欢涓殑澶栭儴閾炬帴锛堜緥濡傦細閲嶇疆瀵嗙爜閾炬帴锛夌殑鍓嶇鍩虹鍦板潃
+  # Example: "https://example.com"
+  frontend_url: ""
+  # Trusted proxies for X-Forwarded-For parsing (CIDR/IP). Empty disables trusted proxies.
+  # 淇′换鐨勪唬鐞嗗湴鍧€锛圕IDR/IP 鏍煎紡锛夛紝鐢ㄤ簬瑙ｆ瀽 X-Forwarded-For 澶淬€傜暀绌哄垯绂佺敤浠ｇ悊淇′换銆?  trusted_proxies: []
+  # Global max request body size in bytes (default: 256MB)
+  # 鍏ㄥ眬鏈€澶ц姹備綋澶у皬锛堝瓧鑺傦紝榛樿 256MB锛?  # Applies to all requests, especially important for h2c first request memory protection
+  # 閫傜敤浜庢墍鏈夎姹傦紝瀵?h2c 绗竴璇锋眰鐨勫唴瀛樹繚鎶ゅ挨涓洪噸瑕?  max_request_body_size: 268435456
+  # HTTP/2 Cleartext (h2c) configuration
+  # HTTP/2 Cleartext (h2c) 閰嶇疆
+  h2c:
+    # Enable HTTP/2 Cleartext for client connections
+    # 鍚敤 HTTP/2 Cleartext 瀹㈡埛绔繛鎺?    enabled: true
+    # Max concurrent streams per connection
+    # 姣忎釜杩炴帴鐨勬渶澶у苟鍙戞祦鏁伴噺
+    max_concurrent_streams: 50
+    # Idle timeout for connections (seconds)
+    # 杩炴帴绌洪棽瓒呮椂鏃堕棿锛堢锛?    idle_timeout: 75
+    # Max frame size in bytes (default: 1MB)
+    # 鏈€澶у抚澶у皬锛堝瓧鑺傦紝榛樿 1MB锛?    max_read_frame_size: 1048576
+    # Max upload buffer per connection in bytes (default: 2MB)
+    # 姣忎釜杩炴帴鐨勬渶澶т笂浼犵紦鍐插尯锛堝瓧鑺傦紝榛樿 2MB锛?    max_upload_buffer_per_connection: 2097152
+    # Max upload buffer per stream in bytes (default: 512KB)
+    # 姣忎釜娴佺殑鏈€澶т笂浼犵紦鍐插尯锛堝瓧鑺傦紝榛樿 512KB锛?    max_upload_buffer_per_stream: 524288
+
+# =============================================================================
+# Run Mode Configuration
+# 杩愯妯″紡閰嶇疆
+# =============================================================================
+# Run mode: "standard" (default) or "simple" (for internal use)
+# 杩愯妯″紡锛?standard"锛堥粯璁わ級鎴?"simple"锛堝唴閮ㄤ娇鐢級
+# - standard: Full SaaS features with billing/balance checks
+# - standard: 瀹屾暣 SaaS 鍔熻兘锛屽寘鍚璐瑰拰浣欓鏍￠獙
+# - simple: Hides SaaS features and skips billing/balance checks
+# - simple: 闅愯棌 SaaS 鍔熻兘锛岃烦杩囪璐瑰拰浣欓鏍￠獙
+run_mode: "standard"
+
+# =============================================================================
+# CORS Configuration
+# 璺ㄥ煙璧勬簮鍏变韩 (CORS) 閰嶇疆
+# =============================================================================
+cors:
+  # Allowed origins list. Leave empty to disable cross-origin requests.
+  # 鍏佽鐨勬潵婧愬垪琛ㄣ€傜暀绌哄垯绂佺敤璺ㄥ煙璇锋眰銆?  allowed_origins: []
+  # Allow credentials (cookies/authorization headers). Cannot be used with "*".
+  # 鍏佽鎼哄甫鍑瘉锛坈ookies/鎺堟潈澶达級銆備笉鑳戒笌 "*" 閫氶厤绗﹀悓鏃朵娇鐢ㄣ€?  allow_credentials: true
+
+# =============================================================================
+# Security Configuration
+# 瀹夊叏閰嶇疆
+# =============================================================================
+security:
+  url_allowlist:
+    # Enable URL allowlist validation (disable to skip all URL checks)
+    # 鍚敤 URL 鐧藉悕鍗曢獙璇侊紙绂佺敤鍒欒烦杩囨墍鏈?URL 妫€鏌ワ級
+    enabled: false
+    # Allowed upstream hosts for API proxying
+    # 鍏佽浠ｇ悊鐨勪笂娓?API 涓绘満鍒楄〃
+    upstream_hosts:
+      - "api.openai.com"
+      - "api.anthropic.com"
+      - "api.kimi.com"
+      - "open.bigmodel.cn"
+      - "api.minimaxi.com"
+      - "generativelanguage.googleapis.com"
+      - "cloudcode-pa.googleapis.com"
+      - "*.openai.azure.com"
+    # Allowed hosts for pricing data download
+    # 鍏佽涓嬭浇瀹氫环鏁版嵁鐨勪富鏈哄垪琛?    pricing_hosts:
+      - "raw.githubusercontent.com"
+    # Allowed hosts for CRS sync (required when using CRS sync)
+    # 鍏佽 CRS 鍚屾鐨勪富鏈哄垪琛紙浣跨敤 CRS 鍚屾鍔熻兘鏃跺繀椤婚厤缃級
+    crs_hosts: []
+    # Allow localhost/private IPs for upstream/pricing/CRS (use only in trusted networks)
+    # 鍏佽鏈湴/绉佹湁 IP 鍦板潃鐢ㄤ簬涓婃父/瀹氫环/CRS锛堜粎鍦ㄥ彲淇＄綉缁滀腑浣跨敤锛?    allow_private_hosts: true
+    # Allow http:// URLs when allowlist is disabled (default: false, require https)
+    # 鐧藉悕鍗曠鐢ㄦ椂鏄惁鍏佽 http:// URL锛堥粯璁? false锛岃姹?https锛?    allow_insecure_http: true
+  response_headers:
+    # Enable configurable response header filtering (default: true)
+    # 鍚敤鍙厤缃殑鍝嶅簲澶磋繃婊わ紙榛樿鍚敤锛岃繃婊や笂娓告晱鎰熷搷搴斿ご锛?    enabled: true
+    # Extra allowed response headers from upstream
+    # 棰濆鍏佽鐨勪笂娓稿搷搴斿ご
+    additional_allowed: []
+    # Force-remove response headers from upstream
+    # 寮哄埗绉婚櫎鐨勪笂娓稿搷搴斿ご
+    force_remove: []
+  csp:
+    # Enable Content-Security-Policy header
+    # 鍚敤鍐呭瀹夊叏绛栫暐 (CSP) 鍝嶅簲澶?    enabled: true
+    # Default CSP policy (override if you host assets on other domains)
+    # 榛樿 CSP 绛栫暐锛堝鏋滈潤鎬佽祫婧愭墭绠″湪鍏朵粬鍩熷悕锛岃鑷瑕嗙洊锛?    # Note: __CSP_NONCE__ will be replaced with 'nonce-xxx' at request time for inline script security
+    # 娉ㄦ剰锛歘_CSP_NONCE__ 浼氬湪璇锋眰鏃惰鏇挎崲涓?'nonce-xxx'锛岀敤浜庡唴鑱旇剼鏈畨鍏?    policy: "default-src 'self'; script-src 'self' __CSP_NONCE__ https://challenges.cloudflare.com https://static.cloudflareinsights.com https://*.stripe.com https://static.airwallex.com https://checkout.airwallex.com https://static-demo.airwallex.com https://checkout-demo.airwallex.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://static.airwallex.com https://checkout.airwallex.com https://static-demo.airwallex.com https://checkout-demo.airwallex.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https:; frame-src https://challenges.cloudflare.com https://*.stripe.com https://checkout.airwallex.com https://checkout-demo.airwallex.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  proxy_probe:
+    # Allow skipping TLS verification for proxy probe (debug only)
+    # 鍏佽浠ｇ悊鎺㈡祴鏃惰烦杩?TLS 璇佷功楠岃瘉锛堜粎鐢ㄤ簬璋冭瘯锛?    insecure_skip_verify: false
+  proxy_fallback:
+    # Allow auxiliary services (update check, pricing data) to fallback to direct
+    # connection when proxy initialization fails. Does NOT affect AI gateway connections.
+    # 杈呭姪鏈嶅姟锛堟洿鏂版鏌ャ€佸畾浠锋暟鎹媺鍙栵級浠ｇ悊鍒濆鍖栧け璐ユ椂鏄惁鍏佽鍥為€€鐩磋繛銆?    # 涓嶅奖鍝?AI 璐﹀彿缃戝叧杩炴帴銆傞粯璁?false锛歠ail-fast 闃叉 IP 娉勯湶銆?    allow_direct_on_error: false
+
+# =============================================================================
+# Gateway Configuration
+# 缃戝叧閰嶇疆
+# =============================================================================
+gateway:
+  # Timeout for waiting upstream response headers (seconds)
+  # 绛夊緟涓婃父鍝嶅簲澶磋秴鏃舵椂闂达紙绉掞級
+  response_header_timeout: 600
+  # Max request body size in bytes (default: 256MB)
+  # 璇锋眰浣撴渶澶у瓧鑺傛暟锛堥粯璁?256MB锛?  max_body_size: 268435456
+  # Max bytes to read for non-stream upstream responses (default: 8MB)
+  # 闈炴祦寮忎笂娓稿搷搴斾綋璇诲彇涓婇檺锛堥粯璁?8MB锛?  upstream_response_read_max_bytes: 8388608
+  # Max bytes to read for proxy probe responses (default: 1MB)
+  # 浠ｇ悊鎺㈡祴鍝嶅簲浣撹鍙栦笂闄愶紙榛樿 1MB锛?  proxy_probe_response_read_max_bytes: 1048576
+  # Enable Gemini upstream response header debug logs (default: false)
+  # 鏄惁寮€鍚?Gemini 涓婃父鍝嶅簲澶磋皟璇曟棩蹇楋紙榛樿 false锛?  gemini_debug_response_headers: false
+  # Sora max request body size in bytes (0=use max_body_size)
+  # Sora 璇锋眰浣撴渶澶у瓧鑺傛暟锛?=浣跨敤 max_body_size锛?  sora_max_body_size: 268435456
+  # Sora stream timeout (seconds, 0=disable)
+  # Sora 娴佸紡璇锋眰鎬昏秴鏃讹紙绉掞紝0=绂佺敤锛?  sora_stream_timeout_seconds: 900
+  # Sora non-stream timeout (seconds, 0=disable)
+  # Sora 闈炴祦寮忚姹傝秴鏃讹紙绉掞紝0=绂佺敤锛?  sora_request_timeout_seconds: 180
+  # Sora stream enforcement mode: force/error
+  # Sora stream 寮哄埗绛栫暐锛歠orce/error
+  sora_stream_mode: "force"
+  # Sora model filters
+  # Sora 妯″瀷杩囨护閰嶇疆
+  sora_model_filters:
+    # Hide prompt-enhance models by default
+    # 榛樿闅愯棌 prompt-enhance 妯″瀷
+    hide_prompt_enhance: true
+  # Require API key for /sora/media proxy (default: false)
+  # /sora/media 鏄惁寮哄埗瑕佹眰 API Key锛堥粯璁?true锛?  sora_media_require_api_key: true
+  # Sora media temporary signing key (empty disables signed URL)
+  # Sora 濯掍綋涓存椂绛惧悕瀵嗛挜锛堜负绌哄垯绂佺敤绛惧悕锛?  sora_media_signing_key: ""
+  # Signed URL TTL seconds (<=0 disables)
+  # 涓存椂绛惧悕 URL 鏈夋晥鏈燂紙绉掞紝<=0 琛ㄧず绂佺敤锛?  sora_media_signed_url_ttl_seconds: 900
+  # Connection pool isolation strategy:
+  # 杩炴帴姹犻殧绂荤瓥鐣ワ細
+  # - proxy: Isolate by proxy, same proxy shares connection pool (suitable for few proxies, many accounts)
+  # - proxy: 鎸変唬鐞嗛殧绂伙紝鍚屼竴浠ｇ悊鍏变韩杩炴帴姹狅紙閫傚悎浠ｇ悊灏戙€佽处鎴峰锛?  # - account: Isolate by account, same account shares connection pool (suitable for few accounts, strict isolation)
+  # - account: 鎸夎处鎴烽殧绂伙紝鍚屼竴璐︽埛鍏变韩杩炴帴姹狅紙閫傚悎璐︽埛灏戙€侀渶涓ユ牸闅旂锛?  # - account_proxy: Isolate by account+proxy combination (default, finest granularity)
+  # - account_proxy: 鎸夎处鎴?浠ｇ悊缁勫悎闅旂锛堥粯璁わ紝鏈€缁嗙矑搴︼級
+  connection_pool_isolation: "account_proxy"
+  # Force Codex CLI mode: treat all /openai/v1/responses requests as Codex CLI.
+  # 寮哄埗鎸?Codex CLI 澶勭悊 /openai/v1/responses 璇锋眰锛堢敤浜庣綉鍏虫湭閫忎紶/鏀瑰啓 User-Agent 鐨勫厹搴曪級銆?  #
+  # 娉ㄦ剰锛氬紑鍚悗浼氬奖鍝嶆墍鏈夊鎴风鐨勮涓猴紙涓嶄粎闄愪簬 VS Code / Codex CLI锛夛紝璇疯皑鎱庡紑鍚€?  force_codex_cli: false
+  # Enable Codex image-generation bridge injection for /openai/v1/responses.
+  # 鏄惁涓?Codex /responses 璇锋眰鑷姩娉ㄥ叆 image_generation 宸ュ叿涓庢ˉ鎺ユ寚浠ゃ€?  #
+  # Default false keeps text-only Codex requests text-only. Explicit client-provided
+  # image_generation tools are still forwarded when the group allows image generation.
+  # 榛樿 false锛氫繚鎸佺函鏂囨湰 Codex 璇锋眰涓嶈鏀瑰啓锛涘鎴风鏄惧紡鎻愪緵 image_generation tool 鏃讹紝
+  # 浠嶄細鍦ㄥ垎缁勫厑璁稿浘鐗囩敓鎴愮殑鎯呭喌涓嬫甯歌浆鍙戙€?  codex_image_generation_bridge_enabled: false
+  # Optional: template file used to build the final top-level Codex `instructions`.
+  # 鍙€夛細鐢ㄤ簬鏋勫缓鏈€缁?Codex 椤跺眰 `instructions` 鐨勬ā鏉挎枃浠惰矾寰勩€?  #
+  # This is applied on the `/v1/messages -> Responses/Codex` conversion path,
+  # after Claude `system` has already been normalized into Codex `instructions`.
+  # 璇ユā鏉夸綔鐢ㄤ簬 `/v1/messages -> Responses/Codex` 杞崲閾捐矾锛屼笖鍙戠敓鍦?Claude `system`
+  # 宸茬粡琚綊涓€鍖栦负 Codex `instructions` 涔嬪悗銆?  #
+  # The template can reference:
+  # 妯℃澘鍙紩鐢細
+  # - {{ .ExistingInstructions }} : converted client instructions/system
+  # - {{ .OriginalModel }}        : original requested model
+  # - {{ .NormalizedModel }}      : normalized routing model
+  # - {{ .BillingModel }}         : billing model
+  # - {{ .UpstreamModel }}        : final upstream model
+  #
+  # If you want to preserve client system prompts, keep {{ .ExistingInstructions }}
+  # somewhere in the template. If omitted, the template output fully replaces it.
+  # 濡傞渶淇濈暀瀹㈡埛绔?system 鎻愮ず璇嶏紝璇峰湪妯℃澘涓樉寮忓寘鍚?{{ .ExistingInstructions }}銆?  # 鑻ョ渷鐣ワ紝鍒欐ā鏉胯緭鍑轰細瀹屽叏瑕嗙洊瀹冦€?  #
+  # Docker users can mount a host file to /app/data/codex-instructions.md.tmpl
+  # and point this field there.
+  # Docker 鐢ㄦ埛鍙皢瀹夸富鏈烘枃浠舵寕杞藉埌 /app/data/codex-instructions.md.tmpl锛?  # 鐒跺悗鎶婃湰瀛楁鎸囧悜璇ヨ矾寰勩€?  forced_codex_instructions_template_file: ""
+  # OpenAI 閫忎紶妯″紡鏄惁鏀捐瀹㈡埛绔秴鏃跺ご锛堝 x-stainless-timeout锛?  # 榛樿 false锛氳繃婊よ秴鏃跺ご锛岄檷浣庝笂娓告彁鍓嶆柇娴侀闄┿€?  openai_passthrough_allow_timeout_headers: false
+  # OpenAI Responses WebSocket 閰嶇疆锛堥粯璁ゅ紑鍚紝鍙寜闇€鍥炴粴鍒?HTTP锛?  openai_ws:
+    # 鏂扮増 WS mode 璺敱锛堥粯璁ゅ叧闂級銆傚叧闂椂淇濇寔褰撳墠 legacy 瀹炵幇琛屼负銆?    mode_router_v2_enabled: false
+    # ingress 榛樿妯″紡锛歰ff|ctx_pool|passthrough锛堜粎 mode_router_v2_enabled=true 鐢熸晥锛?    # 鍏煎鏃у€硷細shared/dedicated 浼氭寜 ctx_pool 澶勭悊銆?    ingress_mode_default: ctx_pool
+    # 鍏ㄥ眬鎬诲紑鍏筹紝榛樿 true锛涘叧闂椂鎵€鏈夎姹備繚鎸佸師鏈?HTTP/SSE 璺敱
+    enabled: true
+    # 鎸夎处鍙风被鍨嬬粏鍒嗗紑鍏?    oauth_enabled: true
+    apikey_enabled: true
+    # 鍏ㄥ眬寮哄埗 HTTP锛堢揣鎬ュ洖婊氬紑鍏筹級
+    force_http: false
+    # 鍏佽鍦?WSv2 涓嬫寜绛栫暐鎭㈠ store=true锛堥粯璁?false锛?    allow_store_recovery: false
+    # ingress 妯″紡鏀跺埌 previous_response_not_found 鏃讹紝鑷姩鍘绘帀 previous_response_id 閲嶈瘯涓€娆★紙榛樿 true锛?    ingress_previous_response_recovery_enabled: true
+    # store=false 涓旀棤鍙鐢ㄤ細璇濊繛鎺ユ椂鐨勭瓥鐣ワ細
+    # strict=寮哄埗鏂板缓杩炴帴锛堥殧绂讳紭鍏堬級锛宎daptive=浠呭湪楂橀闄╁け璐ュ悗寮哄埗鏂板缓锛宱ff=灏介噺澶嶇敤锛堟€ц兘浼樺厛锛?    store_disabled_conn_mode: strict
+    # store=false 涓旀棤鍙鐢ㄤ細璇濊繛鎺ユ椂锛屾槸鍚﹀己鍒舵柊寤鸿繛鎺ワ紙榛樿 true锛屼紭鍏堜細璇濋殧绂伙級
+    # 鍏煎鏃ч厤缃細浠呭湪 store_disabled_conn_mode 鏈厤缃椂鐢熸晥
+    store_disabled_force_new_conn: true
+    # 鏄惁鍚敤 WSv2 generate=false 棰勭儹锛堥粯璁?false锛?    prewarm_generate_enabled: false
+    # 鍗忚 feature 寮€鍏筹紝v2 浼樺厛浜?v1
+    responses_websockets: false
+    responses_websockets_v2: true
+    # 杩炴帴姹犲弬鏁帮紙鎸夎处鍙锋睜鍖栧鐢級
+    max_conns_per_account: 128
+    min_idle_per_account: 4
+    max_idle_per_account: 12
+    # 鏄惁鎸夎处鍙峰苟鍙戝姩鎬佽绠楄繛鎺ユ睜涓婇檺锛?    # effective_max_conns = min(max_conns_per_account, ceil(account.concurrency * factor))
+    dynamic_max_conns_by_account_concurrency_enabled: true
+    # 鎸夎处鍙风被鍨嬪垎鍒缃郴鏁帮紙OAuth / API Key锛?    oauth_max_conns_factor: 1.0
+    apikey_max_conns_factor: 1.0
+    dial_timeout_seconds: 10
+    read_timeout_seconds: 900
+    write_timeout_seconds: 120
+    pool_target_utilization: 0.7
+    queue_limit_per_conn: 64
+    # 娴佸紡鍐欏嚭鎵归噺 flush 鍙傛暟
+    event_flush_batch_size: 1
+    event_flush_interval_ms: 10
+    # 棰勭儹瑙﹀彂鍐峰嵈锛堟绉掞級
+    prewarm_cooldown_ms: 300
+    # WS 鍥為€€鍒?HTTP 鍚庣殑鍐峰嵈鏃堕棿锛堢锛夛紝鐢ㄤ簬閬垮厤 WS/HTTP 鏉ュ洖鎶栧姩锛? 琛ㄧず鍏抽棴鍐峰嵈
+    fallback_cooldown_seconds: 30
+    # WS 閲嶈瘯閫€閬垮弬鏁帮紙姣锛?    retry_backoff_initial_ms: 120
+    retry_backoff_max_ms: 2000
+    # 鎶栧姩姣斾緥锛?-1锛?    retry_jitter_ratio: 0.2
+    # 鍗曟璇锋眰 WS 閲嶈瘯鎬婚绠楋紙姣锛夛紱寤鸿璁剧疆涓烘湁闄愬€硷紝閬垮厤閲嶈瘯鎷夐珮 TTFT 闀垮熬
+    retry_total_budget_ms: 5000
+    # payload_schema 鏃ュ織閲囨牱鐜囷紙0-1锛夛紱闄嶄綆鐑矾寰勬棩蹇楁斁澶?    payload_log_sample_rate: 0.2
+    # 璋冨害涓庣矘杩炲弬鏁?    lb_top_k: 7
+    sticky_session_ttl_seconds: 3600
+    # 浼氳瘽鍝堝笇杩佺Щ鍏煎寮€鍏筹細鏂?key 鏈懡涓椂鍥為€€璇诲彇鏃?SHA-256 key
+    session_hash_read_old_fallback: true
+    # 浼氳瘽鍝堝笇杩佺Щ鍏煎寮€鍏筹細鍐欏叆鏃跺弻鍐欐棫 SHA-256 key锛堢煭 TTL锛?    session_hash_dual_write_old: true
+    # context 鍏冩暟鎹縼绉诲吋瀹瑰紑鍏筹細淇濈暀鏃?ctxkey.* 璇诲彇/娉ㄥ叆妗ユ帴
+    metadata_bridge_enabled: true
+    sticky_response_id_ttl_seconds: 3600
+    # 鍏煎鏃ч敭锛氬綋 sticky_response_id_ttl_seconds 缂哄け鏃跺洖閫€璇ュ€?    sticky_previous_response_ttl_seconds: 3600
+    scheduler_score_weights:
+      priority: 1.0
+      load: 1.0
+      queue: 0.7
+      error_rate: 0.8
+      ttft: 0.5
+  # HTTP upstream connection pool settings (HTTP/2 + multi-proxy scenario defaults)
+  # HTTP 涓婃父杩炴帴姹犻厤缃紙HTTP/2 + 澶氫唬鐞嗗満鏅粯璁ゅ€硷級
+  # Max idle connections across all hosts
+  # 鎵€鏈変富鏈虹殑鏈€澶х┖闂茶繛鎺ユ暟
+  max_idle_conns: 2560
+  # Max idle connections per host
+  # 姣忎釜涓绘満鐨勬渶澶х┖闂茶繛鎺ユ暟
+  max_idle_conns_per_host: 120
+  # Max connections per host
+  # 姣忎釜涓绘満鐨勬渶澶ц繛鎺ユ暟
+  max_conns_per_host: 1024
+  # Idle connection timeout (seconds)
+  # 绌洪棽杩炴帴瓒呮椂鏃堕棿锛堢锛?  idle_conn_timeout_seconds: 90
+  # Upstream client cache settings
+  # 涓婃父杩炴帴姹犲鎴风缂撳瓨閰嶇疆
+  # max_upstream_clients: Max cached clients, evicts least recently used when exceeded
+  # max_upstream_clients: 鏈€澶х紦瀛樺鎴风鏁伴噺锛岃秴鍑哄悗娣樻卑鏈€涔呮湭浣跨敤鐨?  max_upstream_clients: 5000
+  # client_idle_ttl_seconds: Client idle reclaim threshold (seconds), reclaimed when idle and no active requests
+  # client_idle_ttl_seconds: 瀹㈡埛绔┖闂插洖鏀堕槇鍊硷紙绉掞級锛岃秴鏃朵笖鏃犳椿璺冭姹傛椂鍥炴敹
+  client_idle_ttl_seconds: 900
+  # Concurrency slot expiration time (minutes)
+  # 骞跺彂妲戒綅杩囨湡鏃堕棿锛堝垎閽燂級
+  concurrency_slot_ttl_minutes: 30
+  # Stream data interval timeout (seconds), 0=disable
+  # 娴佹暟鎹棿闅旇秴鏃讹紙绉掞級锛?=绂佺敤
+  stream_data_interval_timeout: 180
+  # Stream keepalive interval (seconds), 0=disable
+  # 娴佸紡 keepalive 闂撮殧锛堢锛夛紝0=绂佺敤
+  stream_keepalive_interval: 10
+  # Image stream data interval timeout (seconds), 0=disable; independent from ordinary text streams
+  # 鍥剧墖娴佹暟鎹棿闅旇秴鏃讹紙绉掞級锛?=绂佺敤锛涚嫭绔嬩簬鏅€氭枃鏈祦寮?  image_stream_data_interval_timeout: 900
+  # Image stream keepalive interval (seconds), 0=disable; independent from ordinary text streams
+  # 鍥剧墖娴佸紡 keepalive 闂撮殧锛堢锛夛紝0=绂佺敤锛涚嫭绔嬩簬鏅€氭枃鏈祦寮?  image_stream_keepalive_interval: 10
+  # Image generation independent concurrency limiter (process-local, default disabled)
+  # 鍥剧墖鐢熸垚鐙珛骞跺彂闄愬埗锛堣繘绋嬬骇锛岄粯璁ゅ叧闂紱澶氬疄渚嬫€讳笂闄愮害涓哄疄渚嬫暟脳璇ュ€硷級
+  image_concurrency:
+    # Enable image-only concurrency protection; false keeps existing behavior unchanged
+    # 鏄惁鍚敤鍥剧墖鐙珛骞跺彂淇濇姢锛沠alse 淇濇寔鐜版湁琛屼负涓嶅彉
+    enabled: false
+    # Max concurrent image generation requests in this process, 0=unlimited
+    # 褰撳墠杩涚▼鍏佽鍚屾椂澶勭悊鐨勫浘鐗囩敓鎴愯姹傛暟锛?=涓嶉檺鍒?    max_concurrent_requests: 0
+    # Overflow mode when the image concurrency limit is full: reject/wait
+    # 鍥剧墖骞跺彂婊℃椂鐨勫鐞嗘柟寮忥細reject=绔嬪嵆鎷掔粷锛寃ait=绛夊緟妲戒綅
+    overflow_mode: "reject"
+    # Wait timeout for overflow_mode=wait (seconds), 0=do not wait
+    # wait 妯″紡绛夊緟鍥剧墖骞跺彂妲戒綅鐨勮秴鏃舵椂闂达紙绉掞級锛?=涓嶇瓑寰?    wait_timeout_seconds: 30
+    # Max image requests waiting in this process when overflow_mode=wait, 0=unlimited
+    # wait 妯″紡褰撳墠杩涚▼鍏佽鎺掗槦绛夊緟鐨勫浘鐗囪姹傛暟锛?=涓嶉檺鍒?    max_waiting_requests: 100
+  # SSE max line size in bytes (default: 40MB)
+  # SSE 鍗曡鏈€澶у瓧鑺傛暟锛堥粯璁?40MB锛?  max_line_size: 41943040
+  # Log upstream error response body summary (safe/truncated; does not log request content)
+  # 璁板綍涓婃父閿欒鍝嶅簲浣撴憳瑕侊紙瀹夊叏/鎴柇锛涗笉璁板綍璇锋眰鍐呭锛?  log_upstream_error_body: true
+  # Max bytes to log from upstream error body
+  # 璁板綍涓婃父閿欒鍝嶅簲浣撶殑鏈€澶у瓧鑺傛暟
+  log_upstream_error_body_max_bytes: 2048
+  # Auto inject anthropic-beta header for API-key accounts when needed (default: off)
+  # 闇€瑕佹椂鑷姩涓?API-key 璐︽埛娉ㄥ叆 anthropic-beta 澶达紙榛樿锛氬叧闂級
+  inject_beta_for_apikey: false
+  # Allow failover on selected 400 errors (default: off)
+  # 鍏佽鍦ㄧ壒瀹?400 閿欒鏃惰繘琛屾晠闅滆浆绉伙紙榛樿锛氬叧闂級
+  failover_on_400: false
+  # Scheduling configuration
+  # 璋冨害閰嶇疆
+  scheduling:
+    # Sticky session max waiting queue size
+    # 绮樻€т細璇濇渶澶ф帓闃熼暱搴?    sticky_session_max_waiting: 3
+    # Sticky session wait timeout (duration)
+    # 绮樻€т細璇濈瓑寰呰秴鏃讹紙鏃堕棿娈碉級
+    sticky_session_wait_timeout: 120s
+    # Fallback wait timeout (duration)
+    # 鍏滃簳鎺掗槦绛夊緟瓒呮椂锛堟椂闂存锛?    fallback_wait_timeout: 30s
+    # Fallback max waiting queue size
+    # 鍏滃簳鏈€澶ф帓闃熼暱搴?    fallback_max_waiting: 100
+    # Enable batch load calculation for scheduling
+    # 鍚敤璋冨害鎵归噺璐熻浇璁＄畻
+    load_batch_enabled: true
+    # Slot cleanup interval (duration)
+    # 骞跺彂妲戒綅娓呯悊鍛ㄦ湡锛堟椂闂存锛?    slot_cleanup_interval: 30s
+    # 鏄惁鍏佽鍙楁帶鍥炴簮鍒?DB锛堥粯璁?true锛屼繚鎸佺幇鏈夎涓猴級
+    db_fallback_enabled: true
+    # 鍙楁帶鍥炴簮瓒呮椂锛堢锛夛紝0 琛ㄧず涓嶉澶栨敹绱ц秴鏃?    db_fallback_timeout_seconds: 0
+    # 鍙楁帶鍥炴簮闄愭祦锛堝疄渚嬬骇 QPS锛夛紝0 琛ㄧず涓嶉檺鍒?    db_fallback_max_qps: 0
+    # outbox 杞鍛ㄦ湡锛堢锛?    outbox_poll_interval_seconds: 1
+    # outbox 婊炲悗鍛婅闃堝€硷紙绉掞級
+    outbox_lag_warn_seconds: 5
+    # outbox 瑙﹀彂寮哄埗閲嶅缓闃堝€硷紙绉掞級
+    outbox_lag_rebuild_seconds: 10
+    # outbox 杩炵画婊炲悗瑙﹀彂娆℃暟
+    outbox_lag_rebuild_failures: 3
+    # outbox 绉帇瑙﹀彂閲嶅缓闃堝€硷紙琛屾暟锛?    outbox_backlog_rebuild_rows: 10000
+    # 鍏ㄩ噺閲嶅缓鍛ㄦ湡锛堢锛夛紝0 琛ㄧず绂佺敤
+    full_rebuild_interval_seconds: 300
+  # TLS fingerprint simulation / TLS 鎸囩汗浼
+  # Default profile "claude_cli_v2" simulates Node.js 20.x
+  # 榛樿妯℃澘 "claude_cli_v2" 妯℃嫙 Node.js 20.x 鎸囩汗
+  tls_fingerprint:
+    enabled: true
+    # profiles:
+    #   profile_1:
+    #     name: "Custom Profile 1"
+    #   profile_2:
+    #     name: "Custom Profile 2"
+
+# =============================================================================
+# Logging Configuration
+# 鏃ュ織閰嶇疆
+# =============================================================================
+log:
+  # Log level: debug/info/warn/error
+  # 鏃ュ織绾у埆锛歞ebug/info/warn/error
+  level: "info"
+  # Log format: json/console
+  # 鏃ュ織鏍煎紡锛歫son/console
+  format: "console"
+  # Service name field written into each log line
+  # 姣忔潯鏃ュ織閮戒細闄勫甫 service 瀛楁
+  service_name: "sub2api"
+  # Environment field written into each log line
+  # 姣忔潯鏃ュ織閮戒細闄勫甫 env 瀛楁
+  env: "production"
+  # Include caller information
+  # 鏄惁杈撳嚭璋冪敤鏂逛綅缃俊鎭?  caller: true
+  # Stacktrace threshold: none/error/fatal
+  # 鍫嗘爤杈撳嚭闃堝€硷細none/error/fatal
+  stacktrace_level: "error"
+  output:
+    # Keep stdout/stderr output for container log collection
+    # 淇濇寔鏍囧噯杈撳嚭鐢ㄤ簬瀹瑰櫒鏃ュ織閲囬泦
+    to_stdout: true
+    # Enable file output (default path auto-derived)
+    # 鍚敤鏂囦欢杈撳嚭锛堥粯璁よ矾寰勮嚜鍔ㄦ帹瀵硷級
+    to_file: true
+    # Empty means:
+    # - DATA_DIR set: {{DATA_DIR}}/logs/sub2api.log
+    # - otherwise: /app/data/logs/sub2api.log
+    # 鐣欑┖鏃讹細
+    # - 璁剧疆 DATA_DIR锛歿{DATA_DIR}}/logs/sub2api.log
+    # - 鍚﹀垯锛?app/data/logs/sub2api.log
+    file_path: ""
+  rotation:
+    # Max file size before rotation (MB)
+    # 鍗曟枃浠舵粴鍔ㄩ槇鍊硷紙MB锛?    max_size_mb: 100
+    # Number of rotated files to keep (0 means unlimited)
+    # 淇濈暀鍘嗗彶鏂囦欢鏁伴噺锛? 琛ㄧず涓嶉檺鍒讹級
+    max_backups: 10
+    # Number of days to keep old log files (0 means unlimited)
+    # 鍘嗗彶鏃ュ織淇濈暀澶╂暟锛? 琛ㄧず涓嶉檺鍒讹級
+    max_age_days: 7
+    # Compress rotated files
+    # 鏄惁鍘嬬缉鍘嗗彶鏃ュ織
+    compress: true
+    # Use local time for timestamp in rotated filename
+    # 婊氬姩鏂囦欢鍚嶆椂闂存埑浣跨敤鏈湴鏃跺尯
+    local_time: true
+  sampling:
+    # Enable zap sampler (reduce high-frequency repetitive logs)
+    # 鍚敤 zap 閲囨牱锛堝噺灏戦珮棰戦噸澶嶆棩蹇楋級
+    enabled: false
+    # Number of first entries per second to always log
+    # 姣忕鏃犻噰鏍蜂繚鐣欑殑鍓?N 鏉℃棩蹇?    initial: 100
+    # Thereafter keep 1 out of N entries per second
+    # 涔嬪悗姣?N 鏉′繚鐣?1 鏉?    thereafter: 100
+
+# =============================================================================
+# Sora Direct Client Configuration
+# Sora 鐩磋繛閰嶇疆
+# =============================================================================
+sora:
+  client:
+    # Sora backend base URL
+    # Sora 涓婃父 Base URL
+    base_url: "https://sora.chatgpt.com/backend"
+    # Request timeout (seconds)
+    # 璇锋眰瓒呮椂锛堢锛?    timeout_seconds: 120
+    # Max retries for upstream requests
+    # 涓婃父璇锋眰鏈€澶ч噸璇曟鏁?    max_retries: 3
+    # Account+proxy cooldown window after Cloudflare challenge (seconds, 0 to disable)
+    # Cloudflare challenge 鍚庢寜璐﹀彿+浠ｇ悊鍐峰嵈绐楀彛锛堢锛? 琛ㄧず鍏抽棴锛?    cloudflare_challenge_cooldown_seconds: 900
+    # Poll interval (seconds)
+    # 杞闂撮殧锛堢锛?    poll_interval_seconds: 2
+    # Max poll attempts
+    # 鏈€澶ц疆璇㈡鏁?    max_poll_attempts: 600
+    # Recent task query limit (image)
+    # 鏈€杩戜换鍔℃煡璇㈡暟閲忥紙鍥剧墖杞锛?    recent_task_limit: 50
+    # Recent task query max limit (fallback)
+    # 鏈€杩戜换鍔℃煡璇㈡渶澶ф暟閲忥紙鍥為€€锛?    recent_task_limit_max: 200
+    # Enable debug logs for Sora upstream requests
+    # 鍚敤 Sora 鐩磋繛璋冭瘯鏃ュ織
+    # 璋冭瘯鏃ュ織浼氳緭鍑轰笂娓歌姹傚皾璇曘€侀噸璇曘€佸搷搴旀憳瑕侊紱Authorization/openai-sentinel-token 绛夋晱鎰熷ご浼氳嚜鍔ㄨ劚鏁?    debug: false
+    # Allow Sora client to fetch token via OpenAI token provider
+    # 鏄惁鍏佽 Sora 瀹㈡埛绔€氳繃 OpenAI token provider 鍙?token锛堥粯璁?false锛岄伩鍏嶈璧?OpenAI 鍒锋柊閾捐矾锛?    use_openai_token_provider: false
+    # Optional custom headers (key-value)
+    # 棰濆璇锋眰澶达紙閿€煎锛?    headers: {}
+    # Default User-Agent for Sora requests
+    # Sora 榛樿 User-Agent
+    user_agent: "Sora/1.2026.007 (Android 15; 24122RKC7C; build 2600700)"
+    # Disable TLS fingerprint for Sora upstream
+    # 鍏抽棴 Sora 涓婃父 TLS 鎸囩汗浼
+    disable_tls_fingerprint: false
+    # curl_cffi sidecar for Sora only (required)
+    # 浠?Sora 閾捐矾浣跨敤鐨?curl_cffi sidecar锛堝繀闇€锛?    curl_cffi_sidecar:
+      # Sora 寮哄埗閫氳繃 sidecar 璇锋眰锛屽繀椤诲惎鐢?      # Sora is forced to use sidecar only; keep enabled=true
+      enabled: true
+      # Sidecar base URL (default endpoint: /request)
+      # sidecar 鍩虹鍦板潃锛堥粯璁よ姹傜鐐癸細/request锛?      base_url: "http://sora-curl-cffi-sidecar:8080"
+      # curl_cffi impersonate profile, e.g. chrome131/chrome124/safari18_0
+      # curl_cffi 鎸囩汗浼 profile锛屼緥濡?chrome131/chrome124/safari18_0
+      impersonate: "chrome131"
+      # Sidecar request timeout (seconds)
+      # sidecar 璇锋眰瓒呮椂锛堢锛?      timeout_seconds: 60
+      # Reuse session key per account+proxy to let sidecar persist cookies/session
+      # 鎸夎处鍙?浠ｇ悊澶嶇敤 session key锛岃 sidecar 鎸佷箙鍖?cookies/session
+      session_reuse_enabled: true
+      # Session TTL in sidecar (seconds)
+      # sidecar 浼氳瘽 TTL锛堢锛?      session_ttl_seconds: 3600
+  storage:
+    # Storage type (local only for now)
+    # 瀛樺偍绫诲瀷锛堥鍙戜粎鏀寔 local锛?    type: "local"
+    # Local base path; empty uses /app/data/sora
+    # 鏈湴瀛樺偍鍩虹璺緞锛涗负绌轰娇鐢?/app/data/sora
+    local_path: ""
+    # Fallback to upstream URL when download fails
+    # 涓嬭浇澶辫触鏃跺洖閫€鍒颁笂娓?URL
+    fallback_to_upstream: true
+    # Max concurrent downloads
+    # 骞跺彂涓嬭浇涓婇檺
+    max_concurrent_downloads: 4
+    # Download timeout (seconds)
+    # 涓嬭浇瓒呮椂锛堢锛?    download_timeout_seconds: 120
+    # Max download bytes
+    # 鏈€澶т笅杞藉瓧鑺傛暟
+    max_download_bytes: 209715200
+    # Enable debug logs for media storage
+    # 鍚敤濯掍綋瀛樺偍璋冭瘯鏃ュ織
+    debug: false
+    cleanup:
+      # Enable cleanup task
+      # 鍚敤娓呯悊浠诲姟
+      enabled: true
+      # Retention days
+      # 淇濈暀澶╂暟
+      retention_days: 7
+      # Cron schedule
+      # Cron 璋冨害琛ㄨ揪寮?      schedule: "0 3 * * *"
+
+# Token refresh behavior
+# token 鍒锋柊琛屼负鎺у埗
+token_refresh:
+  # Whether OpenAI refresh flow is allowed to sync linked Sora accounts
+  # 鏄惁鍏佽 OpenAI 鍒锋柊娴佺▼鍚屾瑕嗙洊 linked_openai_account_id 鍏宠仈鐨?Sora 璐﹀彿 token
+  sync_linked_sora_accounts: false
+
+# =============================================================================
+# API Key Auth Cache Configuration
+# API Key 璁よ瘉缂撳瓨閰嶇疆
+# =============================================================================
+api_key_auth_cache:
+  # L1 cache size (entries), in-process LRU/TTL cache
+  # L1 缂撳瓨瀹归噺锛堟潯鐩暟锛夛紝杩涚▼鍐?LRU/TTL 缂撳瓨
+  l1_size: 65535
+  # L1 cache TTL (seconds)
+  # L1 缂撳瓨 TTL锛堢锛?  l1_ttl_seconds: 15
+  # L2 cache TTL (seconds), stored in Redis
+  # L2 缂撳瓨 TTL锛堢锛夛紝Redis 涓瓨鍌?  l2_ttl_seconds: 300
+  # Negative cache TTL (seconds)
+  # 璐熺紦瀛?TTL锛堢锛?  negative_ttl_seconds: 30
+  # TTL jitter percent (0-100)
+  # TTL 鎶栧姩鐧惧垎姣旓紙0-100锛?  jitter_percent: 10
+  # Enable singleflight for cache misses
+  # 缂撳瓨鏈懡涓椂鍚敤 singleflight 鍚堝苟鍥炴簮
+  singleflight: true
+
+# =============================================================================
+# Dashboard Cache Configuration
+# 浠〃鐩樼紦瀛橀厤缃?# =============================================================================
+dashboard_cache:
+  # Enable dashboard cache
+  # 鍚敤浠〃鐩樼紦瀛?  enabled: true
+  # Redis key prefix for multi-environment isolation
+  # Redis key 鍓嶇紑锛岀敤浜庡鐜闅旂
+  key_prefix: "sub2api:"
+  # Fresh TTL (seconds); within this window cached stats are considered fresh
+  # 鏂伴矞闃堝€硷紙绉掞級锛涘懡涓悗澶勪簬璇ョ獥鍙ｈ涓烘柊椴滄暟鎹?  stats_fresh_ttl_seconds: 15
+  # Cache TTL (seconds) stored in Redis
+  # Redis 缂撳瓨 TTL锛堢锛?  stats_ttl_seconds: 30
+  # Async refresh timeout (seconds)
+  # 寮傛鍒锋柊瓒呮椂锛堢锛?  stats_refresh_timeout_seconds: 30
+
+# =============================================================================
+# Dashboard Aggregation Configuration
+# 浠〃鐩橀鑱氬悎閰嶇疆锛堥噸鍚敓鏁堬級
+# =============================================================================
+dashboard_aggregation:
+  # Enable aggregation job
+  # 鍚敤鑱氬悎浣滀笟
+  enabled: true
+  # Refresh interval (seconds)
+  # 鍒锋柊闂撮殧锛堢锛?  interval_seconds: 60
+  # Lookback window (seconds) for late-arriving data
+  # 鍥炵湅绐楀彛锛堢锛夛紝澶勭悊杩熷埌鏁版嵁
+  lookback_seconds: 120
+  # Allow manual backfill
+  # 鍏佽鎵嬪姩鍥炲～
+  backfill_enabled: false
+  # Backfill max range (days)
+  # 鍥炲～鏈€澶ц法搴︼紙澶╋級
+  backfill_max_days: 31
+  # Recompute recent N days on startup
+  # 鍚姩鏃堕噸绠楁渶杩?N 澶?  recompute_days: 2
+  # Retention windows (days)
+  # 淇濈暀绐楀彛锛堝ぉ锛?  retention:
+    # Raw usage_logs retention
+    # 鍘熷 usage_logs 淇濈暀澶╂暟
+    usage_logs_days: 90
+    # Hourly aggregation retention
+    # 灏忔椂鑱氬悎淇濈暀澶╂暟
+    hourly_days: 180
+    # Daily aggregation retention
+    # 鏃ヨ仛鍚堜繚鐣欏ぉ鏁?    daily_days: 730
+
+# =============================================================================
+# Usage Cleanup Task Configuration
+# 浣跨敤璁板綍娓呯悊浠诲姟閰嶇疆锛堥噸鍚敓鏁堬級
+# =============================================================================
+usage_cleanup:
+  # Enable cleanup task worker
+  # 鍚敤娓呯悊浠诲姟鎵ц鍣?  enabled: true
+  # Max date range (days) per task
+  # 鍗曟浠诲姟鏈€澶ф椂闂磋法搴︼紙澶╋級
+  max_range_days: 31
+  # Batch delete size
+  # 鍗曟壒鍒犻櫎鏁伴噺
+  batch_size: 5000
+  # Worker interval (seconds)
+  # 鎵ц鍣ㄨ疆璇㈤棿闅旓紙绉掞級
+  worker_interval_seconds: 10
+  # Task execution timeout (seconds)
+  # 鍗曟浠诲姟鏈€澶ф墽琛屾椂闀匡紙绉掞級
+  task_timeout_seconds: 1800
+
+# =============================================================================
+# HTTP 鍐欐帴鍙ｅ箓绛夐厤缃?# Idempotency Configuration
+# =============================================================================
+idempotency:
+  # Observe-only 妯″紡锛?  # true: 瑙傚療鏈燂紝涓嶅甫 Idempotency-Key 浠嶆斁琛岋紙浣嗕細璁板綍锛?  # false: 寮哄埗鏈燂紝涓嶅甫 Idempotency-Key 鐩存帴鎷掔粷锛堜粎瀵规帴鍏ュ箓绛変繚鎶ょ殑鎺ュ彛鐢熸晥锛?  observe_only: true
+  # 鍏抽敭鍐欐帴鍙ｅ箓绛夎褰?TTL锛堢锛?  default_ttl_seconds: 86400
+  # 绯荤粺鎿嶄綔鎺ュ彛锛坲pdate/rollback/restart锛夊箓绛夎褰?TTL锛堢锛?  system_operation_ttl_seconds: 3600
+  # processing 閿佽秴鏃讹紙绉掞級
+  processing_timeout_seconds: 30
+  # 鍙噸璇曞け璐ラ€€閬跨獥鍙ｏ紙绉掞級
+  failed_retry_backoff_seconds: 5
+  # 鎸佷箙鍖栧搷搴斾綋鏈€澶ч暱搴︼紙瀛楄妭锛?  max_stored_response_len: 65536
+  # 杩囨湡骞傜瓑璁板綍娓呯悊鍛ㄦ湡锛堢锛?  cleanup_interval_seconds: 60
+  # 姣忚疆娓呯悊鏈€澶у垹闄ゆ潯鏁?  cleanup_batch_size: 500
+
+# =============================================================================
+# Concurrency Wait Configuration
+# 骞跺彂绛夊緟閰嶇疆
+# =============================================================================
+concurrency:
+  # SSE ping interval during concurrency wait (seconds)
+  # 骞跺彂绛夊緟鏈熼棿鐨?SSE ping 闂撮殧锛堢锛?  ping_interval: 10
+
+# =============================================================================
+# Database Configuration (PostgreSQL)
+# 鏁版嵁搴撻厤缃?(PostgreSQL)
+# =============================================================================
+database:
+  # Database host address
+  # 鏁版嵁搴撲富鏈哄湴鍧€
+  host: "192.168.30.96"
+  # Database port
+  # 鏁版嵁搴撶鍙?  port: 5432
+  # Database username
+  # 鏁版嵁搴撶敤鎴峰悕
+  user: "root"
+  # Database password
+  # 鏁版嵁搴撳瘑鐮?  password: "Ccx.123456"
+  # Database name
+  # 鏁版嵁搴撳悕绉?  dbname: "mydatabase"
+  # SSL mode: disable, prefer, require, verify-ca, verify-full
+  # SSL 妯″紡锛歞isable锛堢鐢級, prefer锛堜紭鍏堝姞瀵嗭紝榛樿锛? require锛堣姹傦級, verify-ca锛堥獙璇丆A锛? verify-full锛堝畬鍏ㄩ獙璇侊級
+  # 榛樿鍊间负 "prefer"锛屾暟鎹簱鏀寔 SSL 鏃惰嚜鍔ㄤ娇鐢ㄥ姞瀵嗚繛鎺ワ紝涓嶆敮鎸佹椂鍥為€€鏄庢枃
+  sslmode: "disable"
+  # Max open connections (楂樺苟鍙戝満鏅缓璁?256+锛岄渶閰嶅悎 PostgreSQL max_connections 璋冩暣)
+  # 鏈€澶ф墦寮€杩炴帴鏁?  max_open_conns: 256
+  # Max idle connections (寤鸿涓?max_open_conns 鐨?50%锛屽噺灏戦绻佸缓杩炲紑閿€)
+  # 鏈€澶х┖闂茶繛鎺ユ暟
+  max_idle_conns: 128
+  # Connection max lifetime (minutes)
+  # 杩炴帴鏈€澶у瓨娲绘椂闂达紙鍒嗛挓锛?  conn_max_lifetime_minutes: 30
+  # Connection max idle time (minutes)
+  # 绌洪棽杩炴帴鏈€澶у瓨娲绘椂闂达紙鍒嗛挓锛?  conn_max_idle_time_minutes: 5
+
+# =============================================================================
+# Redis Configuration
+# Redis 閰嶇疆
+# =============================================================================
+redis:
+  # Redis host address
+  # Redis 涓绘満鍦板潃
+  host: "192.168.30.96"
+  # Redis port
+  # Redis 绔彛
+  port: 7369
+  # Redis password (leave empty if no password is set)
+  # Redis 瀵嗙爜锛堝鏋滄湭璁剧疆瀵嗙爜鍒欑暀绌猴級
+  password: "a68a13d025e64c9f9f0daf91f828152a"
+  # Database number (0-15)
+  # 鏁版嵁搴撶紪鍙凤紙0-15锛?  db: 0
+  # Connection pool size (max concurrent connections)
+  # 杩炴帴姹犲ぇ灏忥紙鏈€澶у苟鍙戣繛鎺ユ暟锛?  pool_size: 1024
+  # Minimum number of idle connections (楂樺苟鍙戝満鏅缓璁?128+锛屼繚鎸佽冻澶熺儹杩炴帴)
+  # 鏈€灏忕┖闂茶繛鎺ユ暟
+  min_idle_conns: 128
+  # Enable TLS/SSL connection
+  # 鏄惁鍚敤 TLS/SSL 杩炴帴
+  enable_tls: false
+
+# =============================================================================
+# Ops Monitoring (Optional)
+# 杩愮淮鐩戞帶 (鍙€?
+# =============================================================================
+ops:
+  # Enable ops monitoring features (background jobs and APIs)
+  # 鏄惁鍚敤杩愮淮鐩戞帶鍔熻兘锛堝悗鍙颁换鍔″拰鎺ュ彛锛?  # Set to false to hide ops menu in sidebar and disable all ops features
+  # 璁剧疆涓?false 鍙湪宸︿晶鏍忛殣钘忚繍缁寸洃鎺ц彍鍗曞苟绂佺敤鎵€鏈夎繍缁寸洃鎺у姛鑳?  # Other detailed settings (cleanup, aggregation, etc.) are configured in ops settings dialog
+  # 鍏朵粬璇︾粏璁剧疆锛堟暟鎹竻鐞嗐€侀鑱氬悎绛夛級鍦ㄨ繍缁寸洃鎺ц缃璇濇涓厤缃?  enabled: true
+
+# =============================================================================
+# JWT Configuration
+# JWT 閰嶇疆
+# =============================================================================
+jwt:
+  # IMPORTANT: Change this to a random string in production!
+  # 閲嶈锛氱敓浜х幆澧冧腑璇锋洿鏀逛负闅忔満瀛楃涓诧紒
+  # Generate with / 鐢熸垚鍛戒护: openssl rand -hex 32
+  secret: "3f024fcd7ea60ee9bbef5e6ac2c35294c87453103dc1ec420d8c3c42641b19c0"
+  # Token expiration time in hours (max 168)
+  # 浠ょ墝杩囨湡鏃堕棿锛堝皬鏃讹紝鏈€澶?168锛?  expire_hour: 24
+  # Access Token 杩囨湡鏃堕棿锛堝垎閽燂級
+  # 浼樺厛绾ц鏄庯細
+  # - >0: 鎸夊垎閽熺敓鏁堬紙浼樺厛浜?expire_hour锛?  # - =0: 鍥為€€浣跨敤 expire_hour
+  access_token_expire_minutes: 0
+
+# =============================================================================
+# TOTP (2FA) Configuration
+# TOTP 鍙屽洜绱犺璇侀厤缃?# =============================================================================
+totp:
+  # IMPORTANT: Set a fixed encryption key for TOTP secrets.
+  # 閲嶈锛氳缃浐瀹氱殑 TOTP 鍔犲瘑瀵嗛挜銆?  # If left empty, a random key will be generated on each startup, causing all
+  # existing TOTP configurations to become invalid (users won't be able to
+  # login with 2FA).
+  # 濡傛灉鐣欑┖锛屾瘡娆″惎鍔ㄥ皢鐢熸垚闅忔満瀵嗛挜锛屽鑷寸幇鏈夌殑 TOTP 閰嶇疆澶辨晥锛堢敤鎴锋棤娉曚娇鐢?  # 鍙屽洜绱犺璇佺櫥褰曪級銆?  # Generate with / 鐢熸垚鍛戒护: openssl rand -hex 32
+  encryption_key: "3f024fcd7ea60ee9bbef5e6ac2c35294c87453103dc1ec420d8c3c42641b19c0"
+
+# =============================================================================
+# LinuxDo Connect OAuth Login (SSO)
+# LinuxDo Connect OAuth 鐧诲綍锛堢敤浜?Sub2API 鐢ㄦ埛鐧诲綍锛?# =============================================================================
+linuxdo_connect:
+  enabled: false
+  client_id: ""
+  client_secret: ""
+  authorize_url: "https://connect.linux.do/oauth2/authorize"
+  token_url: "https://connect.linux.do/oauth2/token"
+  userinfo_url: "https://connect.linux.do/api/user"
+  scopes: "user"
+  # 绀轰緥: "https://your-domain.com/api/v1/auth/oauth/linuxdo/callback"
+  redirect_url: ""
+  # 瀹夊叏鎻愮ず锛?  # - 寤鸿浣跨敤鍚屾簮鐩稿璺緞锛堜互 / 寮€澶达級锛岄伩鍏嶆妸 token 閲嶅畾鍚戝埌鎰忓鐨勭涓夋柟鍩熷悕
+  # - 璇ュ湴鍧€涓嶅簲鍖呭惈 #fragment锛堟湰瀹炵幇浣跨敤 URL fragment 浼犻€?access_token锛?  frontend_redirect_url: "/auth/linuxdo/callback"
+  token_auth_method: "client_secret_post" # client_secret_post | client_secret_basic | none
+  # 娉ㄦ剰锛氬綋 token_auth_method=none锛坧ublic client锛夋椂锛屽繀椤诲惎鐢?PKCE
+  use_pkce: true
+  userinfo_email_path: ""
+  userinfo_id_path: ""
+  userinfo_username_path: ""
+
+# =============================================================================
+# Generic OIDC OAuth Login (SSO)
+# 閫氱敤 OIDC OAuth 鐧诲綍锛堢敤浜?Sub2API 鐢ㄦ埛鐧诲綍锛?# =============================================================================
+oidc_connect:
+  enabled: false
+  provider_name: "OIDC"
+  client_id: ""
+  client_secret: ""
+  # 渚嬪: "https://keycloak.example.com/realms/myrealm"
+  issuer_url: ""
+  # 鍙€? OIDC Discovery URL銆備负绌烘椂鍙墜鍔ㄥ～鍐?authorize/token/userinfo/jwks
+  discovery_url: ""
+  authorize_url: ""
+  token_url: ""
+  # 鍙€夛紙浠呰ˉ鍏?email/username锛屼笉鐢ㄤ簬 sub 鍙俊缁戝畾锛?  userinfo_url: ""
+  # validate_id_token=true 鏃跺繀濉?  jwks_url: ""
+  scopes: "openid email profile"
+  # 绀轰緥: "https://your-domain.com/api/v1/auth/oauth/oidc/callback"
+  redirect_url: ""
+  # 瀹夊叏鎻愮ず锛?  # - 寤鸿浣跨敤鍚屾簮鐩稿璺緞锛堜互 / 寮€澶达級锛岄伩鍏嶆妸 token 閲嶅畾鍚戝埌鎰忓鐨勭涓夋柟鍩熷悕
+  # - 璇ュ湴鍧€涓嶅簲鍖呭惈 #fragment锛堟湰瀹炵幇浣跨敤 URL fragment 浼犻€?access_token锛?  frontend_redirect_url: "/auth/oidc/callback"
+  token_auth_method: "client_secret_post" # client_secret_post | client_secret_basic | none
+  # 娉ㄦ剰锛氬綋 token_auth_method=none锛坧ublic client锛夋椂锛屽繀椤诲惎鐢?PKCE
+  use_pkce: false
+  # 寮€鍚悗寮哄埗鏍￠獙 id_token 鐨勭鍚嶅拰 claims锛堟帹鑽愶級
+  validate_id_token: true
+  allowed_signing_algs: "RS256,ES256,PS256"
+  # 鍏佽鐨勬椂閽熷亸绉伙紙绉掞級
+  clock_skew_seconds: 120
+  # 鑻?Provider 杩斿洖 email_verified=false锛屾槸鍚︽嫆缁濈櫥褰?  require_email_verified: false
+  userinfo_email_path: ""
+  userinfo_id_path: ""
+  userinfo_username_path: ""
+
+# =============================================================================
+# Default Settings
+# 榛樿璁剧疆
+# =============================================================================
+default:
+  # Initial admin account (created on first run)
+  # 鍒濆绠＄悊鍛樿处鎴凤紙棣栨杩愯鏃跺垱寤猴級
+  admin_email: "admin@example.com"
+  admin_password: "admin123"
+
+  # Default settings for new users
+  # 鏂扮敤鎴烽粯璁よ缃?  # Max concurrent requests per user
+  # 姣忕敤鎴锋渶澶у苟鍙戣姹傛暟
+  user_concurrency: 5
+  # Initial balance for new users
+  # 鏂扮敤鎴峰垵濮嬩綑棰?  user_balance: 0
+
+  # API key settings
+  # API 瀵嗛挜璁剧疆
+  # Prefix for generated API keys
+  # 鐢熸垚鐨?API 瀵嗛挜鍓嶇紑
+  api_key_prefix: "sk-"
+
+  # Rate multiplier (affects billing calculation)
+  # 璐圭巼鍊嶆暟锛堝奖鍝嶈璐硅绠楋級
+  rate_multiplier: 1.0
+
+# =============================================================================
+# Rate Limiting
+# 閫熺巼闄愬埗
+# =============================================================================
+rate_limit:
+  # Cooldown time (in minutes) when upstream returns 529 (overloaded)
+  # 涓婃父杩斿洖 529锛堣繃杞斤級鏃剁殑鍐峰嵈鏃堕棿锛堝垎閽燂級
+  overload_cooldown_minutes: 10
+
+# =============================================================================
+# Pricing Data Source (Optional)
+# 瀹氫环鏁版嵁婧愶紙鍙€夛級
+# =============================================================================
+pricing:
+  # URL to fetch model pricing data (default: pinned model-price-repo commit)
+  # 鑾峰彇妯″瀷瀹氫环鏁版嵁鐨?URL锛堥粯璁わ細鍥哄畾 commit 鐨?model-price-repo锛?  remote_url: "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/refs/heads/main//model_prices_and_context_window.json"
+  # Hash verification URL (optional)
+  # 鍝堝笇鏍￠獙 URL锛堝彲閫夛級
+  hash_url: "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/refs/heads/main//model_prices_and_context_window.sha256"
+  # Local data directory for caching
+  # 鏈湴鏁版嵁缂撳瓨鐩綍
+  data_dir: "./data"
+  # Fallback pricing file
+  # 澶囩敤瀹氫环鏂囦欢
+  fallback_file: "./resources/model-pricing/model_prices_and_context_window.json"
+  # Update interval in hours
+  # 鏇存柊闂撮殧锛堝皬鏃讹級
+  update_interval_hours: 24
+  # Hash check interval in minutes
+  # 鍝堝笇妫€鏌ラ棿闅旓紙鍒嗛挓锛?  hash_check_interval_minutes: 10
+
+# =============================================================================
+# Billing Configuration
+# 璁¤垂閰嶇疆
+# =============================================================================
+billing:
+  circuit_breaker:
+    # Enable circuit breaker for billing service
+    # 鍚敤璁¤垂鏈嶅姟鐔旀柇鍣?    enabled: true
+    # Number of failures before opening circuit
+    # 瑙﹀彂鐔旀柇鐨勫け璐ユ鏁伴槇鍊?    failure_threshold: 5
+    # Time to wait before attempting reset (seconds)
+    # 鐔旀柇鍚庨噸璇曠瓑寰呮椂闂达紙绉掞級
+    reset_timeout_seconds: 30
+    # Number of requests to allow in half-open state
+    # 鍗婂紑鐘舵€佸厑璁搁€氳繃鐨勮姹傛暟
+    half_open_requests: 3
+
+# =============================================================================
+# Turnstile Configuration
+# Turnstile 浜烘満楠岃瘉閰嶇疆
+# =============================================================================
+turnstile:
+  # Require Turnstile in release mode (when enabled, login/register will fail if not configured)
+  # 鍦?release 妯″紡涓嬭姹?Turnstile 楠岃瘉锛堝惎鐢ㄥ悗锛岃嫢鏈厤缃垯鐧诲綍/娉ㄥ唽浼氬け璐ワ級
+  required: false
+
+# =============================================================================
+# Gemini OAuth (Required for Gemini accounts)
+# Gemini OAuth 閰嶇疆锛圙emini 璐︽埛蹇呴渶锛?# =============================================================================
+# Sub2API supports TWO Gemini OAuth modes:
+# Sub2API 鏀寔涓ょ Gemini OAuth 妯″紡锛?#
+# 1. Code Assist OAuth (requires GCP project_id)
+# 1. Code Assist OAuth锛堥渶瑕?GCP project_id锛?#    - Uses: cloudcode-pa.googleapis.com (Code Assist API)
+#    - 浣跨敤锛歝loudcode-pa.googleapis.com锛圕ode Assist API锛?#
+# 2. AI Studio OAuth (no project_id needed)
+# 2. AI Studio OAuth锛堜笉闇€瑕?project_id锛?#    - Uses: generativelanguage.googleapis.com (AI Studio API)
+#    - 浣跨敤锛歡enerativelanguage.googleapis.com锛圓I Studio API锛?#
+# Default: Uses Gemini CLI's public OAuth credentials (same as Google's official CLI tool)
+# 榛樿锛氫娇鐢?Gemini CLI 鐨勫叕寮€ OAuth 鍑瘉锛堜笌 Google 瀹樻柟 CLI 宸ュ叿鐩稿悓锛?gemini:
+  oauth:
+    # OAuth 瀹㈡埛绔厤缃鏄庯細
+    # 1) 鐣欑┖ client_id/client_secret锛氫娇鐢?Gemini CLI 鍐呯疆 OAuth Client锛堝叾 client_secret 闇€閫氳繃鐜鍙橀噺娉ㄥ叆锛?    #    - GEMINI_CLI_OAUTH_CLIENT_SECRET
+    # 2) 鍚屾椂璁剧疆 client_id/client_secret锛氫娇鐢ㄤ綘鑷缓鐨?OAuth Client锛堟帹鑽愶紝鏉冮檺鏇村畬鏁达級
+    #
+    # 娉ㄦ剰锛歝lient_id 涓?client_secret 蹇呴』鍚屾椂涓虹┖鎴栧悓鏃堕潪绌恒€?    client_id: ""
+    client_secret: ""
+    # Optional scopes (space-separated). Leave empty to auto-select based on oauth_type.
+    # 鍙€夌殑鏉冮檺鑼冨洿锛堢┖鏍煎垎闅旓級銆傜暀绌哄垯鏍规嵁 oauth_type 鑷姩閫夋嫨銆?    scopes: ""
+  quota:
+    # Optional: local quota simulation for Gemini Code Assist (local billing).
+    # 鍙€夛細Gemini Code Assist 鏈湴閰嶉妯℃嫙锛堟湰鍦拌璐癸級銆?    # These values are used for UI progress + precheck scheduling, not official Google quotas.
+    # 杩欎簺鍊肩敤浜?UI 杩涘害鏄剧ず鍜岄妫€璋冨害锛屽苟闈?Google 瀹樻柟閰嶉銆?    tiers:
+      LEGACY:
+        # Pro model requests per day
+        # Pro 妯″瀷姣忔棩璇锋眰鏁?        pro_rpd: 50
+        # Flash model requests per day
+        # Flash 妯″瀷姣忔棩璇锋眰鏁?        flash_rpd: 1500
+        # Cooldown time (minutes) after hitting quota
+        # 杈惧埌閰嶉鍚庣殑鍐峰嵈鏃堕棿锛堝垎閽燂級
+        cooldown_minutes: 30
+      PRO:
+        # Pro model requests per day
+        # Pro 妯″瀷姣忔棩璇锋眰鏁?        pro_rpd: 1500
+        # Flash model requests per day
+        # Flash 妯″瀷姣忔棩璇锋眰鏁?        flash_rpd: 4000
+        # Cooldown time (minutes) after hitting quota
+        # 杈惧埌閰嶉鍚庣殑鍐峰嵈鏃堕棿锛堝垎閽燂級
+        cooldown_minutes: 5
+      ULTRA:
+        # Pro model requests per day
+        # Pro 妯″瀷姣忔棩璇锋眰鏁?        pro_rpd: 2000
+        # Flash model requests per day (0 = unlimited)
+        # Flash 妯″瀷姣忔棩璇锋眰鏁帮紙0 = 鏃犻檺鍒讹級
+        flash_rpd: 0
+        # Cooldown time (minutes) after hitting quota
+        # 杈惧埌閰嶉鍚庣殑鍐峰嵈鏃堕棿锛堝垎閽燂級
+        cooldown_minutes: 5
+
+# =============================================================================
+# Update Configuration (鍦ㄧ嚎鏇存柊閰嶇疆)
+# =============================================================================
+update:
+  # Proxy URL for accessing GitHub (used for online updates and pricing data)
+  # 鐢ㄤ簬璁块棶 GitHub 鐨勪唬鐞嗗湴鍧€锛堢敤浜庡湪绾挎洿鏂板拰瀹氫环鏁版嵁鑾峰彇锛?  # Supports: http, https, socks5, socks5h
+  # Examples:
+  #   - HTTP proxy: "http://127.0.0.1:7890"
+  #   - SOCKS5 proxy: "socks5://127.0.0.1:1080"
+  #   - With authentication: "http://user:pass@proxy.example.com:8080"
+  # Leave empty for direct connection (recommended for overseas servers)
+  # 鐣欑┖琛ㄧず鐩磋繛锛堥€傜敤浜庢捣澶栨湇鍔″櫒锛?  proxy_url: ""
+

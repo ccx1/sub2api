@@ -17,6 +17,10 @@
     "remove_repeat": 0,
     "extra_headers": {}
   },
+  "notification": {
+    "dingtalk_webhook": "",
+    "keyword": "Token使用"
+  },
   "products": {
     "balance_50": {
       "label": "50元余额卡",
