@@ -2986,6 +2986,8 @@ export default {
       dataImportHint: '上传导出的 JSON 文件以批量导入账号与代理。',
       dataImportWarning: '导入将创建新账号与代理，分组需手工绑定；请确认已有数据不会冲突。',
       dataImportFile: '数据文件',
+      dataImportJsonText: 'JSON 文本',
+      dataImportJsonPlaceholder: '可粘贴完整导出 JSON，或直接粘贴账号数组：[{ "name": "...", "platform": "...", "type": "...", "credentials": {...} }]',
       dataImportButton: '开始导入',
       dataImporting: '导入中...',
       dataImportSelectFile: '请选择数据文件',

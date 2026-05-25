@@ -40,6 +40,16 @@
         />
       </div>
 
+      <div>
+        <label class="input-label">{{ t('admin.accounts.dataImportJsonText') }}</label>
+        <textarea
+          v-model="jsonText"
+          rows="8"
+          class="input font-mono text-xs"
+          :placeholder="t('admin.accounts.dataImportJsonPlaceholder')"
+        ></textarea>
+      </div>
+
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -90,7 +100,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { AdminDataImportResult } from '@/types'
+import type { AdminDataImportError, AdminDataImportResult, CreateAccountRequest } from '@/types'
 
 interface Props {
   show: boolean
@@ -109,6 +119,7 @@ const appStore = useAppStore()
 
 const importing = ref(false)
 const file = ref<File | null>(null)
+const jsonText = ref('')
 const result = ref<AdminDataImportResult | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -121,6 +132,7 @@ watch(
   (open) => {
     if (open) {
       file.value = null
+      jsonText.value = ''
       result.value = null
       if (fileInput.value) {
         fileInput.value.value = ''
@@ -161,21 +173,82 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
   })
 }
 
+const readImportSourceText = async (): Promise<string | null> => {
+  const directText = jsonText.value.trim()
+  if (directText) {
+    return directText
+  }
+  if (file.value) {
+    return readFileAsText(file.value)
+  }
+  return null
+}
+
+const isAccountArrayPayload = (payload: unknown): payload is CreateAccountRequest[] => {
+  return Array.isArray(payload)
+}
+
+const hasAccountsArrayOnly = (
+  payload: unknown
+): payload is { accounts: CreateAccountRequest[]; proxies?: unknown } => {
+  if (!payload || typeof payload !== 'object') return false
+  const data = payload as { accounts?: unknown; proxies?: unknown }
+  return Array.isArray(data.accounts) && !Array.isArray(data.proxies)
+}
+
+const toBatchImportResult = (res: {
+  success: number
+  failed: number
+  results: Array<{ success: boolean; name?: string; error?: string }>
+}): AdminDataImportResult => {
+  const errors: AdminDataImportError[] = res.results
+    .filter(item => !item.success)
+    .map(item => ({
+      kind: 'account',
+      name: item.name,
+      message: item.error || t('admin.accounts.dataImportFailed')
+    }))
+
+  return {
+    proxy_created: 0,
+    proxy_reused: 0,
+    proxy_failed: 0,
+    account_created: res.success,
+    account_failed: res.failed,
+    errors
+  }
+}
+
+const importParsedPayload = async (payload: unknown): Promise<AdminDataImportResult> => {
+  if (isAccountArrayPayload(payload)) {
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload))
+  }
+
+  if (hasAccountsArrayOnly(payload)) {
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload.accounts))
+  }
+
+  return adminAPI.accounts.importData({
+    data: payload as Parameters<typeof adminAPI.accounts.importData>[0]['data'],
+    skip_default_group_bind: true
+  })
+}
+
 const handleImport = async () => {
-  if (!file.value) {
+  if (!jsonText.value.trim() && !file.value) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
     return
   }
 
   importing.value = true
   try {
-    const text = await readFileAsText(file.value)
+    const text = await readImportSourceText()
+    if (!text) {
+      appStore.showError(t('admin.accounts.dataImportSelectFile'))
+      return
+    }
     const dataPayload = JSON.parse(text)
-
-    const res = await adminAPI.accounts.importData({
-      data: dataPayload,
-      skip_default_group_bind: true
-    })
+    const res = await importParsedPayload(dataPayload)
 
     result.value = res
 
