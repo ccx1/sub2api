@@ -33,94 +33,202 @@
       </template>
 
       <template #table>
-        <AvailableChannelsTable
-          :columns="columnLabels"
-          :rows="filteredChannels"
-          :loading="loading"
-          :user-group-rates="userGroupRates"
-          pricing-key-prefix="availableChannels.pricing"
-          :no-pricing-label="t('availableChannels.noPricing')"
-          :no-models-label="t('availableChannels.noModels')"
-          :empty-label="t('availableChannels.empty')"
-        />
+        <div class="h-full overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+          <div v-if="loading" class="flex h-full items-center justify-center py-16">
+            <Icon name="refresh" size="lg" class="animate-spin text-gray-400" />
+          </div>
+
+          <div v-else-if="filteredChannels.length === 0" class="flex h-full items-center justify-center px-6 py-16 text-center">
+            <div>
+              <Icon name="inbox" size="xl" class="mx-auto mb-3 h-12 w-12 text-gray-400" />
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('availableChannels.empty') }}</p>
+            </div>
+          </div>
+
+          <div v-else class="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <aside class="border-b border-gray-200 bg-gray-50/70 dark:border-dark-700 dark:bg-dark-900/40 lg:border-b-0 lg:border-r">
+              <div class="border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ t('availableChannels.title') }}
+                </h2>
+              </div>
+
+              <div class="max-h-full overflow-y-auto p-3">
+                <button
+                  v-for="channel in filteredChannels"
+                  :key="channel.name"
+                  type="button"
+                  class="mb-2 w-full rounded-xl border px-4 py-3 text-left transition last:mb-0"
+                  :class="selectedChannelName === channel.name
+                    ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm dark:border-primary-700 dark:bg-primary-900/20 dark:text-primary-300'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-primary-200 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-primary-800 dark:hover:bg-dark-700'"
+                  @click="selectedChannelName = channel.name"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="truncate text-sm font-medium">{{ channel.name }}</div>
+                    </div>
+                    <span
+                      class="mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-gray-100 px-2 text-[11px] font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+                    >
+                      {{ getChannelModelCount(channel) }}
+                    </span>
+                  </div>
+                </button>
+              </div>
+            </aside>
+
+            <section class="flex min-h-0 flex-col">
+              <div class="border-b border-gray-200 px-5 py-4 dark:border-dark-700">
+                <h2 class="truncate text-lg font-semibold text-gray-900 dark:text-white">
+                  {{ selectedChannel?.name }}
+                </h2>
+              </div>
+
+              <div class="min-h-0 flex-1 overflow-auto">
+                <table class="w-full min-w-[760px] border-collapse text-sm">
+                  <thead class="sticky top-0 z-10 bg-gray-50/95 text-xs font-medium uppercase tracking-wide text-gray-500 backdrop-blur dark:bg-dark-800/95 dark:text-gray-400">
+                    <tr>
+                      <th class="px-5 py-3 text-left">模型名称</th>
+                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.billingMode') }}</th>
+                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.inputPrice') }}</th>
+                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.outputPrice') }}</th>
+                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.cacheWritePrice') }}</th>
+                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.cacheReadPrice') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="model in selectedChannelModels"
+                      :key="`${model.platform}-${model.name}`"
+                      class="border-t border-gray-100 dark:border-dark-700"
+                    >
+                      <td class="px-5 py-4 align-top">
+                        <div class="font-medium text-gray-900 dark:text-white">{{ model.name }}</div>
+                      </td>
+                      <td class="px-5 py-4 align-top">
+                        <span
+                          class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium"
+                          :class="getBillingModeBadgeClass(model.pricing?.billing_mode)"
+                        >
+                          {{ getBillingModeText(model.pricing?.billing_mode) }}
+                        </span>
+                      </td>
+                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'input_price') }}</td>
+                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'output_price') }}</td>
+                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'cache_write_price') }}</td>
+                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'cache_read_price') }}</td>
+                    </tr>
+                    <tr v-if="selectedChannelModels.length === 0">
+                      <td colspan="6" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                        {{ t('availableChannels.noModels') }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
       </template>
     </TablePageLayout>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import AvailableChannelsTable from '@/components/channels/AvailableChannelsTable.vue'
-import userChannelsAPI, { type UserAvailableChannel } from '@/api/channels'
-import userGroupsAPI from '@/api/groups'
+import userChannelsAPI, { type UserAvailableChannel, type UserSupportedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatScaled } from '@/utils/pricing'
+import { getBillingModeBadgeClass, getBillingModeLabel } from '@/utils/billingMode'
+import { BILLING_MODE_TOKEN } from '@/constants/channel'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const channels = ref<UserAvailableChannel[]>([])
-const userGroupRates = ref<Record<number, number>>({})
 const loading = ref(false)
 const searchQuery = ref('')
+const selectedChannelName = ref('')
 
-const columnLabels = computed(() => ({
-  name: t('availableChannels.columns.name'),
-  description: t('availableChannels.columns.description'),
-  platform: t('availableChannels.columns.platform'),
-  groups: t('availableChannels.columns.groups'),
-  supportedModels: t('availableChannels.columns.supportedModels'),
-}))
-
-/**
- * 搜索过滤：
- * - 命中渠道名/描述 → 整个渠道（所有 platforms）都保留
- * - 否则按 platform/group/model 维度在 sections 里过滤，保留有匹配的 section
- * - 所有 sections 都不匹配时，渠道本身被过滤掉
- */
 const filteredChannels = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (!q) return channels.value
-  return channels.value
-    .map((ch) => {
-      const nameHit = ch.name.toLowerCase().includes(q)
-      const descHit = (ch.description || '').toLowerCase().includes(q)
-      if (nameHit || descHit) return ch
-      const matchingSections = ch.platforms.filter(
-        (p) =>
-          p.platform.toLowerCase().includes(q) ||
-          p.groups.some((g) => g.name.toLowerCase().includes(q)) ||
-          p.supported_models.some((m) => m.name.toLowerCase().includes(q)),
-      )
-      if (matchingSections.length === 0) return null
-      return { ...ch, platforms: matchingSections }
-    })
-    .filter((ch): ch is UserAvailableChannel => ch !== null)
+
+  return channels.value.filter((channel) => {
+    if (channel.name.toLowerCase().includes(q)) return true
+    if ((channel.description || '').toLowerCase().includes(q)) return true
+
+    return channel.platforms.some((section) =>
+      section.platform.toLowerCase().includes(q) ||
+      section.supported_models.some((model) => model.name.toLowerCase().includes(q)),
+    )
+  })
 })
+
+const selectedChannel = computed(() => {
+  const list = filteredChannels.value
+  if (list.length === 0) return null
+  return list.find((channel) => channel.name === selectedChannelName.value) ?? list[0]
+})
+
+const selectedChannelModels = computed<UserSupportedModel[]>(() => {
+  const channel = selectedChannel.value
+  if (!channel) return []
+
+  return channel.platforms.flatMap((section) =>
+    section.supported_models.map((model) => ({
+      ...model,
+      platform: model.platform || section.platform,
+    })),
+  )
+})
+
+watch(filteredChannels, (list) => {
+  if (list.length === 0) {
+    selectedChannelName.value = ''
+    return
+  }
+
+  if (!list.some((channel) => channel.name === selectedChannelName.value)) {
+    selectedChannelName.value = list[0].name
+  }
+}, { immediate: true })
 
 async function loadChannels() {
   loading.value = true
   try {
-    // 渠道列表和用户专属倍率并发拉取。专属倍率失败不阻塞渠道展示——
-    // 失败时只是无法渲染专属倍率角标，降级为仅显示默认倍率。
-    const [list, rates] = await Promise.all([
-      userChannelsAPI.getAvailable(),
-      userGroupsAPI.getUserGroupRates().catch((err: unknown) => {
-        console.error('Failed to load user group rates:', err)
-        return {} as Record<number, number>
-      }),
-    ])
+    const list = await userChannelsAPI.getAvailable()
     channels.value = list
-    userGroupRates.value = rates
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   } finally {
     loading.value = false
   }
+}
+
+function getChannelModelCount(channel: UserAvailableChannel): number {
+  return channel.platforms.reduce((count, section) => count + section.supported_models.length, 0)
+}
+
+function getBillingModeText(mode: string | null | undefined): string {
+  return getBillingModeLabel(mode, t)
+}
+
+function getModelPricingValue(
+  model: UserSupportedModel,
+  field: 'input_price' | 'output_price' | 'cache_write_price' | 'cache_read_price',
+): string {
+  const pricing = model.pricing
+  if (!pricing) return '-'
+
+  if (pricing.billing_mode !== BILLING_MODE_TOKEN) return '-'
+  return formatScaled(pricing[field], 1_000_000)
 }
 
 onMounted(loadChannels)

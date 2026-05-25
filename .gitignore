@@ -119,6 +119,12 @@ tests
 CLAUDE.md
 .claude
 scripts
+!scripts/
+scripts/*
+!scripts/package-backend-source.bat
+!scripts/build-linux-backend.sh
+!scripts/sub2api-service.sh
+!scripts/cleanup-sub2api-logs.sh
 .code-review-state
 #openspec/
 code-reviews/
