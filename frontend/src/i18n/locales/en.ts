@@ -390,6 +390,11 @@ export default {
     riskControl: 'Risk Control',
   },
 
+  userGuide: {
+    title: 'Guide',
+    description: 'API Key, channel, model, client setup, and FAQ'
+  },
+
   // Auth
   auth: {
     welcomeBack: 'Welcome Back',
@@ -1396,6 +1401,7 @@ export default {
       metricTokens: 'By Tokens',
       metricActualCost: 'By Actual Cost',
       tokenUsageTrend: 'Token Usage Trend',
+      accountUsageTrend: 'Account Usage',
       userUsageTrend: 'User Usage Trend (Top 12)',
       model: 'Model',
       group: 'Group',
@@ -2984,12 +2990,16 @@ export default {
       },
       types: {
         oauth: 'OAuth',
+        setupToken: 'Setup Token',
+        apiKey: 'API Key',
         chatgptOauth: 'ChatGPT OAuth',
         responsesApi: 'Responses API',
         googleOauth: 'Google OAuth',
         codeAssist: 'Code Assist',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: 'Connect via Base URL + API Key',
+        bedrock: 'AWS Bedrock',
+        serviceAccount: 'Service Account',
         upstream: 'Upstream',
         upstreamDesc: 'Connect via Base URL + API Key'
       },

@@ -86,7 +86,7 @@
               </div>
 
               <div class="min-h-0 flex-1 overflow-auto">
-                <table class="w-full min-w-[760px] border-collapse text-sm">
+                <table class="w-full min-w-[880px] border-collapse text-sm">
                   <thead class="sticky top-0 z-10 bg-gray-50/95 text-xs font-medium uppercase tracking-wide text-gray-500 backdrop-blur dark:bg-dark-800/95 dark:text-gray-400">
                     <tr>
                       <th class="px-5 py-3 text-left">模型名称</th>
@@ -95,6 +95,7 @@
                       <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.outputPrice') }}</th>
                       <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.cacheWritePrice') }}</th>
                       <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.cacheReadPrice') }}</th>
+                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.perRequestPrice') }}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -118,9 +119,23 @@
                       <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'output_price') }}</td>
                       <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'cache_write_price') }}</td>
                       <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'cache_read_price') }}</td>
+                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">
+                        <div v-if="getPerRequestPricingItems(model).length > 0" class="space-y-1">
+                          <div
+                            v-for="item in getPerRequestPricingItems(model)"
+                            :key="item.key"
+                            class="whitespace-nowrap"
+                          >
+                            <span v-if="item.label" class="text-gray-500 dark:text-gray-400">{{ item.label }}: </span>
+                            <span>{{ item.value }}</span>
+                            <span class="ml-1 text-gray-400 dark:text-gray-500">{{ t('availableChannels.pricing.unitPerRequest') }}</span>
+                          </div>
+                        </div>
+                        <span v-else>-</span>
+                      </td>
                     </tr>
                     <tr v-if="selectedChannelModels.length === 0">
-                      <td colspan="6" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                      <td colspan="7" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
                         {{ t('availableChannels.noModels') }}
                       </td>
                     </tr>
@@ -146,7 +161,7 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatScaled } from '@/utils/pricing'
 import { getBillingModeBadgeClass, getBillingModeLabel } from '@/utils/billingMode'
-import { BILLING_MODE_TOKEN } from '@/constants/channel'
+import { BILLING_MODE_IMAGE, BILLING_MODE_PER_REQUEST, BILLING_MODE_TOKEN } from '@/constants/channel'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -229,6 +244,51 @@ function getModelPricingValue(
 
   if (pricing.billing_mode !== BILLING_MODE_TOKEN) return '-'
   return formatScaled(pricing[field], 1_000_000)
+}
+
+interface PricingDisplayItem {
+  key: string
+  label: string
+  value: string
+}
+
+function getPerRequestPricingItems(model: UserSupportedModel): PricingDisplayItem[] {
+  const pricing = model.pricing
+  if (!pricing) return []
+  if (pricing.billing_mode !== BILLING_MODE_PER_REQUEST && pricing.billing_mode !== BILLING_MODE_IMAGE) {
+    return []
+  }
+
+  const items: PricingDisplayItem[] = []
+  if (pricing.per_request_price != null) {
+    items.push({
+      key: 'default',
+      label: pricing.intervals.length > 0 ? t('common.default', '默认') : '',
+      value: formatScaled(pricing.per_request_price, 1),
+    })
+  } else if (pricing.billing_mode === BILLING_MODE_IMAGE && pricing.image_output_price != null) {
+    items.push({
+      key: 'legacy-image',
+      label: pricing.intervals.length > 0 ? t('availableChannels.pricing.imageOutputPrice') : '',
+      value: formatScaled(pricing.image_output_price, 1),
+    })
+  }
+
+  pricing.intervals.forEach((interval, index) => {
+    if (interval.per_request_price == null) return
+    items.push({
+      key: `tier-${index}`,
+      label: interval.tier_label || formatIntervalRange(interval.min_tokens, interval.max_tokens),
+      value: formatScaled(interval.per_request_price, 1),
+    })
+  })
+
+  return items
+}
+
+function formatIntervalRange(min: number, max: number | null): string {
+  if (max == null) return `${min}+`
+  return `${min}-${max}`
 }
 
 onMounted(loadChannels)

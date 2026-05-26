@@ -198,6 +198,18 @@ type APIKeyUsageTrendPoint struct {
 	Tokens   int64  `json:"tokens"`
 }
 
+// AccountUsageTrendPoint represents account usage trend data point.
+type AccountUsageTrendPoint struct {
+	Date        string  `json:"date"`
+	AccountID   int64   `json:"account_id"`
+	AccountName string  `json:"account_name"`
+	Requests    int64   `json:"requests"`
+	Tokens      int64   `json:"tokens"`
+	Cost        float64 `json:"cost"`
+	ActualCost  float64 `json:"actual_cost"`
+	AccountCost float64 `json:"account_cost"`
+}
+
 // APIKeyDailyUsagePoint represents one day of usage for a single API key.
 type APIKeyDailyUsagePoint struct {
 	Date             string  `json:"date"`

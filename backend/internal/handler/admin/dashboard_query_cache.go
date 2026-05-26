@@ -10,11 +10,12 @@ import (
 )
 
 var (
-	dashboardTrendCache        = newSnapshotCache(30 * time.Second)
-	dashboardModelStatsCache   = newSnapshotCache(30 * time.Second)
-	dashboardGroupStatsCache   = newSnapshotCache(30 * time.Second)
-	dashboardUsersTrendCache   = newSnapshotCache(30 * time.Second)
-	dashboardAPIKeysTrendCache = newSnapshotCache(30 * time.Second)
+	dashboardTrendCache         = newSnapshotCache(30 * time.Second)
+	dashboardModelStatsCache    = newSnapshotCache(30 * time.Second)
+	dashboardGroupStatsCache    = newSnapshotCache(30 * time.Second)
+	dashboardUsersTrendCache    = newSnapshotCache(30 * time.Second)
+	dashboardAPIKeysTrendCache  = newSnapshotCache(30 * time.Second)
+	dashboardAccountsTrendCache = newSnapshotCache(30 * time.Second)
 )
 
 type dashboardTrendCacheKey struct {
@@ -48,6 +49,23 @@ type dashboardEntityTrendCacheKey struct {
 	StartTime   string `json:"start_time"`
 	EndTime     string `json:"end_time"`
 	Granularity string `json:"granularity"`
+	Limit       int    `json:"limit"`
+}
+
+type dashboardAccountTrendCacheKey struct {
+	StartTime   string `json:"start_time"`
+	EndTime     string `json:"end_time"`
+	Granularity string `json:"granularity"`
+	UserID      int64  `json:"user_id"`
+	APIKeyID    int64  `json:"api_key_id"`
+	AccountID   int64  `json:"account_id"`
+	GroupID     int64  `json:"group_id"`
+	AccountType string `json:"account_type"`
+	Platform    string `json:"platform"`
+	Model       string `json:"model"`
+	RequestType *int16 `json:"request_type"`
+	Stream      *bool  `json:"stream"`
+	BillingType *int8  `json:"billing_type"`
 	Limit       int    `json:"limit"`
 }
 
@@ -199,5 +217,43 @@ func (h *DashboardHandler) getUserUsageTrendCached(ctx context.Context, startTim
 		return nil, hit, err
 	}
 	trend, err := snapshotPayloadAs[[]usagestats.UserUsageTrendPoint](entry.Payload)
+	return trend, hit, err
+}
+
+func (h *DashboardHandler) getAccountUsageTrendCached(
+	ctx context.Context,
+	startTime, endTime time.Time,
+	granularity string,
+	userID, apiKeyID, accountID, groupID int64,
+	accountType, platform string,
+	model string,
+	requestType *int16,
+	stream *bool,
+	billingType *int8,
+	limit int,
+) ([]usagestats.AccountUsageTrendPoint, bool, error) {
+	key := mustMarshalDashboardCacheKey(dashboardAccountTrendCacheKey{
+		StartTime:   startTime.UTC().Format(time.RFC3339),
+		EndTime:     endTime.UTC().Format(time.RFC3339),
+		Granularity: granularity,
+		UserID:      userID,
+		APIKeyID:    apiKeyID,
+		AccountID:   accountID,
+		GroupID:     groupID,
+		AccountType: accountType,
+		Platform:    platform,
+		Model:       model,
+		RequestType: requestType,
+		Stream:      stream,
+		BillingType: billingType,
+		Limit:       limit,
+	})
+	entry, hit, err := dashboardAccountsTrendCache.GetOrLoad(key, func() (any, error) {
+		return h.dashboardService.GetAccountUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, accountType, platform, model, requestType, stream, billingType, limit)
+	})
+	if err != nil {
+		return nil, hit, err
+	}
+	trend, err := snapshotPayloadAs[[]usagestats.AccountUsageTrendPoint](entry.Payload)
 	return trend, hit, err
 }

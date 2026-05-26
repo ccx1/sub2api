@@ -537,6 +537,39 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetAccountUsageTrendWithFilters(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	requestType := int16(service.RequestTypeStream)
+	billingType := int8(1)
+	accountType := "apikey"
+	platform := "openai"
+
+	rows := sqlmock.NewRows([]string{"date", "account_id", "account_name", "requests", "tokens", "cost", "actual_cost", "account_cost"}).
+		AddRow("2025-01-01", int64(11), "acc-a", int64(3), int64(300), 1.2, 2.4, 3.6)
+
+	mock.ExpectQuery("WITH filtered_usage AS \\(").
+		WithArgs(start, end, int64(7), int64(8), int64(9), int64(10), accountType, platform, "gpt-test", requestType, int16(billingType), 5).
+		WillReturnRows(rows)
+
+	got, err := repo.GetAccountUsageTrendWithFilters(context.Background(), start, end, "day", 7, 8, 9, 10, accountType, platform, "gpt-test", &requestType, nil, &billingType, 5)
+	require.NoError(t, err)
+	require.Equal(t, []usagestats.AccountUsageTrendPoint{{
+		Date:        "2025-01-01",
+		AccountID:   11,
+		AccountName: "acc-a",
+		Requests:    3,
+		Tokens:      300,
+		Cost:        1.2,
+		ActualCost:  2.4,
+		AccountCost: 3.6,
+	}}, got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestBuildRequestTypeFilterConditionLegacyFallback(t *testing.T) {
 	tests := []struct {
 		name      string

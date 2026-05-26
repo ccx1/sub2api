@@ -2234,6 +2234,9 @@ type UserSpendingRankingResponse = usagestats.UserSpendingRankingResponse
 // APIKeyUsageTrendPoint represents API key usage trend data point
 type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 
+// AccountUsageTrendPoint represents account usage trend data point
+type AccountUsageTrendPoint = usagestats.AccountUsageTrendPoint
+
 // GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
@@ -2345,6 +2348,132 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 	}
 
 	return results, nil
+}
+
+// GetAccountUsageTrendWithFilters returns usage trend data grouped by account and date.
+func (r *usageLogRepository) GetAccountUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, accountType, platform, model string, requestType *int16, stream *bool, billingType *int8, limit int) (results []AccountUsageTrendPoint, err error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	dateFormat := safeDateFormat(granularity)
+
+	baseWhere, args := buildAccountTrendWhereClause(startTime, endTime, userID, apiKeyID, accountID, groupID, accountType, platform, model, requestType, stream, billingType)
+	topLimitArg := len(args) + 1
+	args = append(args, limit)
+
+	query := fmt.Sprintf(`
+		WITH filtered_usage AS (
+			SELECT usage_logs.*, COALESCE(a.name, '') AS account_name
+			FROM usage_logs
+			LEFT JOIN accounts a ON usage_logs.account_id = a.id
+			%s
+		),
+		top_accounts AS (
+			SELECT account_id
+			FROM filtered_usage
+			GROUP BY account_id
+			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
+			LIMIT $%d
+		)
+		SELECT
+			TO_CHAR(u.created_at, '%s') as date,
+			u.account_id,
+			u.account_name,
+			COUNT(*) as requests,
+			COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens,
+			COALESCE(SUM(u.total_cost), 0) as cost,
+			COALESCE(SUM(u.actual_cost), 0) as actual_cost,
+			COALESCE(SUM(COALESCE(u.account_stats_cost, u.total_cost) * COALESCE(u.account_rate_multiplier, 1)), 0) as account_cost
+		FROM filtered_usage u
+		WHERE u.account_id IN (SELECT account_id FROM top_accounts)
+		GROUP BY date, u.account_id, u.account_name
+		ORDER BY date ASC, tokens DESC
+	`, baseWhere, topLimitArg, dateFormat)
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+			results = nil
+		}
+	}()
+
+	results = make([]AccountUsageTrendPoint, 0)
+	for rows.Next() {
+		var row AccountUsageTrendPoint
+		if err = rows.Scan(&row.Date, &row.AccountID, &row.AccountName, &row.Requests, &row.Tokens, &row.Cost, &row.ActualCost, &row.AccountCost); err != nil {
+			return nil, err
+		}
+		results = append(results, row)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func buildAccountTrendWhereClause(startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, accountType, platform, model string, requestType *int16, stream *bool, billingType *int8) (string, []any) {
+	conditions := []string{
+		"usage_logs.created_at >= $1",
+		"usage_logs.created_at < $2",
+		"usage_logs.account_id > 0",
+	}
+	args := []any{startTime, endTime}
+	if userID > 0 {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.user_id = $%d", len(args)+1))
+		args = append(args, userID)
+	}
+	if apiKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.api_key_id = $%d", len(args)+1))
+		args = append(args, apiKeyID)
+	}
+	if accountID > 0 {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.account_id = $%d", len(args)+1))
+		args = append(args, accountID)
+	}
+	if groupID > 0 {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.group_id = $%d", len(args)+1))
+		args = append(args, groupID)
+	}
+	if accountType = strings.ToLower(strings.TrimSpace(accountType)); accountType != "" {
+		conditions = append(conditions, fmt.Sprintf("a.type = $%d", len(args)+1))
+		args = append(args, accountType)
+	}
+	if platform = strings.ToLower(strings.TrimSpace(platform)); platform != "" {
+		conditions = append(conditions, fmt.Sprintf("a.platform = $%d", len(args)+1))
+		args = append(args, platform)
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.model = $%d", len(args)+1))
+		args = append(args, model)
+	}
+	if requestType != nil {
+		normalized := service.RequestTypeFromInt16(*requestType)
+		requestTypeArg := int16(normalized)
+		switch normalized {
+		case service.RequestTypeSync:
+			conditions = append(conditions, fmt.Sprintf("(usage_logs.request_type = $%d OR (usage_logs.request_type = %d AND usage_logs.stream = FALSE AND usage_logs.openai_ws_mode = FALSE))", len(args)+1, int16(service.RequestTypeUnknown)))
+		case service.RequestTypeStream:
+			conditions = append(conditions, fmt.Sprintf("(usage_logs.request_type = $%d OR (usage_logs.request_type = %d AND usage_logs.stream = TRUE AND usage_logs.openai_ws_mode = FALSE))", len(args)+1, int16(service.RequestTypeUnknown)))
+		case service.RequestTypeWSV2:
+			conditions = append(conditions, fmt.Sprintf("(usage_logs.request_type = $%d OR (usage_logs.request_type = %d AND usage_logs.openai_ws_mode = TRUE))", len(args)+1, int16(service.RequestTypeUnknown)))
+		default:
+			conditions = append(conditions, fmt.Sprintf("usage_logs.request_type = $%d", len(args)+1))
+		}
+		args = append(args, requestTypeArg)
+	} else if stream != nil {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.stream = $%d", len(args)+1))
+		args = append(args, *stream)
+	}
+	if billingType != nil {
+		conditions = append(conditions, fmt.Sprintf("usage_logs.billing_type = $%d", len(args)+1))
+		args = append(args, int16(*billingType))
+	}
+	return buildWhere(conditions), args
 }
 
 // GetUserSpendingRanking returns user spending ranking aggregated within the time range.

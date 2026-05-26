@@ -1485,6 +1485,17 @@ export interface ApiKeyUsageTrendPoint {
   tokens: number
 }
 
+export interface AccountUsageTrendPoint {
+  date: string
+  account_id: number
+  account_name: string
+  requests: number
+  tokens: number
+  cost: number
+  actual_cost: number
+  account_cost: number
+}
+
 // ==================== Admin User Management ====================
 
 export interface UpdateUserRequest {

@@ -205,6 +205,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/guide',
+    name: 'UserGuide',
+    component: () => import('@/views/user/GuideView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'User Guide',
+      titleKey: 'userGuide.title',
+      descriptionKey: 'userGuide.description'
+    }
+  },
+  {
     path: '/usage',
     name: 'Usage',
     component: () => import('@/views/user/UsageView.vue'),

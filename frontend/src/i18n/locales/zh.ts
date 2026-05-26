@@ -390,6 +390,11 @@ export default {
     riskControl: '风控中心',
   },
 
+  userGuide: {
+    title: '使用说明',
+    description: '查看 API Key、渠道模型、客户端接入和常见问题'
+  },
+
   // Auth
   auth: {
     welcomeBack: '欢迎回来',
@@ -1045,7 +1050,7 @@ export default {
       cacheWritePrice: '缓存写入',
       cacheReadPrice: '缓存读取',
       imageOutputPrice: '图片输出',
-      perRequestPrice: '每次请求',
+      perRequestPrice: '单次价格',
       intervals: '阶梯定价',
       unitPerMillion: '/ 1M token',
       unitPerRequest: '/ 次'
@@ -1409,6 +1414,7 @@ export default {
       metricTokens: '按 Token',
       metricActualCost: '按实际消费',
       tokenUsageTrend: 'Token 使用趋势',
+      accountUsageTrend: '账号使用情况',
       noDataAvailable: '暂无数据',
       model: '模型',
       group: '分组',
@@ -2340,7 +2346,7 @@ export default {
         cacheWritePrice: '缓存写入',
         cacheReadPrice: '缓存读取',
         imageOutputPrice: '图片输出',
-        perRequestPrice: '每次请求',
+        perRequestPrice: '单次价格',
         intervals: '阶梯定价',
         unitPerMillion: '/ 1M token',
         unitPerRequest: '/ 次'
@@ -3169,12 +3175,16 @@ export default {
       },
       types: {
         oauth: 'OAuth',
+        setupToken: 'Setup Token',
+        apiKey: 'API Key',
         chatgptOauth: 'ChatGPT OAuth',
         responsesApi: 'Responses API',
         googleOauth: 'Google OAuth',
         codeAssist: 'Code Assist',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: '通过 Base URL + API Key 连接',
+        bedrock: 'AWS Bedrock',
+        serviceAccount: '服务账号',
         upstream: '对接上游',
         upstreamDesc: '通过 Base URL + API Key 连接上游',
         api_key: 'API Key',
