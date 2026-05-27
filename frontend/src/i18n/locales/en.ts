@@ -2968,7 +2968,7 @@ export default {
       dataImportWarning: 'Import will create new accounts/proxies; groups must be bound manually. Ensure existing data does not conflict.',
       dataImportFile: 'Data file',
       dataImportJsonText: 'JSON text',
-      dataImportJsonPlaceholder: 'Paste a full exported JSON payload, or paste an account array directly: [{ "name": "...", "platform": "...", "type": "...", "credentials": {...} }]',
+      dataImportJsonPlaceholder: 'Paste a full exported JSON payload, or paste an account array directly. Example:',
       dataImportButton: 'Start Import',
       dataImporting: 'Importing...',
       dataImportSelectFile: 'Please select a data file',

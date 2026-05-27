@@ -46,7 +46,7 @@
           v-model="jsonText"
           rows="8"
           class="input font-mono text-xs"
-          :placeholder="t('admin.accounts.dataImportJsonPlaceholder')"
+          :placeholder="dataImportJsonPlaceholder"
         ></textarea>
       </div>
 
@@ -122,8 +122,13 @@ const file = ref<File | null>(null)
 const jsonText = ref('')
 const result = ref<AdminDataImportResult | null>(null)
 
+const ACCOUNT_IMPORT_JSON_EXAMPLE = '[{ "name": "...", "platform": "...", "type": "...", "credentials": {...} }]'
+
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileName = computed(() => file.value?.name || '')
+const dataImportJsonPlaceholder = computed(
+  () => `${t('admin.accounts.dataImportJsonPlaceholder')}\n${ACCOUNT_IMPORT_JSON_EXAMPLE}`
+)
 
 const errorItems = computed(() => result.value?.errors || [])
 
