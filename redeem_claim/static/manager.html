@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iCode 本地活动管理台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/manager.css" />
+  </head>
+  <body>
+    <main class="manager-shell">
+      <section class="top">
+        <span class="badge">本地管理台</span>
+        <h1>iCode 活动配置</h1>
+        <p class="subtitle">管理台只用于本地配置和生成静态页，用户只访问生成后的活动链接。</p>
+      </section>
+
+      <section class="panel">
+        <div class="manager-grid">
+          <label class="field full">
+            管理口令
+            <input id="adminToken" type="password" placeholder="config.json 里的 security.admin_token" />
+          </label>
+          <label class="field">
+            活动 ID
+            <input id="activityId" placeholder="例如 spring2026" />
+          </label>
+          <label class="field">
+            活动标题
+            <input id="name" placeholder="例如 iCode 周年兑换码" />
+          </label>
+          <label class="field full">
+            活动说明
+            <input id="description" placeholder="展示在领取页标题下方" />
+          </label>
+          <label class="field full">
+            领取后跳转地址
+            <input id="useUrl" placeholder="例如 https://icode.sampleccx.cn 或 /console" />
+          </label>
+          <div class="field full">
+            <div class="field-title">活动时间区间</div>
+            <div class="date-range">
+              <label class="date-control" for="startsAt">
+                <span>开始</span>
+                <input id="startsAt" type="datetime-local" step="60" />
+              </label>
+              <span class="date-separator">至</span>
+              <label class="date-control" for="endsAt">
+                <span>结束</span>
+                <input id="endsAt" type="datetime-local" step="60" />
+              </label>
+            </div>
+          </div>
+          <div class="field full status-row">
+            <label for="status">活动状态</label>
+            <div class="status-line">
+              <select id="status">
+                <option value="draft">草稿</option>
+                <option value="open">开放领取</option>
+                <option value="closed">已结束</option>
+              </select>
+              <p class="field-help">草稿不会开放领取；开放领取会按时间区间生效；已结束会停止领取。</p>
+            </div>
+          </div>
+          <label class="field full codes-field">
+            兑换码列表
+            <textarea id="codes" placeholder="一行一个兑换码"></textarea>
+          </label>
+        </div>
+        <div class="manager-actions">
+          <button class="primary" id="savePublishButton">保存、导入并生成链接</button>
+          <button class="secondary" id="importButton" type="button">导入兑换码</button>
+          <button class="secondary" id="closeButton" type="button">结束活动</button>
+          <button class="text-action" id="loadButton" type="button">刷新活动列表</button>
+        </div>
+        <div class="message" id="message"></div>
+        <div class="link-box" id="linkBox"></div>
+      </section>
+
+      <section class="panel">
+        <h2>已有活动</h2>
+        <div class="activity-list" id="activityList"></div>
+      </section>
+    </main>
+
+    <script>
+      const fields = {
+        adminToken: document.getElementById("adminToken"),
+        activityId: document.getElementById("activityId"),
+        name: document.getElementById("name"),
+        description: document.getElementById("description"),
+        useUrl: document.getElementById("useUrl"),
+        startsAt: document.getElementById("startsAt"),
+        endsAt: document.getElementById("endsAt"),
+        status: document.getElementById("status"),
+        codes: document.getElementById("codes"),
+      };
+      const message = document.getElementById("message");
+      const list = document.getElementById("activityList");
+      const linkBox = document.getElementById("linkBox");
+
+      function setMessage(text, type = "") {
+        message.textContent = text;
+        message.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function currentId() {
+        return fields.activityId.value.trim();
+      }
+
+      function headers() {
+        return { "Content-Type": "application/json", "X-Admin-Token": fields.adminToken.value.trim() };
+      }
+
+      async function api(path, options = {}) {
+        const res = await fetch(path, { headers: headers(), ...options });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || `请求失败：${res.status}`);
+        return data;
+      }
+
+      function payload() {
+        const startsAt = toOffsetIso(fields.startsAt.value);
+        const endsAt = toOffsetIso(fields.endsAt.value);
+        if (!startsAt || !endsAt) {
+          throw new Error("请选择完整的活动时间区间。");
+        }
+        if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) {
+          throw new Error("结束时间必须晚于开始时间。");
+        }
+        return {
+          activity_id: currentId(),
+          name: fields.name.value,
+          description: fields.description.value,
+          use_url: fields.useUrl.value,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          status: fields.status.value,
+        };
+      }
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function toOffsetIso(value) {
+        const match = String(value || "").match(
+          /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+        );
+        if (!match) return "";
+        const [, year, month, day, hour, minute, second = "00"] = match;
+        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+        const offsetMinutes = -date.getTimezoneOffset();
+        const sign = offsetMinutes >= 0 ? "+" : "-";
+        const absOffset = Math.abs(offsetMinutes);
+        return `${year}-${month}-${day}T${hour}:${minute}:${second}${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+      }
+
+      function toDatetimeLocalValue(value) {
+        if (!value) return "";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function fillActivity(activity) {
+        fields.activityId.value = activity.slug || "";
+        fields.name.value = activity.name || "";
+        fields.description.value = activity.description || "";
+        fields.useUrl.value = activity.use_url || "";
+        fields.startsAt.value = toDatetimeLocalValue(activity.starts_at);
+        fields.endsAt.value = toDatetimeLocalValue(activity.ends_at);
+        fields.status.value = activity.status || "draft";
+      }
+
+      function showLink(url, outputDir) {
+        linkBox.style.display = "block";
+        linkBox.textContent = `用户链接：${url}  生成目录：${outputDir}`;
+      }
+
+      async function saveActivity() {
+        const data = await api("/api/manager/activities", { method: "POST", body: JSON.stringify(payload()) });
+        fillActivity(data.activity);
+        return data.activity;
+      }
+
+      async function publishActivity() {
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/publish`, { method: "POST" });
+        showLink(data.url, data.output_dir);
+        return data;
+      }
+
+      async function saveAndPublish() {
+        await saveActivity();
+        if (fields.codes.value.trim()) {
+          await importCodes({ silent: true });
+        }
+        const published = await publishActivity();
+        setMessage("活动已保存，静态页已生成。", "ok");
+        await loadActivities();
+        return published;
+      }
+
+      async function importCodes(options = {}) {
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/codes`, {
+          method: "POST",
+          body: JSON.stringify({ codes: fields.codes.value }),
+        });
+        fields.codes.value = "";
+        if (!options.silent) {
+          setMessage(`导入完成：新增 ${data.imported_count} 条。`, "ok");
+          await loadActivities();
+        }
+        return data;
+      }
+
+      async function closeActivity() {
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/close`, { method: "POST" });
+        fillActivity(data.activity);
+        await publishActivity();
+        setMessage("活动已结束，静态页已重新生成。", "ok");
+        await loadActivities();
+      }
+
+      function renderActivities(items) {
+        list.innerHTML = "";
+        if (!items.length) {
+          list.innerHTML = '<p class="meta">暂无活动。</p>';
+          return;
+        }
+        for (const item of items) {
+          const node = document.createElement("div");
+          node.className = "activity-item";
+          node.innerHTML = `
+            <strong></strong>
+            <div class="meta"></div>
+            <button class="text-action" type="button">编辑</button>
+          `;
+          node.querySelector("strong").textContent = `${item.name} (${item.slug})`;
+          node.querySelector(".meta").textContent =
+            `状态：${item.status_text} · 剩余：${item.remaining_count} · 已领：${item.claimed_count}`;
+          node.querySelector("button").addEventListener("click", () => fillActivity(item));
+          list.appendChild(node);
+        }
+      }
+
+      async function loadActivities() {
+        const data = await api("/api/manager/activities");
+        renderActivities(data.activities || []);
+      }
+
+      document.getElementById("savePublishButton").addEventListener("click", () => saveAndPublish().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("importButton").addEventListener("click", () => importCodes().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("closeButton").addEventListener("click", () => closeActivity().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("loadButton").addEventListener("click", () => loadActivities().catch((e) => setMessage(e.message, "error")));
+    </script>
+  </body>
+</html>

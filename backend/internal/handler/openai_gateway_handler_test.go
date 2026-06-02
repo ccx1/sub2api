@@ -741,8 +741,9 @@ func (r *contentModerationHandlerSettingRepo) Delete(ctx context.Context, key st
 }
 
 type contentModerationHandlerTestRepo struct {
-	mu   sync.Mutex
-	logs []service.ContentModerationLog
+	mu             sync.Mutex
+	logs           []service.ContentModerationLog
+	requestRecords []service.ContentModerationLog
 }
 
 func (r *contentModerationHandlerTestRepo) CreateLog(ctx context.Context, log *service.ContentModerationLog) error {
@@ -766,12 +767,29 @@ func (r *contentModerationHandlerTestRepo) logSnapshot() []service.ContentModera
 	return append([]service.ContentModerationLog(nil), r.logs...)
 }
 
+func (r *contentModerationHandlerTestRepo) CreateRequestRecord(ctx context.Context, log *service.ContentModerationLog) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if log != nil {
+		r.requestRecords = append(r.requestRecords, *log)
+	}
+	return nil
+}
+
 func (r *contentModerationHandlerTestRepo) ListLogs(ctx context.Context, filter service.ContentModerationLogFilter) ([]service.ContentModerationLog, *pagination.PaginationResult, error) {
+	return nil, nil, nil
+}
+
+func (r *contentModerationHandlerTestRepo) ListRequestRecords(ctx context.Context, filter service.ContentModerationRequestRecordFilter) ([]service.ContentModerationRequestRecord, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
 
 func (r *contentModerationHandlerTestRepo) CountFlaggedByUserSince(ctx context.Context, userID int64, since time.Time) (int, error) {
 	return 0, nil
+}
+
+func (r *contentModerationHandlerTestRepo) HasRecentKeywordBlockByUserSince(ctx context.Context, userID int64, since time.Time) (bool, error) {
+	return false, nil
 }
 
 func (r *contentModerationHandlerTestRepo) CleanupExpiredLogs(ctx context.Context, hitBefore time.Time, nonHitBefore time.Time) (*service.ContentModerationCleanupResult, error) {

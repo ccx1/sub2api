@@ -80,6 +80,23 @@ func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *test
 	require.Empty(t, input.Images)
 }
 
+func TestExtractContentModerationRequestRecordInput_OpenAIChatFindsLatestUser(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"system","content":"system"},
+			{"role":"user","content":"first user"},
+			{"role":"assistant","content":"answer"},
+			{"role":"user","content":[{"type":"text","text":"latest user"}]},
+			{"role":"assistant","content":"streaming answer"}
+		]
+	}`)
+
+	input := ExtractContentModerationRequestRecordInput(ContentModerationProtocolOpenAIChat, body)
+
+	require.Equal(t, "latest user", input.Text)
+	require.Empty(t, input.Images)
+}
+
 func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsLatestUser(t *testing.T) {
 	body := []byte(`{
 		"messages": [
@@ -147,6 +164,23 @@ func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testi
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
 	require.Empty(t, input.Text)
+	require.Empty(t, input.Images)
+}
+
+func TestExtractContentModerationRequestRecordInput_ResponsesFindsLatestUserBeforeToolOutput(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"developer","content":[{"type":"input_text","text":"developer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"first user"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"latest user"}]},
+			{"type":"function_call","call_id":"call_1","name":"run","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":"done"}
+		]
+	}`)
+
+	input := ExtractContentModerationRequestRecordInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Equal(t, "latest user", input.Text)
 	require.Empty(t, input.Images)
 }
 

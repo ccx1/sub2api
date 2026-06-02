@@ -49,6 +49,7 @@ type contentModerationConfigRequest struct {
 	PreHashCheckEnabled  *bool                                 `json:"pre_hash_check_enabled"`
 	BlockedKeywords      *[]string                             `json:"blocked_keywords"`
 	KeywordBlockingMode  *string                               `json:"keyword_blocking_mode"`
+	KeywordBanMinutes    *int                                  `json:"keyword_ban_duration_minutes"`
 	ModelFilter          *service.ContentModerationModelFilter `json:"model_filter"`
 }
 
@@ -63,6 +64,11 @@ type contentModerationAPIKeyTestRequest struct {
 
 type contentModerationHashRequest struct {
 	InputHash string `json:"input_hash"`
+}
+
+type contentModerationKeywordExtractionRequest struct {
+	Text  string `json:"text"`
+	Model string `json:"model"`
 }
 
 func (h *ContentModerationHandler) GetConfig(c *gin.Context) {
@@ -110,6 +116,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		PreHashCheckEnabled:  req.PreHashCheckEnabled,
 		BlockedKeywords:      req.BlockedKeywords,
 		KeywordBlockingMode:  req.KeywordBlockingMode,
+		KeywordBanMinutes:    req.KeywordBanMinutes,
 		ModelFilter:          req.ModelFilter,
 	})
 	if err != nil {
@@ -194,6 +201,71 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
+func (h *ContentModerationHandler) ListRequestRecords(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	filter := service.ContentModerationRequestRecordFilter{
+		Pagination: pagination.PaginationParams{
+			Page:      page,
+			PageSize:  pageSize,
+			SortOrder: pagination.SortOrderDesc,
+		},
+		Search: c.Query("search"),
+	}
+	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
+		groupID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || groupID <= 0 {
+			response.BadRequest(c, "Invalid group_id")
+			return
+		}
+		filter.GroupID = &groupID
+	}
+	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
+		t, _, err := parseContentModerationDate(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid from")
+			return
+		}
+		filter.From = &t
+	}
+	if raw := strings.TrimSpace(c.Query("to")); raw != "" {
+		t, dateOnly, err := parseContentModerationDate(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid to")
+			return
+		}
+		if dateOnly {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+		}
+		filter.To = &t
+	}
+	items, pageResult, err := h.service.ListRequestRecords(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
+func (h *ContentModerationHandler) ExtractKeywords(c *gin.Context) {
+	var req contentModerationKeywordExtractionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.ExtractKeywords(c.Request.Context(), service.ContentModerationKeywordExtractionInput{
+		Text:  req.Text,
+		Model: req.Model,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *ContentModerationHandler) UnbanUser(c *gin.Context) {
