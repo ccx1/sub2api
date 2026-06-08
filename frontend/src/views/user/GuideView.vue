@@ -30,6 +30,24 @@
         </div>
       </section>
 
+      <section class="rounded-lg border border-primary-200 bg-primary-50/80 p-5 shadow-sm dark:border-primary-800 dark:bg-primary-900/20 md:p-6">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">快速开始教程</h2>
+            <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-300">小白用户请直接打开金山文档，按照里面的步骤做。</p>
+          </div>
+          <a
+            :href="quickStartGuideUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-primary w-full justify-center sm:w-auto"
+          >
+            <Icon name="externalLink" size="sm" />
+            <span>打开金山文档</span>
+          </a>
+        </div>
+      </section>
+
       <div class="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside class="hidden lg:block">
           <nav class="sticky top-24 rounded-lg border border-gray-200 bg-white/90 p-3 shadow-sm dark:border-dark-700 dark:bg-dark-800/90" aria-label="使用说明目录">
@@ -175,6 +193,7 @@ interface ClientExample {
 
 const { copyToClipboard } = useClipboard()
 const activeClient = ref('claude')
+const quickStartGuideUrl = 'https://www.kdocs.cn/l/cmuLD3zCWFWq'
 
 const baseUrl = computed(() => {
   if (typeof window === 'undefined') return 'https://api.example.com'

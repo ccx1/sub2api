@@ -1,6 +1,24 @@
 <template>
   <AppLayout>
     <TablePageLayout>
+      <template #actions>
+        <div class="flex flex-col gap-3 rounded-lg border border-primary-200 bg-primary-50/80 p-4 dark:border-primary-800 dark:bg-primary-900/20 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white">快速开始教程</h2>
+            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">小白用户请直接打开金山文档，按照里面的步骤做。</p>
+          </div>
+          <a
+            :href="quickStartGuideUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-primary w-full justify-center sm:w-auto"
+          >
+            <Icon name="externalLink" size="sm" />
+            <span>打开金山文档</span>
+          </a>
+        </div>
+      </template>
+
       <template #filters>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div class="flex flex-1 flex-wrap items-center gap-3">
@@ -170,6 +188,7 @@ const channels = ref<UserAvailableChannel[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
 const selectedChannelName = ref('')
+const quickStartGuideUrl = 'https://www.kdocs.cn/l/cmuLD3zCWFWq'
 
 const filteredChannels = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
