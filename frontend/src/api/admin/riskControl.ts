@@ -42,6 +42,7 @@ export interface ContentModerationConfig {
   keyword_blocking_mode: KeywordBlockingMode
   keyword_ban_duration_minutes: number
   model_filter: ContentModerationModelFilter
+  cyber_policy_exclude_from_ban_count: boolean
 }
 
 export type ContentModerationAPIKeyStatusValue = 'unknown' | 'ok' | 'error' | 'frozen'
@@ -119,6 +120,7 @@ export interface UpdateContentModerationConfig {
   keyword_blocking_mode?: KeywordBlockingMode
   keyword_ban_duration_minutes?: number
   model_filter?: ContentModerationModelFilter
+  cyber_policy_exclude_from_ban_count?: boolean
 }
 
 export interface ContentModerationRuntimeStatus {
