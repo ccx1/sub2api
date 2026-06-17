@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
-import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
 import { resolveDocumentTitle } from '@/router/title'
-import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
+
+const AnnouncementPopup = defineAsyncComponent(() => import('@/components/common/AnnouncementPopup.vue'))
+const AdminComplianceDialog = defineAsyncComponent(() => import('@/components/admin/AdminComplianceDialog.vue'))
 
 const router = useRouter()
 const route = useRoute()
@@ -16,6 +17,10 @@ const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
+const shouldRenderAnnouncementPopup = computed(() => Boolean(announcementStore.currentPopup))
+const shouldRenderAdminComplianceDialog = computed(
+  () => authStore.isAuthenticated && authStore.isAdmin && adminComplianceStore.shouldShow
+)
 
 /**
  * Update favicon dynamically
@@ -132,6 +137,6 @@ onMounted(async () => {
   <NavigationProgress />
   <RouterView />
   <Toast />
-  <AnnouncementPopup />
-  <AdminComplianceDialog />
+  <AnnouncementPopup v-if="shouldRenderAnnouncementPopup" />
+  <AdminComplianceDialog v-if="shouldRenderAdminComplianceDialog" />
 </template>
