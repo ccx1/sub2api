@@ -16,8 +16,9 @@ import (
 
 type dashboardUsageRepoCacheProbe struct {
 	service.UsageLogRepository
-	trendCalls      atomic.Int32
-	usersTrendCalls atomic.Int32
+	trendCalls         atomic.Int32
+	usersTrendCalls    atomic.Int32
+	accountsTrendCalls atomic.Int32
 }
 
 func (r *dashboardUsageRepoCacheProbe) GetUsageTrendWithFilters(
@@ -58,10 +59,36 @@ func (r *dashboardUsageRepoCacheProbe) GetUserUsageTrend(
 	}}, nil
 }
 
+func (r *dashboardUsageRepoCacheProbe) GetAccountUsageTrendWithFilters(
+	ctx context.Context,
+	startTime, endTime time.Time,
+	granularity string,
+	userID, apiKeyID, accountID, groupID int64,
+	accountType, platform string,
+	model string,
+	requestType *int16,
+	stream *bool,
+	billingType *int8,
+	limit int,
+) ([]usagestats.AccountUsageTrendPoint, error) {
+	r.accountsTrendCalls.Add(1)
+	return []usagestats.AccountUsageTrendPoint{{
+		Date:        "2026-03-11",
+		AccountID:   1,
+		AccountName: "cache-account",
+		Requests:    2,
+		Tokens:      20,
+		Cost:        3,
+		ActualCost:  4,
+		AccountCost: 5,
+	}}, nil
+}
+
 func resetDashboardReadCachesForTest() {
 	dashboardTrendCache = newSnapshotCache(30 * time.Second)
 	dashboardUsersTrendCache = newSnapshotCache(30 * time.Second)
 	dashboardAPIKeysTrendCache = newSnapshotCache(30 * time.Second)
+	dashboardAccountsTrendCache = newSnapshotCache(30 * time.Second)
 	dashboardModelStatsCache = newSnapshotCache(30 * time.Second)
 	dashboardGroupStatsCache = newSnapshotCache(30 * time.Second)
 	dashboardSnapshotV2Cache = newSnapshotCache(30 * time.Second)
@@ -115,4 +142,36 @@ func TestDashboardHandler_GetUserUsageTrend_UsesCache(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec2.Code)
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, int32(1), repo.usersTrendCalls.Load())
+}
+
+func TestDashboardHandler_GetAccountUsageTrend_UsesCache(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	gin.SetMode(gin.TestMode)
+	repo := &dashboardUsageRepoCacheProbe{}
+	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
+	handler := NewDashboardHandler(dashboardSvc, nil)
+	router := gin.New()
+	router.GET("/admin/dashboard/accounts-trend", handler.GetAccountUsageTrend)
+
+	req1 := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?start_date=2026-03-01&end_date=2026-03-07&granularity=day&limit=8&account_type=apikey&platform=openai", nil)
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
+	require.Equal(t, http.StatusOK, rec1.Code)
+	require.Equal(t, "miss", rec1.Header().Get("X-Snapshot-Cache"))
+
+	req2 := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?start_date=2026-03-01&end_date=2026-03-07&granularity=day&limit=8&account_type=apikey&platform=openai", nil)
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	require.Equal(t, http.StatusOK, rec2.Code)
+	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
+	require.Equal(t, int32(1), repo.accountsTrendCalls.Load())
+
+	req3 := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?start_date=2026-03-01&end_date=2026-03-07&granularity=day&limit=8&account_type=oauth&platform=openai", nil)
+	rec3 := httptest.NewRecorder()
+	router.ServeHTTP(rec3, req3)
+	require.Equal(t, http.StatusOK, rec3.Code)
+	require.Equal(t, "miss", rec3.Header().Get("X-Snapshot-Cache"))
+	require.Equal(t, int32(2), repo.accountsTrendCalls.Load())
 }

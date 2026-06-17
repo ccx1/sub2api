@@ -119,6 +119,12 @@ tests
 CLAUDE.md
 .claude
 scripts
+!scripts/
+scripts/*
+!scripts/package-backend-source.bat
+!scripts/build-linux-backend.sh
+!scripts/sub2api-service.sh
+!scripts/cleanup-sub2api-logs.sh
 .code-review-state
 #openspec/
 code-reviews/
@@ -131,8 +137,11 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/legal/
+!docs/legal/*.md
 .serena/
 .codex/
 frontend/coverage/
 aicodex
 output/
+backend.zip

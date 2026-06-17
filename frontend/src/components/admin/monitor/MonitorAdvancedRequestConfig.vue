@@ -93,6 +93,7 @@
         class="input font-mono text-xs"
         style="white-space: pre; overflow-wrap: normal; overflow-x: auto;"
         spellcheck="false"
+        @input="markBodyEdited"
         @blur="commitBody"
       />
       <p v-if="bodyError" class="mt-1 text-xs text-red-500">{{ bodyError }}</p>
@@ -206,23 +207,91 @@ function removeRow(index: number) {
 // ---- Body mode + JSON ----
 const bodyText = ref(serializeBody(props.bodyOverride))
 const bodyError = ref('')
+const bodyEdited = ref(false)
 
 watch(
-  () => props.bodyOverride,
-  (v) => {
-    bodyText.value = serializeBody(v)
-    bodyError.value = ''
+  () => [props.provider, props.apiMode, props.bodyOverrideMode, props.bodyOverride] as const,
+  ([, , , body], oldValues) => {
+    const bodyChanged = !oldValues || body !== oldValues[3]
+    if (bodyEdited.value && !bodyChanged) return
+    if (props.bodyOverrideMode !== 'off' && !hasBodyOverride(body)) {
+      if (bodyChanged || bodyText.value.trim() === '') {
+        seedDefaultBody()
+      }
+      return
+    }
+    syncBodyText(body)
   },
+  { immediate: true },
 )
+
+function hasBodyOverride(body: Record<string, unknown> | null): body is Record<string, unknown> {
+  return body != null && Object.keys(body).length > 0
+}
+
+function syncBodyText(body: Record<string, unknown> | null) {
+  bodyText.value = serializeBody(body)
+  bodyError.value = ''
+  bodyEdited.value = false
+}
+
+function buildDefaultBody(mode: BodyOverrideMode = props.bodyOverrideMode): Record<string, unknown> {
+  if (props.provider === PROVIDER_OPENAI && props.apiMode === API_MODE_RESPONSES) {
+    if (mode === 'merge') {
+      return { max_output_tokens: 20 }
+    }
+    return {
+      model: 'gpt-4o-mini',
+      instructions: 'You are a health check endpoint. Reply briefly.',
+      input: 'Reply with exactly: ok',
+      max_output_tokens: 20,
+      stream: false,
+    }
+  }
+  if (props.provider === PROVIDER_OPENAI) {
+    if (mode === 'merge') {
+      return { max_tokens: 20 }
+    }
+    return {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Reply with exactly: ok' }],
+      max_tokens: 20,
+      stream: false,
+    }
+  }
+  if (mode === 'merge') {
+    return { system: 'You are Claude Code...' }
+  }
+  return {
+    model: 'claude-x',
+    messages: [{ role: 'user', content: 'hi' }],
+    max_tokens: 10,
+  }
+}
+
+function seedDefaultBody(mode: BodyOverrideMode = props.bodyOverrideMode) {
+  const body = buildDefaultBody(mode)
+  bodyText.value = JSON.stringify(body, null, 2)
+  bodyError.value = ''
+  bodyEdited.value = false
+  emit('update:bodyOverride', body)
+}
+
+function markBodyEdited() {
+  if (props.bodyOverrideMode !== 'off') {
+    bodyEdited.value = true
+  }
+}
 
 function commitBody() {
   if (props.bodyOverrideMode === 'off') {
+    syncBodyText(null)
+    emit('update:bodyOverride', null)
     return
   }
   const trimmed = bodyText.value.trim()
   if (trimmed === '') {
-    emit('update:bodyOverride', null)
-    bodyError.value = ''
+    seedDefaultBody()
     return
   }
   try {
@@ -233,6 +302,7 @@ function commitBody() {
     }
     emit('update:bodyOverride', parsed as Record<string, unknown>)
     bodyError.value = ''
+    bodyEdited.value = false
   } catch (e) {
     bodyError.value =
       t('admin.channelMonitor.advanced.bodyJsonError') +
@@ -251,6 +321,7 @@ function formatBody() {
     // 同步把校验过的对象提交，避免格式化后焦点未移走时父组件读到旧值
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       emit('update:bodyOverride', parsed as Record<string, unknown>)
+      bodyEdited.value = false
     }
   } catch (e) {
     bodyError.value =
@@ -269,7 +340,16 @@ function updateBodyMode(mode: BodyOverrideMode) {
   emit('update:bodyOverrideMode', mode)
   // 切换到 off 时清掉 body（提示用户）
   if (mode === 'off') {
+    syncBodyText(null)
     emit('update:bodyOverride', null)
+    return
+  }
+  if (
+    !hasBodyOverride(props.bodyOverride) &&
+    !bodyEdited.value &&
+    bodyText.value.trim() === ''
+  ) {
+    seedDefaultBody(mode)
   }
 }
 
@@ -299,21 +379,6 @@ const bodyModeHint = computed(() => {
 })
 
 const bodyPlaceholder = computed(() => {
-  if (props.provider === PROVIDER_OPENAI && props.apiMode === API_MODE_RESPONSES) {
-    if (props.bodyOverrideMode === 'merge') {
-      return '{\n  "max_output_tokens": 20\n}'
-    }
-    return '{\n  "model": "gpt-4o-mini",\n  "instructions": "You are a health check endpoint. Reply briefly.",\n  "input": "Reply with exactly: ok",\n  "max_output_tokens": 20,\n  "stream": false\n}'
-  }
-  if (props.provider === PROVIDER_OPENAI) {
-    if (props.bodyOverrideMode === 'merge') {
-      return '{\n  "max_tokens": 20\n}'
-    }
-    return '{\n  "model": "gpt-4o-mini",\n  "messages": [{"role":"user","content":"Reply with exactly: ok"}],\n  "max_tokens": 20,\n  "stream": false\n}'
-  }
-  if (props.bodyOverrideMode === 'merge') {
-    return '{\n  "system": "You are Claude Code..."\n}'
-  }
-  return '{\n  "model": "claude-x",\n  "messages": [{"role":"user","content":"hi"}],\n  "max_tokens": 10\n}'
+  return JSON.stringify(buildDefaultBody(), null, 2)
 })
 </script>

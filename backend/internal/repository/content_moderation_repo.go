@@ -71,6 +71,39 @@ INSERT INTO content_moderation_logs (
 	return nil
 }
 
+func (r *contentModerationRepository) CreateRequestRecord(ctx context.Context, log *service.ContentModerationLog) error {
+	if log == nil {
+		return nil
+	}
+	var userID any
+	if log.UserID != nil {
+		userID = *log.UserID
+	}
+	var apiKeyID any
+	if log.APIKeyID != nil {
+		apiKeyID = *log.APIKeyID
+	}
+	var groupID any
+	if log.GroupID != nil {
+		groupID = *log.GroupID
+	}
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO api_key_request_records (
+    request_id, user_id, user_email, api_key_id, api_key_name, group_id, group_name,
+    endpoint, provider, model, input_excerpt
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11
+) RETURNING id, created_at`,
+		log.RequestID, userID, log.UserEmail, apiKeyID, log.APIKeyName, groupID, log.GroupName,
+		log.Endpoint, log.Provider, log.Model, log.InputExcerpt,
+	).Scan(&log.ID, &log.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert api key request record: %w", err)
+	}
+	return nil
+}
+
 func (r *contentModerationRepository) ListLogs(ctx context.Context, filter service.ContentModerationLogFilter) ([]service.ContentModerationLog, *pagination.PaginationResult, error) {
 	where, args := buildContentModerationLogWhere(filter)
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
@@ -177,10 +210,86 @@ LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
 	return items, paginationResultFromTotal(total, params), nil
 }
 
-func (r *contentModerationRepository) CountFlaggedByUserSince(ctx context.Context, userID int64, since time.Time) (int, error) {
+func (r *contentModerationRepository) ListRequestRecords(ctx context.Context, filter service.ContentModerationRequestRecordFilter) ([]service.ContentModerationRequestRecord, *pagination.PaginationResult, error) {
+	where, args := buildContentModerationRequestRecordWhere(filter)
+	whereSQL := "WHERE " + strings.Join(where, " AND ")
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_key_request_records r "+whereSQL, args...).Scan(&total); err != nil {
+		return nil, nil, fmt.Errorf("count content moderation request records: %w", err)
+	}
+
+	params := filter.Pagination
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = 10
+	}
+	if params.PageSize > 100 {
+		params.PageSize = 100
+	}
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, params.Limit(), params.Offset())
+	rows, err := r.db.QueryContext(ctx, `
+SELECT
+    r.id, r.request_id, r.group_id, r.group_name, r.user_id, r.user_email,
+    r.api_key_id, r.api_key_name, r.input_excerpt, r.model, r.created_at
+FROM api_key_request_records r `+whereSQL+`
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
+		queryArgs...,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list content moderation request records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	items := make([]service.ContentModerationRequestRecord, 0)
+	for rows.Next() {
+		var item service.ContentModerationRequestRecord
+		var groupID, userID, apiKeyID sql.NullInt64
+		if err := rows.Scan(
+			&item.ID,
+			&item.RequestID,
+			&groupID,
+			&item.GroupName,
+			&userID,
+			&item.UserEmail,
+			&apiKeyID,
+			&item.APIKeyName,
+			&item.InputExcerpt,
+			&item.Model,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan content moderation request record: %w", err)
+		}
+		item.Action = service.ContentModerationActionRequestRecord
+		if groupID.Valid {
+			v := groupID.Int64
+			item.GroupID = &v
+		}
+		if userID.Valid {
+			v := userID.Int64
+			item.UserID = &v
+		}
+		if apiKeyID.Valid {
+			v := apiKeyID.Int64
+			item.APIKeyID = &v
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate content moderation request records: %w", err)
+	}
+	return items, paginationResultFromTotal(total, params), nil
+}
+
+func (r *contentModerationRepository) CountFlaggedByUserSince(ctx context.Context, userID int64, since time.Time, excludeCyberPolicy bool) (int, error) {
 	if userID <= 0 {
 		return 0, nil
 	}
+	// SQL 中的 'cyber_policy' 字面量须与 service.ContentModerationActionCyberPolicy 保持一致。
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 WITH last_auto_ban AS (
@@ -192,13 +301,44 @@ SELECT COUNT(*)
 FROM content_moderation_logs
 WHERE user_id = $1
   AND flagged = TRUE
+  AND action <> 'hash_block'
+  AND ($3::bool IS FALSE OR action <> 'cyber_policy')
   AND created_at >= $2
   AND created_at > COALESCE((SELECT at FROM last_auto_ban), '-infinity'::timestamptz)
-`, userID, since).Scan(&count)
+`, userID, since, excludeCyberPolicy).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count user content moderation flagged logs: %w", err)
 	}
 	return count, nil
+}
+
+func (r *contentModerationRepository) HasRecentKeywordBlockByUserSince(ctx context.Context, userID int64, since time.Time) (bool, error) {
+	if userID <= 0 {
+		return false, nil
+	}
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM content_moderation_logs
+    WHERE user_id = $1
+      AND flagged = TRUE
+      AND action = $2
+      AND created_at >= $3
+    LIMIT 1
+)`, userID, service.ContentModerationActionKeywordBlock, since).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check recent keyword block: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *contentModerationRepository) UpdateLogEmailSent(ctx context.Context, id int64, sent bool) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE content_moderation_logs SET email_sent = $1 WHERE id = $2`, sent, id)
+	if err != nil {
+		return fmt.Errorf("update content moderation log email_sent: %w", err)
+	}
+	return nil
 }
 
 func (r *contentModerationRepository) CleanupExpiredLogs(ctx context.Context, hitBefore time.Time, nonHitBefore time.Time) (*service.ContentModerationCleanupResult, error) {
@@ -246,7 +386,7 @@ func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) (
 	case "hit", "flagged":
 		where = append(where, "l.flagged = TRUE")
 	case "blocked", "block":
-		where = append(where, "l.action = 'block'")
+		where = append(where, "l.action IN ('block', 'keyword_block', 'hash_block')")
 	case "pass", "allow":
 		where = append(where, "l.flagged = FALSE AND l.error = ''")
 	case "error":
@@ -269,6 +409,31 @@ func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) (
 	}
 	if filter.To != nil && !filter.To.IsZero() {
 		add("l.created_at <= $%d", *filter.To)
+	}
+	return where, args
+}
+
+func buildContentModerationRequestRecordWhere(filter service.ContentModerationRequestRecordFilter) ([]string, []any) {
+	where := []string{"r.id IS NOT NULL", "r.api_key_id IS NOT NULL", "r.input_excerpt <> ''"}
+	args := make([]any, 0)
+	add := func(expr string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf(expr, len(args)))
+	}
+	if filter.GroupID != nil {
+		add("r.group_id = $%d", *filter.GroupID)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		like := "%" + search + "%"
+		args = append(args, like, like, like, like, like, like)
+		idx := len(args) - 5
+		where = append(where, fmt.Sprintf("(r.request_id ILIKE $%d OR r.group_name ILIKE $%d OR r.user_email ILIKE $%d OR r.api_key_name ILIKE $%d OR r.model ILIKE $%d OR r.input_excerpt ILIKE $%d)", idx, idx+1, idx+2, idx+3, idx+4, idx+5))
+	}
+	if filter.From != nil && !filter.From.IsZero() {
+		add("r.created_at >= $%d", *filter.From)
+	}
+	if filter.To != nil && !filter.To.IsZero() {
+		add("r.created_at <= $%d", *filter.To)
 	}
 	return where, args
 }

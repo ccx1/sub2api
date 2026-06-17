@@ -10,6 +10,7 @@ import type {
   ModelStat,
   GroupStat,
   ApiKeyUsageTrendPoint,
+  AccountUsageTrendPoint,
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
   UserBreakdownItem,
@@ -235,6 +236,19 @@ export interface UserTrendResponse {
   granularity: string
 }
 
+export interface AccountTrendParams extends TrendParams {
+  account_type?: string
+  platform?: string
+  limit?: number
+}
+
+export interface AccountTrendResponse {
+  trend: AccountUsageTrendPoint[]
+  start_date: string
+  end_date: string
+  granularity: string
+}
+
 export interface UserSpendingRankingParams
   extends Pick<TrendParams, 'start_date' | 'end_date'> {
   limit?: number
@@ -247,6 +261,20 @@ export interface UserSpendingRankingParams
  */
 export async function getUserUsageTrend(params?: UserTrendParams): Promise<UserTrendResponse> {
   const { data } = await apiClient.get<UserTrendResponse>('/admin/dashboard/users-trend', {
+    params
+  })
+  return data
+}
+
+/**
+ * Get account usage trend data.
+ * @param params - Query parameters for filtering
+ * @returns Account usage trend data
+ */
+export async function getAccountUsageTrend(
+  params?: AccountTrendParams
+): Promise<AccountTrendResponse> {
+  const { data } = await apiClient.get<AccountTrendResponse>('/admin/dashboard/accounts-trend', {
     params
   })
   return data
@@ -331,6 +359,7 @@ export const dashboardAPI = {
   getSnapshotV2,
   getApiKeyUsageTrend,
   getUserUsageTrend,
+  getAccountUsageTrend,
   getUserSpendingRanking,
   getBatchUsersUsage,
   getBatchApiKeysUsage

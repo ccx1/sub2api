@@ -1,0 +1,160 @@
+.manager-shell {
+  width: min(100%, 980px);
+}
+
+.manager-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.date-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.date-control {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.date-control span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.date-separator {
+  display: inline-grid;
+  place-items: center;
+  min-height: 48px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+select,
+textarea {
+  width: 100%;
+  border: 1px solid #e5b29e;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  background: #fff;
+}
+
+select {
+  min-height: 44px;
+}
+
+.status-row {
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+}
+
+.status-row label {
+  margin: 0;
+}
+
+.status-line {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.field-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.codes-field textarea {
+  min-height: 164px;
+}
+
+textarea {
+  min-height: 128px;
+  resize: vertical;
+  font-family: Consolas, "Liberation Mono", monospace;
+}
+
+.manager-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.link-box {
+  display: none;
+  border: 1px dashed var(--gold);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+
+.activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.activity-item strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.activity-link {
+  overflow-wrap: anywhere;
+  color: var(--primary);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .manager-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .date-range,
+  .status-row,
+  .status-line {
+    grid-template-columns: 1fr;
+  }
+
+  .date-separator {
+    min-height: auto;
+  }
+}

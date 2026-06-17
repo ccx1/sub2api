@@ -1,0 +1,37 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8099,
+    "public_base_url": "http://127.0.0.1:8099"
+  },
+  "database": {
+    "path": "redeem_claim.db"
+  },
+  "publisher": {
+    "output_dir": "public",
+    "public_base_url": "https://example.com/redeem",
+    "api_base_url": ""
+  },
+  "manager": {
+    "local_only": true
+  },
+  "sub2api": {
+    "base_url": "http://127.0.0.1:8081/api/v1",
+    "verify_mode": "admin_users_api",
+    "auth": {
+      "mode": "login",
+      "email": "admin@example.com",
+      "password": "admin-password",
+      "access_token": "",
+      "refresh_token": "",
+      "api_key": "",
+      "turnstile_token": "",
+      "totp_code": ""
+    },
+    "timeout_seconds": 8
+  },
+  "security": {
+    "admin_token": "change-me-admin-token",
+    "allowed_origins": []
+  }
+}

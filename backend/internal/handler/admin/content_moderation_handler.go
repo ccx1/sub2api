@@ -20,34 +20,39 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 }
 
 type contentModerationConfigRequest struct {
-	Enabled              *bool     `json:"enabled"`
-	Mode                 *string   `json:"mode"`
-	BaseURL              *string   `json:"base_url"`
-	Model                *string   `json:"model"`
-	APIKey               *string   `json:"api_key"`
-	APIKeys              *[]string `json:"api_keys"`
-	APIKeysMode          string    `json:"api_keys_mode"`
-	DeleteAPIKeyHashes   *[]string `json:"delete_api_key_hashes"`
-	ClearAPIKey          bool      `json:"clear_api_key"`
-	TimeoutMS            *int      `json:"timeout_ms"`
-	SampleRate           *int      `json:"sample_rate"`
-	AllGroups            *bool     `json:"all_groups"`
-	GroupIDs             *[]int64  `json:"group_ids"`
-	RecordNonHits        *bool     `json:"record_non_hits"`
-	WorkerCount          *int      `json:"worker_count"`
-	QueueSize            *int      `json:"queue_size"`
-	BlockStatus          *int      `json:"block_status"`
-	BlockMessage         *string   `json:"block_message"`
-	EmailOnHit           *bool     `json:"email_on_hit"`
-	AutoBanEnabled       *bool     `json:"auto_ban_enabled"`
-	BanThreshold         *int      `json:"ban_threshold"`
-	ViolationWindowHours *int      `json:"violation_window_hours"`
-	RetryCount           *int      `json:"retry_count"`
-	HitRetentionDays     *int      `json:"hit_retention_days"`
-	NonHitRetentionDays  *int      `json:"non_hit_retention_days"`
-	PreHashCheckEnabled  *bool     `json:"pre_hash_check_enabled"`
-	BlockedKeywords      *[]string `json:"blocked_keywords"`
-	KeywordBlockingMode  *string   `json:"keyword_blocking_mode"`
+	Enabled                        *bool                                 `json:"enabled"`
+	Mode                           *string                               `json:"mode"`
+	BaseURL                        *string                               `json:"base_url"`
+	Model                          *string                               `json:"model"`
+	APIKey                         *string                               `json:"api_key"`
+	APIKeys                        *[]string                             `json:"api_keys"`
+	APIKeysMode                    string                                `json:"api_keys_mode"`
+	DeleteAPIKeyHashes             *[]string                             `json:"delete_api_key_hashes"`
+	ClearAPIKey                    bool                                  `json:"clear_api_key"`
+	TimeoutMS                      *int                                  `json:"timeout_ms"`
+	SampleRate                     *int                                  `json:"sample_rate"`
+	AllGroups                      *bool                                 `json:"all_groups"`
+	GroupIDs                       *[]int64                              `json:"group_ids"`
+	RecordNonHits                  *bool                                 `json:"record_non_hits"`
+	RequestRecordsEnabled          *bool                                 `json:"request_records_enabled"`
+	Thresholds                     *map[string]float64                   `json:"thresholds"`
+	WorkerCount                    *int                                  `json:"worker_count"`
+	QueueSize                      *int                                  `json:"queue_size"`
+	BlockStatus                    *int                                  `json:"block_status"`
+	BlockMessage                   *string                               `json:"block_message"`
+	EmailOnHit                     *bool                                 `json:"email_on_hit"`
+	AutoBanEnabled                 *bool                                 `json:"auto_ban_enabled"`
+	BanThreshold                   *int                                  `json:"ban_threshold"`
+	ViolationWindowHours           *int                                  `json:"violation_window_hours"`
+	CyberPolicyExcludeFromBanCount *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
+	RetryCount                     *int                                  `json:"retry_count"`
+	HitRetentionDays               *int                                  `json:"hit_retention_days"`
+	NonHitRetentionDays            *int                                  `json:"non_hit_retention_days"`
+	PreHashCheckEnabled            *bool                                 `json:"pre_hash_check_enabled"`
+	BlockedKeywords                *[]string                             `json:"blocked_keywords"`
+	KeywordBlockingMode            *string                               `json:"keyword_blocking_mode"`
+	KeywordBanMinutes              *int                                  `json:"keyword_ban_duration_minutes"`
+	ModelFilter                    *service.ContentModerationModelFilter `json:"model_filter"`
 }
 
 type contentModerationAPIKeyTestRequest struct {
@@ -61,6 +66,11 @@ type contentModerationAPIKeyTestRequest struct {
 
 type contentModerationHashRequest struct {
 	InputHash string `json:"input_hash"`
+}
+
+type contentModerationKeywordExtractionRequest struct {
+	Text  string `json:"text"`
+	Model string `json:"model"`
 }
 
 func (h *ContentModerationHandler) GetConfig(c *gin.Context) {
@@ -79,34 +89,39 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
-		Enabled:              req.Enabled,
-		Mode:                 req.Mode,
-		BaseURL:              req.BaseURL,
-		Model:                req.Model,
-		APIKey:               req.APIKey,
-		APIKeys:              req.APIKeys,
-		APIKeysMode:          req.APIKeysMode,
-		DeleteAPIKeyHashes:   req.DeleteAPIKeyHashes,
-		ClearAPIKey:          req.ClearAPIKey,
-		TimeoutMS:            req.TimeoutMS,
-		SampleRate:           req.SampleRate,
-		AllGroups:            req.AllGroups,
-		GroupIDs:             req.GroupIDs,
-		RecordNonHits:        req.RecordNonHits,
-		WorkerCount:          req.WorkerCount,
-		QueueSize:            req.QueueSize,
-		BlockStatus:          req.BlockStatus,
-		BlockMessage:         req.BlockMessage,
-		EmailOnHit:           req.EmailOnHit,
-		AutoBanEnabled:       req.AutoBanEnabled,
-		BanThreshold:         req.BanThreshold,
-		ViolationWindowHours: req.ViolationWindowHours,
-		RetryCount:           req.RetryCount,
-		HitRetentionDays:     req.HitRetentionDays,
-		NonHitRetentionDays:  req.NonHitRetentionDays,
-		PreHashCheckEnabled:  req.PreHashCheckEnabled,
-		BlockedKeywords:      req.BlockedKeywords,
-		KeywordBlockingMode:  req.KeywordBlockingMode,
+		Enabled:                        req.Enabled,
+		Mode:                           req.Mode,
+		BaseURL:                        req.BaseURL,
+		Model:                          req.Model,
+		APIKey:                         req.APIKey,
+		APIKeys:                        req.APIKeys,
+		APIKeysMode:                    req.APIKeysMode,
+		DeleteAPIKeyHashes:             req.DeleteAPIKeyHashes,
+		ClearAPIKey:                    req.ClearAPIKey,
+		TimeoutMS:                      req.TimeoutMS,
+		SampleRate:                     req.SampleRate,
+		AllGroups:                      req.AllGroups,
+		GroupIDs:                       req.GroupIDs,
+		RecordNonHits:                  req.RecordNonHits,
+		RequestRecordsEnabled:          req.RequestRecordsEnabled,
+		Thresholds:                     req.Thresholds,
+		WorkerCount:                    req.WorkerCount,
+		QueueSize:                      req.QueueSize,
+		BlockStatus:                    req.BlockStatus,
+		BlockMessage:                   req.BlockMessage,
+		EmailOnHit:                     req.EmailOnHit,
+		AutoBanEnabled:                 req.AutoBanEnabled,
+		BanThreshold:                   req.BanThreshold,
+		ViolationWindowHours:           req.ViolationWindowHours,
+		CyberPolicyExcludeFromBanCount: req.CyberPolicyExcludeFromBanCount,
+		RetryCount:                     req.RetryCount,
+		HitRetentionDays:               req.HitRetentionDays,
+		NonHitRetentionDays:            req.NonHitRetentionDays,
+		PreHashCheckEnabled:            req.PreHashCheckEnabled,
+		BlockedKeywords:                req.BlockedKeywords,
+		KeywordBlockingMode:            req.KeywordBlockingMode,
+		KeywordBanMinutes:              req.KeywordBanMinutes,
+		ModelFilter:                    req.ModelFilter,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -190,6 +205,71 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
+func (h *ContentModerationHandler) ListRequestRecords(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	filter := service.ContentModerationRequestRecordFilter{
+		Pagination: pagination.PaginationParams{
+			Page:      page,
+			PageSize:  pageSize,
+			SortOrder: pagination.SortOrderDesc,
+		},
+		Search: c.Query("search"),
+	}
+	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
+		groupID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || groupID <= 0 {
+			response.BadRequest(c, "Invalid group_id")
+			return
+		}
+		filter.GroupID = &groupID
+	}
+	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
+		t, _, err := parseContentModerationDate(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid from")
+			return
+		}
+		filter.From = &t
+	}
+	if raw := strings.TrimSpace(c.Query("to")); raw != "" {
+		t, dateOnly, err := parseContentModerationDate(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid to")
+			return
+		}
+		if dateOnly {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+		}
+		filter.To = &t
+	}
+	items, pageResult, err := h.service.ListRequestRecords(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
+func (h *ContentModerationHandler) ExtractKeywords(c *gin.Context) {
+	var req contentModerationKeywordExtractionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.service.ExtractKeywords(c.Request.Context(), service.ContentModerationKeywordExtractionInput{
+		Text:  req.Text,
+		Model: req.Model,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *ContentModerationHandler) UnbanUser(c *gin.Context) {

@@ -357,6 +357,14 @@ func (s *DashboardService) GetUserUsageTrend(ctx context.Context, startTime, end
 	return trend, nil
 }
 
+func (s *DashboardService) GetAccountUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, accountType, platform, model string, requestType *int16, stream *bool, billingType *int8, limit int) ([]usagestats.AccountUsageTrendPoint, error) {
+	trend, err := s.usageRepo.GetAccountUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, accountType, platform, model, requestType, stream, billingType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get account usage trend: %w", err)
+	}
+	return trend, nil
+}
+
 func (s *DashboardService) GetUserSpendingRanking(ctx context.Context, startTime, endTime time.Time, limit int) (*usagestats.UserSpendingRankingResponse, error) {
 	ranking, err := s.usageRepo.GetUserSpendingRanking(ctx, startTime, endTime, limit)
 	if err != nil {

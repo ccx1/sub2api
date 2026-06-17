@@ -37,7 +37,7 @@ function injectPublicSettings(backendUrl: string): Plugin {
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
-  const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
+  const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:10888'
   const devPort = Number(env.VITE_DEV_PORT || 3000)
 
   return {
@@ -79,6 +79,58 @@ export default defineConfig(({ mode }) => {
               id.includes('/@vue/')
             ) {
               return 'vendor-vue'
+            }
+
+            if (id.includes('/vue-i18n/') || id.includes('/@intlify/')) {
+              return 'vendor-i18n'
+            }
+
+            if (id.includes('/axios/')) {
+              return 'vendor-http'
+            }
+
+            if (id.includes('/@vueuse/')) {
+              return 'vendor-vueuse'
+            }
+
+            if (id.includes('/@tanstack/vue-virtual/')) {
+              return 'vendor-virtual'
+            }
+
+            if (id.includes('/xlsx/')) {
+              return 'vendor-xlsx'
+            }
+
+            if (id.includes('/qrcode/')) {
+              return 'vendor-qrcode'
+            }
+
+            if (id.includes('/marked/') || id.includes('/dompurify/')) {
+              return 'vendor-markdown'
+            }
+
+            if (id.includes('/@stripe/stripe-js/')) {
+              return 'vendor-stripe'
+            }
+
+            if (id.includes('/@airwallex/components-sdk/')) {
+              return 'vendor-airwallex'
+            }
+
+            if (id.includes('/file-saver/')) {
+              return 'vendor-file'
+            }
+
+            if (id.includes('/vue-draggable-plus/')) {
+              return 'vendor-dnd'
+            }
+
+            if (id.includes('/driver.js/')) {
+              return 'vendor-tour'
+            }
+
+            if (id.includes('/@lobehub/icons/')) {
+              return 'vendor-icons'
             }
 
             // UI 工具库（较大，单独分离）

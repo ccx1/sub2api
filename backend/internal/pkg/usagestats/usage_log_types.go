@@ -198,6 +198,18 @@ type APIKeyUsageTrendPoint struct {
 	Tokens   int64  `json:"tokens"`
 }
 
+// AccountUsageTrendPoint represents account usage trend data point.
+type AccountUsageTrendPoint struct {
+	Date        string  `json:"date"`
+	AccountID   int64   `json:"account_id"`
+	AccountName string  `json:"account_name"`
+	Requests    int64   `json:"requests"`
+	Tokens      int64   `json:"tokens"`
+	Cost        float64 `json:"cost"`
+	ActualCost  float64 `json:"actual_cost"`
+	AccountCost float64 `json:"account_cost"`
+}
+
 // APIKeyDailyUsagePoint represents one day of usage for a single API key.
 type APIKeyDailyUsagePoint struct {
 	Date             string  `json:"date"`
@@ -278,18 +290,20 @@ type UsageLogFilters struct {
 
 // UsageStats represents usage statistics
 type UsageStats struct {
-	TotalRequests     int64          `json:"total_requests"`
-	TotalInputTokens  int64          `json:"total_input_tokens"`
-	TotalOutputTokens int64          `json:"total_output_tokens"`
-	TotalCacheTokens  int64          `json:"total_cache_tokens"`
-	TotalTokens       int64          `json:"total_tokens"`
-	TotalCost         float64        `json:"total_cost"`
-	TotalActualCost   float64        `json:"total_actual_cost"`
-	TotalAccountCost  *float64       `json:"total_account_cost,omitempty"`
-	AverageDurationMs float64        `json:"average_duration_ms"`
-	Endpoints         []EndpointStat `json:"endpoints,omitempty"`
-	UpstreamEndpoints []EndpointStat `json:"upstream_endpoints,omitempty"`
-	EndpointPaths     []EndpointStat `json:"endpoint_paths,omitempty"`
+	TotalRequests            int64          `json:"total_requests"`
+	TotalInputTokens         int64          `json:"total_input_tokens"`
+	TotalOutputTokens        int64          `json:"total_output_tokens"`
+	TotalCacheTokens         int64          `json:"total_cache_tokens"`
+	TotalCacheCreationTokens int64          `json:"total_cache_creation_tokens"`
+	TotalCacheReadTokens     int64          `json:"total_cache_read_tokens"`
+	TotalTokens              int64          `json:"total_tokens"`
+	TotalCost                float64        `json:"total_cost"`
+	TotalActualCost          float64        `json:"total_actual_cost"`
+	TotalAccountCost         *float64       `json:"total_account_cost,omitempty"`
+	AverageDurationMs        float64        `json:"average_duration_ms"`
+	Endpoints                []EndpointStat `json:"endpoints,omitempty"`
+	UpstreamEndpoints        []EndpointStat `json:"upstream_endpoints,omitempty"`
+	EndpointPaths            []EndpointStat `json:"endpoint_paths,omitempty"`
 }
 
 // PlatformUsage 表示某用户/某 API key 在单个"有效平台"维度的用量明细。

@@ -63,8 +63,12 @@
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
+        <AccountUsageTrend
+          :trend-data="accountTrendData"
+          :loading="chartsLoading"
+        />
       </div>
-      <UsageFilters v-model="filters" :start-date="startDate" :end-date="endDate" :exporting="exporting" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+      <UsageFilters v-model="filters" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
         <template #after-reset>
           <div class="relative" ref="columnDropdownRef">
             <button
@@ -100,17 +104,36 @@
           </div>
         </template>
       </UsageFilters>
-      <UsageTable
-        :data="usageLogs"
-        :loading="loading"
-        :columns="visibleColumns"
-        :server-side-sort="true"
-        :default-sort-key="'created_at'"
-        :default-sort-order="'desc'"
-        @sort="handleSort"
-        @userClick="handleUserClick"
-      />
-      <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+      <div class="mb-4 flex gap-2 border-b border-gray-200 dark:border-dark-700">
+        <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
+          {{ t('usage.tabs.usage') }}
+        </button>
+        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrorsTab">
+          {{ t('usage.tabs.errors') }}
+        </button>
+      </div>
+      <div v-show="activeTab === 'usage'">
+        <UsageTable
+          :data="usageLogs"
+          :loading="loading"
+          :columns="visibleColumns"
+          :server-side-sort="true"
+          :default-sort-key="'created_at'"
+          :default-sort-order="'desc'"
+          @sort="handleSort"
+          @userClick="handleUserClick"
+        />
+        <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+      </div>
+      <div v-show="activeTab === 'errors'">
+        <OpsErrorLogTable
+          :rows="errRows" :total="errTotal" :loading="errLoading"
+          :page="errPage" :page-size="errPageSize"
+          @openErrorDetail="openError"
+          @update:page="onErrPage"
+          @update:pageSize="onErrPageSize" />
+        <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="'request'" />
+      </div>
     </div>
   </AppLayout>
   <UsageExportProgress :show="exportProgress.show" :progress="exportProgress.progress" :current="exportProgress.current" :total="exportProgress.total" :estimated-time="exportProgress.estimatedTime" @cancel="cancelExport" />
@@ -144,10 +167,14 @@ import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; impo
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
-import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'; import AccountUsageTrend from '@/components/charts/AccountUsageTrend.vue'
+import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
+import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
+import { listErrorLogs } from '@/api/admin/ops'
+import type { OpsErrorLog } from '@/api/admin/ops'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser, AccountUsageTrendPoint } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -156,7 +183,7 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
-const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+const trendData = ref<TrendDataPoint[]>([]); const accountTrendData = ref<AccountUsageTrendPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -192,9 +219,13 @@ const breakdownFilters = computed(() => {
   return f
 })
 
+const modelNameOptions = computed(() =>
+  Array.from(new Set(requestedModelStats.value.map((m) => m.model).filter(Boolean))).sort()
+)
+
 const handleUserClick = async (userId: number) => {
   try {
-    const user = await adminAPI.users.getById(userId)
+    const user = await adminAPI.users.getById(userId, true)
     balanceHistoryUser.value = user
     showBalanceHistoryModal.value = true
   } catch {
@@ -306,13 +337,17 @@ const loadLogs = async () => {
     if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
   } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
 }
-const loadStats = async () => {
+const loadStats = async (force = false) => {
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
-    const s = await adminAPI.usage.getStats({ ...filters.value, stream: legacyStream === null ? undefined : legacyStream })
+    const s = await adminAPI.usage.getStats({
+      ...filters.value,
+      stream: legacyStream === null ? undefined : legacyStream,
+      ...(force ? { nocache: 1 } : {}),
+    })
     if (seq !== statsReqSeq) return
     usageStats.value = s
     inboundEndpointStats.value = s.endpoints || []
@@ -329,10 +364,8 @@ const loadStats = async () => {
   }
 }
 
-const resetModelStatsCache = () => {
-  requestedModelStats.value = []
-  upstreamModelStats.value = []
-  mappingModelStats.value = []
+// 失效模型统计缓存:仅标记需要重取,保留旧数据直到新数据到达(避免刷新时图表闪空)。
+const invalidateModelStatsCache = () => {
   loadedModelSources.requested = false
   loadedModelSources.upstream = false
   loadedModelSources.mapping = false
@@ -414,25 +447,51 @@ const loadChartData = async () => {
       include_group_stats: true,
       include_users_trend: false
     })
+    const accountTrend = await adminAPI.dashboard.getAccountUsageTrend({
+      start_date: filters.value.start_date || startDate.value,
+      end_date: filters.value.end_date || endDate.value,
+      granularity: granularity.value,
+      user_id: filters.value.user_id,
+      model: filters.value.model,
+      api_key_id: filters.value.api_key_id,
+      account_id: filters.value.account_id,
+      group_id: filters.value.group_id,
+      request_type: requestType,
+      stream: legacyStream === null ? undefined : legacyStream,
+      billing_type: filters.value.billing_type,
+      limit: 10
+    })
     if (seq !== chartReqSeq) return
     trendData.value = snapshot.trend || []
+    accountTrendData.value = accountTrend.trend || []
     groupStats.value = snapshot.groups || []
-  } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
+  } catch (error) {
+    if (seq !== chartReqSeq) return
+    console.error('Failed to load chart data:', error)
+    accountTrendData.value = []
+  } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
 const applyFilters = () => {
   pagination.page = 1
-  resetModelStatsCache()
+  invalidateModelStatsCache()
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
+  errPage.value = 1
+  if (activeTab.value === 'errors') {
+    loadAdminErrors()
+  } else {
+    errRows.value = []
+  }
 }
 const refreshData = () => {
-  resetModelStatsCache()
+  invalidateModelStatsCache()
   loadLogs()
-  loadStats()
+  loadStats(true)
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
+  if (activeTab.value === 'errors') loadAdminErrors()
 }
 const resetFilters = () => {
   const range = getLast24HoursRangeDates()
@@ -454,6 +513,7 @@ const cancelExport = () => exportAbortController?.abort()
 const openCleanupDialog = () => { cleanupDialogVisible.value = true }
 const getRequestTypeLabel = (log: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(log)
+  if (requestType === 'cyber') return t('usage.cyber')
   if (requestType === 'ws_v2') return t('usage.ws')
   if (requestType === 'stream') return t('usage.stream')
   if (requestType === 'sync') return t('usage.sync')
@@ -586,6 +646,50 @@ const loadSavedColumns = () => {
   }
 }
 
+// Error tab state
+const activeTab = ref<'usage' | 'errors'>('usage')
+const errRows = ref<OpsErrorLog[]>([])
+const errLoading = ref(false)
+const errPage = ref(1)
+const errPageSize = ref(20)
+const errTotal = ref(0)
+const showErrorModal = ref(false)
+const selectedErrorId = ref<number | null>(null)
+
+// 注意：'YYYY-MM-DDT00:00:00' 无时区后缀，按本地时区解析后再转 UTC——与页面其它日期处理语义一致，刻意如此，勿改成 'T00:00:00Z'
+const toRFC3339 = (d: string | undefined, endOfDay = false): string | undefined =>
+  d ? new Date(d + (endOfDay ? 'T23:59:59.999' : 'T00:00:00')).toISOString() : undefined
+
+const loadAdminErrors = async () => {
+  errLoading.value = true
+  try {
+    const resp = await listErrorLogs({
+      page: errPage.value,
+      page_size: errPageSize.value,
+      view: 'all',
+      start_time: toRFC3339(filters.value.start_date),
+      end_time: toRFC3339(filters.value.end_date, true),
+      user_id: filters.value.user_id ?? undefined,
+      api_key_id: filters.value.api_key_id ?? undefined,
+      account_id: filters.value.account_id ?? undefined,
+      group_id: filters.value.group_id ?? undefined,
+      model: filters.value.model || undefined,
+    })
+    errRows.value = resp.items
+    errTotal.value = resp.total
+  } catch (error) {
+    console.error('Failed to load admin errors:', error)
+    appStore.showError(t('usage.errors.failedToLoad'))
+  } finally {
+    errLoading.value = false
+  }
+}
+
+const onErrPage = (p: number) => { errPage.value = p; loadAdminErrors() }
+const onErrPageSize = (s: number) => { errPageSize.value = s; errPage.value = 1; loadAdminErrors() }
+const openError = (id: number) => { selectedErrorId.value = id; showErrorModal.value = true }
+const switchToErrorsTab = () => { activeTab.value = 'errors'; if (errRows.value.length === 0) loadAdminErrors() }
+
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 
@@ -611,4 +715,6 @@ onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); do
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)
 })
+
+defineExpose({ requestedModelStats, refreshData })
 </script>

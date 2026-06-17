@@ -15,13 +15,17 @@ import (
 
 type dashboardUsageRepoCapture struct {
 	service.UsageLogRepository
-	trendRequestType *int16
-	trendStream      *bool
-	modelRequestType *int16
-	modelStream      *bool
-	rankingLimit     int
-	ranking          []usagestats.UserSpendingRankingItem
-	rankingTotal     float64
+	trendRequestType        *int16
+	trendStream             *bool
+	modelRequestType        *int16
+	modelStream             *bool
+	accountTrendRequestType *int16
+	accountTrendStream      *bool
+	accountTrendAccountType string
+	accountTrendPlatform    string
+	rankingLimit            int
+	ranking                 []usagestats.UserSpendingRankingItem
+	rankingTotal            float64
 }
 
 func (s *dashboardUsageRepoCapture) GetUsageTrendWithFilters(
@@ -52,6 +56,25 @@ func (s *dashboardUsageRepoCapture) GetModelStatsWithFilters(
 	return []usagestats.ModelStat{}, nil
 }
 
+func (s *dashboardUsageRepoCapture) GetAccountUsageTrendWithFilters(
+	ctx context.Context,
+	startTime, endTime time.Time,
+	granularity string,
+	userID, apiKeyID, accountID, groupID int64,
+	accountType, platform string,
+	model string,
+	requestType *int16,
+	stream *bool,
+	billingType *int8,
+	limit int,
+) ([]usagestats.AccountUsageTrendPoint, error) {
+	s.accountTrendRequestType = requestType
+	s.accountTrendStream = stream
+	s.accountTrendAccountType = accountType
+	s.accountTrendPlatform = platform
+	return []usagestats.AccountUsageTrendPoint{}, nil
+}
+
 func (s *dashboardUsageRepoCapture) GetUserSpendingRanking(
 	ctx context.Context,
 	startTime, endTime time.Time,
@@ -73,6 +96,7 @@ func newDashboardRequestTypeTestRouter(repo *dashboardUsageRepoCapture) *gin.Eng
 	router := gin.New()
 	router.GET("/admin/dashboard/trend", handler.GetUsageTrend)
 	router.GET("/admin/dashboard/models", handler.GetModelStats)
+	router.GET("/admin/dashboard/accounts-trend", handler.GetAccountUsageTrend)
 	router.GET("/admin/dashboard/users-ranking", handler.GetUserSpendingRanking)
 	return router
 }
@@ -147,6 +171,55 @@ func TestDashboardModelStatsInvalidStream(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDashboardAccountTrendRequestTypePriority(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?request_type=stream&stream=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.accountTrendRequestType)
+	require.Equal(t, int16(service.RequestTypeStream), *repo.accountTrendRequestType)
+	require.Nil(t, repo.accountTrendStream)
+}
+
+func TestDashboardAccountTrendInvalidRequestType(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?request_type=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDashboardAccountTrendInvalidStream(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?stream=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDashboardAccountTrendFiltersForwarded(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/accounts-trend?account_type=APIKEY&platform=OpenAI", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "apikey", repo.accountTrendAccountType)
+	require.Equal(t, "openai", repo.accountTrendPlatform)
 }
 
 func TestDashboardModelStatsInvalidModelSource(t *testing.T) {

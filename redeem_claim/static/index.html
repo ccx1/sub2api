@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iCode 兑换码领取</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <!-- REDEEM_CLAIM_STATIC_CONFIG -->
+  </head>
+  <body>
+    <main>
+      <section class="top">
+        <span class="badge">限时福利</span>
+        <h1 id="title">iCode 兑换码领取</h1>
+        <p class="subtitle" id="description">输入 iCode 账号邮箱领取活动兑换码。</p>
+        <p class="meta" id="activityMeta"></p>
+      </section>
+
+      <section class="panel claim-panel">
+        <div class="status-banner" id="statusBanner"></div>
+        <label for="email">iCode 账号邮箱</label>
+        <input id="email" autocomplete="email" inputmode="email" placeholder="name@example.com" />
+        <div class="actions">
+          <button class="primary" id="claimButton">立即领取兑换码</button>
+          <button class="text-action" id="recordsButton" type="button">查看我的兑换码</button>
+        </div>
+        <div class="message" id="message"></div>
+        <div class="code-box" id="codeBox">
+          <div class="code-value" id="codeValue"></div>
+          <button class="secondary" id="copyButton">复制</button>
+          <button class="primary use-button" id="useButton" type="button">立即使用</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>活动规则</h2>
+        <ol class="rules">
+          <li>仅限已注册的 iCode 账号邮箱参与领取。</li>
+          <li>同一活动内，每个账号邮箱只能领取一次。</li>
+          <li>兑换码数量有限，按领取成功时间先到先得。</li>
+          <li>活动到期、码量领完或管理员关闭后，将停止领取。</li>
+          <li>领取成功后可复制兑换码，也可再次输入邮箱查看记录。</li>
+        </ol>
+      </section>
+
+      <section class="panel">
+        <h2>领用记录</h2>
+        <div class="list" id="records"></div>
+      </section>
+    </main>
+
+    <script>
+      const qs = new URLSearchParams(location.search);
+      const staticConfig = window.REDEEM_CLAIM_STATIC_CONFIG || {};
+      const pathParts = location.pathname.split("/").filter(Boolean);
+      const pathActivityId = pathParts.filter((part) => part !== "activity" && part !== "index.html").pop();
+      const slug = staticConfig.activityId || qs.get("activity_id") || qs.get("activity") || pathActivityId || "default";
+      const apiBase = (staticConfig.apiBase || "").replace(/\/$/, "");
+      const emailInput = document.getElementById("email");
+      const claimButton = document.getElementById("claimButton");
+      const recordsButton = document.getElementById("recordsButton");
+      const copyButton = document.getElementById("copyButton");
+      const message = document.getElementById("message");
+      const codeBox = document.getElementById("codeBox");
+      const codeValue = document.getElementById("codeValue");
+      const useButton = document.getElementById("useButton");
+      const records = document.getElementById("records");
+      const statusBanner = document.getElementById("statusBanner");
+      let activityUseUrl = staticConfig.useUrl || "";
+      let codeVisible = false;
+
+      function setMessage(text, type) {
+        message.textContent = text || "";
+        message.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function normalizeEmail() {
+        return emailInput.value.trim().toLowerCase();
+      }
+
+      function showUseButton(show) {
+        useButton.style.display = show && activityUseUrl ? "inline-flex" : "none";
+      }
+
+      function goUse() {
+        if (activityUseUrl) location.assign(activityUseUrl);
+      }
+
+      async function api(path, options = {}) {
+        const res = await fetch(`${apiBase}${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.error || `请求失败：${res.status}`);
+        }
+        return data;
+      }
+
+      function renderRecordList(items) {
+        records.innerHTML = "";
+        if (!items.length) {
+          records.innerHTML = '<p class="meta">暂无领取记录。</p>';
+          return;
+        }
+        for (const item of items) {
+          const node = document.createElement("div");
+          node.className = "record";
+          const time = item.claimed_at ? new Date(item.claimed_at).toLocaleString() : "";
+          node.innerHTML = `
+            <div class="record-head">
+              <div class="record-code"></div>
+              <div class="record-actions">
+                <button class="secondary copy-small" type="button">复制</button>
+                <button class="primary use-small" type="button">立即使用</button>
+              </div>
+            </div>
+            <div class="record-time">${time}</div>
+          `;
+          node.querySelector(".record-code").textContent = item.code;
+          node.querySelector(".copy-small").addEventListener("click", () => copyText(item.code));
+          const recordUseButton = node.querySelector(".use-small");
+          recordUseButton.style.display = activityUseUrl ? "inline-flex" : "none";
+          recordUseButton.addEventListener("click", goUse);
+          records.appendChild(node);
+        }
+      }
+
+      async function loadActivity() {
+        const data = await api(`/api/activities/${encodeURIComponent(slug)}`);
+        const activityName = data.activity.name || staticConfig.name || "iCode 兑换码领取";
+        document.title = activityName;
+        document.getElementById("title").textContent = activityName;
+        document.getElementById("description").textContent =
+          data.activity.description || staticConfig.description || "输入 iCode 账号邮箱领取活动兑换码。";
+        activityUseUrl = data.activity.use_url || staticConfig.useUrl || "";
+        showUseButton(codeVisible);
+        const endsAt = data.activity.ends_at ? new Date(data.activity.ends_at).toLocaleString() : "未设置";
+        document.getElementById("activityMeta").textContent =
+          `状态：${data.activity.status_text} · 剩余：${data.activity.remaining_count} · 截止：${endsAt}`;
+        claimButton.disabled = !data.activity.claimable;
+        statusBanner.style.display = data.activity.claimable ? "none" : "block";
+        statusBanner.textContent = data.activity.status_text;
+        claimButton.textContent = data.activity.claimable ? "立即领取兑换码" : data.activity.status_text;
+      }
+
+      async function claim() {
+        const email = normalizeEmail();
+        if (!email) {
+          setMessage("请输入邮箱。", "error");
+          return;
+        }
+        claimButton.disabled = true;
+        setMessage("正在校验账号并领取...", "");
+        codeVisible = false;
+        codeBox.style.display = "none";
+        showUseButton(false);
+        try {
+          const data = await api(`/api/activities/${encodeURIComponent(slug)}/claim`, {
+            method: "POST",
+            body: JSON.stringify({ email }),
+          });
+          codeValue.textContent = data.claim.code;
+          codeVisible = true;
+          codeBox.style.display = "flex";
+          showUseButton(true);
+          setMessage(data.already_claimed ? "你已经领取过，本次显示原兑换码。" : "领取成功。", "ok");
+          await loadRecords();
+          await loadActivity();
+        } catch (err) {
+          setMessage(err.message, "error");
+        } finally {
+          await loadActivity().catch(() => {
+            claimButton.disabled = false;
+          });
+        }
+      }
+
+      async function loadRecords() {
+        const email = normalizeEmail();
+        if (!email) {
+          setMessage("请输入邮箱后再查看记录。", "error");
+          return;
+        }
+        const data = await api(
+          `/api/activities/${encodeURIComponent(slug)}/claims?email=${encodeURIComponent(email)}`
+        );
+        renderRecordList(data.claims || []);
+      }
+
+      async function copyText(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          setMessage("已复制到剪贴板。", "ok");
+        } catch {
+          setMessage("复制失败，请长按或手动选择兑换码。", "error");
+        }
+      }
+
+      claimButton.addEventListener("click", claim);
+      recordsButton.addEventListener("click", loadRecords);
+      copyButton.addEventListener("click", () => copyText(codeValue.textContent));
+      useButton.addEventListener("click", goUse);
+      emailInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") claim();
+      });
+
+      loadActivity().catch((err) => setMessage(err.message, "error"));
+    </script>
+  </body>
+</html>

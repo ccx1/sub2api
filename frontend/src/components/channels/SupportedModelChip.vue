@@ -113,10 +113,10 @@
             <PricingRow
               v-if="
                 model.pricing.billing_mode === BILLING_MODE_IMAGE &&
-                model.pricing.image_output_price != null
+                imageRequestPrice != null
               "
-              :label="t(prefixKey('imageOutputPrice'))"
-              :value="model.pricing.image_output_price"
+              :label="imageRequestPriceLabel"
+              :value="imageRequestPrice"
               :unit="t(prefixKey('unitPerRequest'))"
               :scale="1"
             />
@@ -225,6 +225,18 @@ const billingModeLabel = computed(() => {
     default:
       return '-'
   }
+})
+
+const imageRequestPrice = computed<number | null>(() => {
+  const pricing = props.model.pricing
+  if (!pricing || pricing.billing_mode !== BILLING_MODE_IMAGE) return null
+  return pricing.per_request_price ?? pricing.image_output_price
+})
+
+const imageRequestPriceLabel = computed(() => {
+  const pricing = props.model.pricing
+  if (pricing?.per_request_price != null) return t(prefixKey('perRequestPrice'))
+  return t(prefixKey('imageOutputPrice'))
 })
 
 function formatRange(min: number, max: number | null): string {

@@ -1,0 +1,57 @@
+# Sub2API 服务根地址。用户态接口会自动走 /api/v1，API Key 公共查询会自动走 /v1。
+[sub2api]
+base_url = "https://sub2api.example.com"
+timezone = "Asia/Shanghai"
+timeout_seconds = 30
+verify_ssl = true
+
+# 推荐两种模式：
+# 1. api_key：直接监控单个 key
+# 2. token：登录用户态，监控自己名下多把 key
+# password 模式仅适用于未开启 Turnstile / 2FA 的场景。
+[auth]
+mode = "api_key" # api_key | token | password
+api_key = ""
+api_key_alias = "my-key"
+access_token = ""
+refresh_token = ""
+email = ""
+password = ""
+session_path = ".runtime/auth_session.json"
+
+# token/password 模式下，账号下有很多 key 时，用这里圈定“自己的 key”
+[keys]
+active_only = true
+include_ids = []
+include_names = []
+include_name_contains = ["alice"]
+exclude_ids = []
+exclude_names = []
+
+[report]
+day_offset = 0
+history_days = 1
+sort_by = "actual_cost" # actual_cost | requests | total_tokens
+max_keys_in_message = 20
+quiet_if_no_usage = false
+
+[thresholds]
+total_actual_cost = 20.0
+total_requests = 5000
+total_tokens = 1000000
+per_key_actual_cost = 5.0
+per_key_requests = 1000
+per_key_total_tokens = 300000
+
+[dingtalk]
+enabled = true
+webhook = "https://oapi.dingtalk.com/robot/send?access_token=replace_me"
+secret = ""
+keyword = "Token额度"
+at_all = false
+at_mobiles = []
+
+[state]
+path = ".runtime/monitor_state.json"
+dedupe_daily_summary = true
+dedupe_threshold_alert = true
