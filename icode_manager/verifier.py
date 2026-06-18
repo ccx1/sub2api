@@ -3,22 +3,30 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http import HTTPStatus
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from affiliate_admin import connect_db, load_database_config
 from common import AppError
 from sub2api_auth import Sub2APIAuth
 
 
 class UserVerifier:
     def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.auth = Sub2APIAuth(config)
+        self.app_config = config
+        self.config = config.get("sub2api", config)
+        self.auth = Sub2APIAuth(self.config)
+        self.db_config = load_database_config(config)
 
     def exists(self, email: str) -> bool:
+        return self.find_user(email) is not None
+
+    def find_user(self, email: str) -> Optional[Dict[str, Any]]:
         email = email.strip().lower()
         mode = self.config.get("verify_mode", "admin_users_api")
         if mode == "disabled":
-            return True
+            return {"id": 0, "email": email}
+        if mode == "database":
+            return self.find_user_from_database(email)
         if mode != "admin_users_api":
             raise AppError(HTTPStatus.INTERNAL_SERVER_ERROR, f"不支持的校验模式：{mode}")
 
@@ -27,7 +35,10 @@ class UserVerifier:
             raise AppError(HTTPStatus.INTERNAL_SERVER_ERROR, "未配置 sub2api.base_url")
 
         payload = self.fetch_users(base_url, email)
-        return any(str(item.get("email", "")).strip().lower() == email for item in extract_user_items(payload))
+        for item in extract_user_items(payload):
+            if str(item.get("email", "")).strip().lower() == email:
+                return item
+        return None
 
     def fetch_users(self, base_url: str, email: str) -> Any:
         query = urllib.parse.urlencode({"page": 1, "page_size": 1, "search": email})
@@ -52,6 +63,29 @@ class UserVerifier:
         req = urllib.request.Request(url, headers=self.auth.headers(force_refresh=force_refresh))
         with urllib.request.urlopen(req, timeout=float(self.config.get("timeout_seconds", 8))) as resp:
             return json.loads(resp.read().decode("utf-8"))
+
+    def find_user_from_database(self, email: str) -> Optional[Dict[str, Any]]:
+        with connect_db(self.db_config) as conn:
+            rows = conn.execute(
+                """
+                SELECT id,
+                       email,
+                       COALESCE(username, '') AS username,
+                       status,
+                       deleted_at,
+                       total_recharged
+                FROM users
+                WHERE lower(email) = lower(%s)
+                ORDER BY id
+                """,
+                (email,),
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        row = dict(rows[0])
+        if row.get("deleted_at"):
+            return None
+        return row
 
 
 def extract_user_items(payload: Any) -> List[Dict[str, Any]]:

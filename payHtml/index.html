@@ -6,18 +6,19 @@
   <title>储值卡充值跳转页</title>
   <style>
     :root {
-      --bg-start: #fff7ed;
-      --bg-end: #fff;
-      --panel: rgba(255, 255, 255, 0.92);
-      --line: rgba(148, 163, 184, 0.24);
-      --text-main: #172554;
+      --page-bg: #f7f9fc;
+      --surface: #fff;
+      --surface-muted: #f8fafc;
+      --line: #e2e8f0;
+      --text-main: #111827;
       --text-sub: #475569;
       --text-soft: #64748b;
-      --accent: #f97316;
-      --accent-strong: #ea580c;
-      --badge: #7c2d12;
-      --shadow: 0 18px 50px rgba(15, 23, 42, 0.10);
-      --radius: 24px;
+      --accent-soft: #fff7ed;
+      --accent-text: #9a3412;
+      --shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+      --card-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+      --radius: 14px;
+      --card-radius: 8px;
       --font-main: "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
 
@@ -28,43 +29,30 @@
       min-height: 100vh;
       font-family: var(--font-main);
       color: var(--text-main);
-      background:
-        radial-gradient(circle at top left, rgba(249, 115, 22, 0.18), transparent 26%),
-        linear-gradient(180deg, var(--bg-start), var(--bg-end));
+      background: linear-gradient(180deg, var(--page-bg) 0%, #eef4ff 46%, #fff 100%);
     }
 
     .shell {
-      width: min(1120px, calc(100% - 32px));
+      width: min(1160px, calc(100% - 32px));
       margin: 0 auto;
       padding: 36px 0 48px;
     }
 
     .hero,
     .footer {
-      backdrop-filter: blur(12px);
-      background: var(--panel);
+      background: var(--surface);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
 
     .hero {
-      position: relative;
-      overflow: hidden;
-      padding: 28px 28px 24px;
-      margin-bottom: 20px;
-    }
-
-    .hero::after {
-      content: "";
-      position: absolute;
-      right: -40px;
-      top: -48px;
-      width: 180px;
-      height: 180px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(249, 115, 22, 0.28), transparent 66%);
-      pointer-events: none;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 24px;
+      padding: 32px;
+      margin-bottom: 30px;
     }
 
     .eyebrow {
@@ -73,12 +61,10 @@
       gap: 8px;
       padding: 8px 12px;
       border-radius: 999px;
-      background: rgba(255, 237, 213, 0.92);
-      color: var(--badge);
+      background: var(--accent-soft);
+      color: var(--accent-text);
       font-size: 12px;
       font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
     }
 
     h1 {
@@ -97,81 +83,191 @@
     .hero-meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 20px;
+      justify-content: flex-end;
+      gap: 10px;
+      max-width: 340px;
     }
 
     .meta-chip {
-      padding: 10px 14px;
+      padding: 9px 12px;
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid rgba(249, 115, 22, 0.18);
-      color: var(--text-soft);
-      font-size: 13px;
-    }
-
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 18px;
-    }
-
-    .card {
-      display: block;
-      width: 100%;
-      padding: 22px;
+      background: var(--surface-muted);
       border: 1px solid var(--line);
-      border-radius: 22px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      text-align: left;
-      color: inherit;
-      cursor: pointer;
-      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+      color: var(--text-sub);
+      font-size: 13px;
+      font-weight: 700;
     }
 
-    .card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(249, 115, 22, 0.35);
-      box-shadow: 0 24px 45px rgba(234, 88, 12, 0.14);
+    .sections {
+      display: grid;
+      gap: 32px;
     }
 
-    .card:focus-visible {
-      outline: 3px solid rgba(249, 115, 22, 0.26);
-      outline-offset: 3px;
+    .product-section {
+      --section-accent: #f97316;
+      --section-soft: #fff7ed;
+      --section-border: #fed7aa;
+      --section-text: #9a3412;
     }
 
-    .card-tag {
-      display: inline-block;
+    .product-section.theme-blue {
+      --section-accent: #2563eb;
+      --section-soft: #eff6ff;
+      --section-border: #bfdbfe;
+      --section-text: #1e3a8a;
+    }
+
+    .product-section.theme-emerald {
+      --section-accent: #059669;
+      --section-soft: #ecfdf5;
+      --section-border: #a7f3d0;
+      --section-text: #064e3b;
+    }
+
+    .product-section.theme-rose {
+      --section-accent: #e11d48;
+      --section-soft: #fff1f2;
+      --section-border: #fecdd3;
+      --section-text: #9f1239;
+    }
+
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding-bottom: 14px;
       margin-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-kicker {
+      display: inline-flex;
+      align-items: center;
       padding: 6px 10px;
       border-radius: 999px;
-      background: rgba(249, 115, 22, 0.12);
-      color: var(--badge);
+      background: var(--section-soft);
+      border: 1px solid var(--section-border);
+      color: var(--section-text);
       font-size: 12px;
       font-weight: 700;
     }
 
+    .section-title {
+      margin: 10px 0 0;
+      font-size: 25px;
+      line-height: 1.25;
+    }
+
+    .section-desc {
+      max-width: 760px;
+      margin: 8px 0 0;
+      color: var(--text-sub);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .section-count {
+      align-self: flex-start;
+      white-space: nowrap;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      color: var(--text-soft);
+      font-size: 12px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      min-height: 190px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--card-radius);
+      background: var(--surface);
+      box-shadow: var(--card-shadow);
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: var(--section-border);
+      background: linear-gradient(180deg, #fff, var(--section-soft));
+      box-shadow: 0 18px 36px rgba(15, 23, 42, 0.10);
+    }
+
+    .card:focus-visible {
+      outline: 3px solid var(--section-border);
+      outline-offset: 3px;
+    }
+
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .card-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--section-soft);
+      color: var(--section-text);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .card-price {
+      color: var(--section-accent);
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
     .card-title {
       margin: 0 0 8px;
-      font-size: 22px;
+      font-size: 20px;
       font-weight: 700;
       line-height: 1.25;
     }
 
     .card-desc {
-      min-height: 48px;
-      margin: 0 0 22px;
+      flex: 1;
+      margin: 0;
       color: var(--text-sub);
       font-size: 14px;
       line-height: 1.6;
+    }
+
+    .card-meta {
+      margin: 14px 0 0;
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.5;
     }
 
     .card-action {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      color: var(--accent-strong);
+      gap: 14px;
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--section-accent);
       font-weight: 700;
       font-size: 14px;
     }
@@ -186,16 +282,31 @@
 
     .empty {
       padding: 28px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.86);
-      border: 1px dashed rgba(249, 115, 22, 0.28);
+      border-radius: var(--card-radius);
+      background: var(--surface);
+      border: 1px dashed var(--line);
       color: var(--text-sub);
       text-align: center;
     }
 
+    @media (max-width: 1024px) {
+      .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 760px) {
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
     @media (max-width: 640px) {
       .shell { width: min(100% - 24px, 1120px); padding-top: 24px; }
-      .hero { padding: 22px 20px; }
+      .hero {
+        grid-template-columns: 1fr;
+        padding: 22px 20px;
+      }
+      .hero-meta { justify-content: flex-start; max-width: none; }
+      .section-heading { display: block; }
+      .section-count { display: inline-flex; margin-top: 12px; }
+      .cards { grid-template-columns: 1fr; }
       .card { padding: 18px; }
       .card-title { font-size: 20px; }
     }
@@ -204,65 +315,163 @@
 <body>
   <main class="shell">
     <section class="hero">
-      <span class="eyebrow">欢迎购买iCode兑换码</span>
-      <h1 id="page-title">兑换码购买</h1>
-      <p id="page-subtitle" class="hero-copy"></p>
-      <div class="hero-meta">
-        <span class="meta-chip" id="open-mode-chip"></span>
-        <span class="meta-chip" id="frame-mode-chip"></span>
+      <div>
+        <span class="eyebrow" id="page-eyebrow">欢迎购买 iCode 兑换码</span>
+        <h1 id="page-title">兑换码购买</h1>
+        <p id="page-subtitle" class="hero-copy"></p>
       </div>
+      <div class="hero-meta" id="hero-badges" aria-label="页面要点"></div>
     </section>
 
-    <section id="cards" class="cards" aria-label="兑换码购买列表"></section>
+    <div id="sections" class="sections" aria-label="兑换码购买板块"></div>
 
-    <section class="footer">
+    <footer class="footer">
       <div id="page-hint"></div>
       <div id="page-footer"></div>
-    </section>
+    </footer>
   </main>
 
   <script src="./config.js"></script>
   <script>
     const config = window.PAY_PAGE_CONFIG || {}
     const openMode = normalizeOpenMode(config.openMode)
-    const cardsContainer = document.getElementById('cards')
-    const isInIframe = window.self !== window.top
+    const sectionsContainer = document.getElementById('sections')
 
+    document.getElementById('page-eyebrow').textContent = config.pageEyebrow || '欢迎购买 iCode 兑换码'
     document.getElementById('page-title').textContent = config.pageTitle || '储值卡充值'
     document.getElementById('page-subtitle').textContent =
       config.pageSubtitle || '请选择要跳转的储值卡页面。'
     document.getElementById('page-hint').textContent =
-      config.pageHint || '修改 payHtml/config.js 中的 items 即可替换卡片内容。'
+      config.pageHint || '下单前请确认套餐说明和到账规则。'
     document.getElementById('page-footer').textContent =
-      config.footerText || '点击卡片后将跳转到配置中的充值地址。'
-    document.getElementById('open-mode-chip').textContent = `跳转方式：${modeLabel(openMode)}`
-    document.getElementById('frame-mode-chip').textContent =
-      isInIframe ? '当前运行：iframe 内' : '当前运行：独立页面'
+      config.footerText || '如支付后未及时到账，请保留订单信息并联系站点客服。'
 
-    if (!Array.isArray(config.items) || config.items.length === 0) {
-      cardsContainer.innerHTML = '<div class="empty">当前没有可用的充值卡，请先配置 payHtml/config.js。</div>'
+    renderHeroBadges(Array.isArray(config.heroBadges)
+      ? config.heroBadges
+      : ['多档可选', '购买后兑换', '移动端友好'])
+
+    const sections = normalizeSections(config)
+    if (sections.length === 0) {
+      sectionsContainer.innerHTML = '<div class="empty">当前没有可用的充值卡，请先配置 payHtml/config.js。</div>'
     } else {
       const fragment = document.createDocumentFragment()
-      config.items.forEach(function (item, index) {
-        const button = document.createElement('button')
-        button.type = 'button'
-        button.className = 'card'
-        button.innerHTML = [
-          `<span class="card-tag">${escapeHtml(item.tag || ('套餐 ' + (index + 1)))}</span>`,
-          `<h2 class="card-title">${escapeHtml(item.name || '未命名套餐')}</h2>`,
-          `<p class="card-desc">${escapeHtml(item.desc || '请在配置文件中补充说明文字。')}</p>`,
-          '<div class="card-action"><span>立即前往</span><span>→</span></div>',
-        ].join('')
-        button.addEventListener('click', function () {
-          if (!item.url) {
-            window.alert('当前卡片未配置跳转地址，请先修改 payHtml/config.js。')
-            return
-          }
-          openTarget(item.url, normalizeOpenMode(item.openMode || openMode))
-        })
-        fragment.appendChild(button)
+      sections.forEach(function (section, index) {
+        fragment.appendChild(renderSection(section, index))
       })
-      cardsContainer.appendChild(fragment)
+      sectionsContainer.appendChild(fragment)
+    }
+
+    function renderHeroBadges(badges) {
+      const badgesContainer = document.getElementById('hero-badges')
+      const items = badges.filter(function (badge) { return String(badge || '').trim() })
+      if (items.length === 0) {
+        badgesContainer.hidden = true
+        return
+      }
+
+      const fragment = document.createDocumentFragment()
+      items.forEach(function (badge) {
+        const chip = document.createElement('span')
+        chip.className = 'meta-chip'
+        chip.textContent = badge
+        fragment.appendChild(chip)
+      })
+      badgesContainer.appendChild(fragment)
+    }
+
+    function normalizeSections(pageConfig) {
+      const configuredSections = Array.isArray(pageConfig.sections) ? pageConfig.sections : []
+      if (configuredSections.length > 0) {
+        return configuredSections
+          .map(function (section, index) { return normalizeSection(section, index) })
+          .filter(function (section) { return !section.hidden })
+      }
+
+      const legacyItems = Array.isArray(pageConfig.items) ? pageConfig.items : []
+      if (legacyItems.length === 0) return []
+      return [normalizeSection({
+        title: pageConfig.sectionTitle || '储值卡套餐',
+        desc: pageConfig.sectionDesc || '选择适合当前需求的充值卡。',
+        tag: pageConfig.sectionTag || '默认板块',
+        theme: 'orange',
+        items: legacyItems,
+      }, 0)]
+    }
+
+    function normalizeSection(section, index) {
+      const source = section && typeof section === 'object' ? section : {}
+      return {
+        title: textOr(source.title, `充值板块 ${index + 1}`),
+        desc: textOr(source.desc || source.subtitle, ''),
+        tag: textOr(source.tag || source.badge, ''),
+        theme: normalizeTheme(source.theme, index),
+        openMode: normalizeOpenMode(source.openMode || openMode),
+        actionText: textOr(source.actionText, ''),
+        emptyText: textOr(source.emptyText, '当前板块暂无可选套餐。'),
+        hidden: source.hidden === true,
+        items: Array.isArray(source.items) ? source.items : [],
+      }
+    }
+
+    function renderSection(section, sectionIndex) {
+      const sectionElement = document.createElement('section')
+      const titleId = `pay-section-${sectionIndex + 1}`
+      sectionElement.className = `product-section ${section.theme}`
+      sectionElement.setAttribute('aria-labelledby', titleId)
+      sectionElement.innerHTML = [
+        '<div class="section-heading">',
+        '<div>',
+        section.tag ? `<span class="section-kicker">${escapeHtml(section.tag)}</span>` : '',
+        `<h2 class="section-title" id="${titleId}">${escapeHtml(section.title)}</h2>`,
+        section.desc ? `<p class="section-desc">${escapeHtml(section.desc)}</p>` : '',
+        '</div>',
+        `<span class="section-count">${section.items.length} 个选项</span>`,
+        '</div>',
+        '<div class="cards"></div>',
+      ].join('')
+
+      const cardsElement = sectionElement.querySelector('.cards')
+      if (section.items.length === 0) {
+        cardsElement.innerHTML = `<div class="empty">${escapeHtml(section.emptyText)}</div>`
+        return sectionElement
+      }
+
+      section.items.forEach(function (item, itemIndex) {
+        cardsElement.appendChild(renderCard(item, itemIndex, section))
+      })
+      return sectionElement
+    }
+
+    function renderCard(item, itemIndex, section) {
+      const source = item && typeof item === 'object' ? item : {}
+      const name = textOr(source.name, `未命名套餐 ${itemIndex + 1}`)
+      const desc = textOr(source.desc, '请在配置文件中补充说明文字。')
+      const tag = textOr(source.tag, `选项 ${itemIndex + 1}`)
+      const price = textOr(source.price, '')
+      const meta = textOr(source.meta, '')
+      const actionText = textOr(source.actionText || section.actionText, '立即购买')
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'card'
+      button.setAttribute('aria-label', `${name}，${actionText}`)
+      button.innerHTML = [
+        '<div class="card-top">',
+        `<span class="card-tag">${escapeHtml(tag)}</span>`,
+        price ? `<span class="card-price">${escapeHtml(price)}</span>` : '',
+        '</div>',
+        `<h3 class="card-title">${escapeHtml(name)}</h3>`,
+        `<p class="card-desc">${escapeHtml(desc)}</p>`,
+        meta ? `<p class="card-meta">${escapeHtml(meta)}</p>` : '',
+        `<div class="card-action"><span>${escapeHtml(actionText)}</span><span aria-hidden="true">→</span></div>`,
+      ].join('')
+      button.addEventListener('click', function () {
+        if (!source.url) {
+          window.alert('当前卡片未配置跳转地址，请先修改 payHtml/config.js。')
+          return
+        }
+        openTarget(source.url, normalizeOpenMode(source.openMode || section.openMode || openMode))
+      })
+      return button
     }
 
     function openTarget(url, mode) {
@@ -294,13 +503,16 @@
       return ['top', 'parent', 'self', 'new-tab'].indexOf(mode) >= 0 ? mode : 'top'
     }
 
-    function modeLabel(mode) {
-      return {
-        top: '顶层窗口',
-        parent: '父级窗口',
-        self: '当前 iframe',
-        'new-tab': '新标签页',
-      }[mode] || '顶层窗口'
+    function normalizeTheme(theme, index) {
+      const themes = ['orange', 'blue', 'emerald', 'rose']
+      const value = String(theme || '').replace(/^theme-/, '')
+      const normalized = themes.indexOf(value) >= 0 ? value : themes[index % themes.length]
+      return `theme-${normalized}`
+    }
+
+    function textOr(value, fallback) {
+      const text = value === undefined || value === null ? '' : String(value).trim()
+      return text || fallback
     }
 
     function escapeHtml(value) {

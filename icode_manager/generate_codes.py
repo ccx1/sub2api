@@ -117,13 +117,7 @@ def _to_unicode(value):
 
 
 def _display(value):
-    text = _to_unicode(value)
-    try:
-        return text.encode("utf-8")
-    except AttributeError:
-        return text
-    except UnicodeDecodeError:
-        return str(value)
+    return _to_unicode(value)
 
 
 if __name__ == "__main__":

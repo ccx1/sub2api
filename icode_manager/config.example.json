@@ -7,6 +7,15 @@
   "database": {
     "path": "redeem_claim.db"
   },
+  "sub2api_database": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "sub2api",
+    "user": "postgres",
+    "password": "change-this-password",
+    "sslmode": "prefer",
+    "connect_timeout": 10
+  },
   "publisher": {
     "output_dir": "public",
     "public_base_url": "https://example.com/redeem",
@@ -14,6 +23,9 @@
   },
   "manager": {
     "local_only": true
+  },
+  "product_listing": {
+    "note": "商品上架复用当前目录的 sub2api-config.json 和 lianjia-config.json；链动 Cookie、Merchant-Token 和内置定时器可在管理台配置。"
   },
   "sub2api": {
     "base_url": "http://127.0.0.1:8081/api/v1",
@@ -28,7 +40,10 @@
       "turnstile_token": "",
       "totp_code": ""
     },
-    "timeout_seconds": 8
+    "timeout_seconds": 8,
+    "timezone": "Asia/Shanghai",
+    "balance_history_page_size": 100,
+    "balance_history_max_pages": 50
   },
   "security": {
     "admin_token": "change-me-admin-token",

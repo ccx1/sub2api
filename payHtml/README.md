@@ -8,12 +8,51 @@
 
 ```js
 window.PAY_PAGE_CONFIG = {
+  pageTitle: '储值卡充值',
   openMode: 'top',
-  items: [
-    { name: '100 元储值卡', desc: '说明', tag: '推荐', url: 'https://example.com/pay/card-100' },
+  sections: [
+    {
+      title: '推荐套餐',
+      desc: '适合稳定使用的常规充值档位。',
+      tag: 'Hot',
+      theme: 'orange',
+      items: [
+        {
+          name: '100 元储值卡',
+          desc: '说明',
+          tag: '推荐',
+          price: '¥100',
+          meta: '购买后按页面提示完成兑换',
+          url: 'https://example.com/pay/card-100',
+        },
+      ],
+    },
   ],
 }
 ```
+
+## 板块配置
+
+- `sections`：页面板块列表，每个板块会独立显示标题、说明和卡片网格
+- `sections[].title`：板块标题
+- `sections[].desc`：板块说明
+- `sections[].tag`：板块角标
+- `sections[].theme`：板块配色，可选 `orange`、`blue`、`emerald`、`rose`
+- `sections[].actionText`：当前板块内卡片默认按钮文案
+- `sections[].emptyText`：当前板块没有 `items` 时显示的提示
+- `sections[].items`：当前板块下的商品卡片
+
+## 卡片配置
+
+- `name`：卡片标题
+- `desc`：卡片说明
+- `tag`：卡片角标
+- `price`：右上角价格展示，可不填
+- `meta`：补充说明，可不填
+- `url`：点击后跳转的支付地址
+- `openMode`：单张卡片的打开方式，可覆盖全局或板块的 `openMode`
+
+旧版 `items` 配置仍然兼容；如果没有配置 `sections`，页面会自动把 `items` 渲染成一个默认板块。
 
 ## openMode 说明
 

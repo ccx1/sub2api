@@ -36,6 +36,8 @@ def render_activity_html(activity: Dict[str, Any], api_base_url: str) -> str:
         "name": activity["name"],
         "description": activity["description"],
         "useUrl": activity.get("use_url", ""),
+        "packetType": activity.get("packet_type", "ordinary"),
+        "tiers": activity.get("tiers", []),
         "apiBase": api_base_url.rstrip("/"),
     }
     script = "<script>window.REDEEM_CLAIM_STATIC_CONFIG = "

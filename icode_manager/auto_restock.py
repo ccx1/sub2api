@@ -264,24 +264,12 @@ def _to_unicode(value):
 
 
 def _display(value):
-    text = _to_unicode(value)
-    try:
-        return text.encode("utf-8")
-    except AttributeError:
-        return text
-    except UnicodeDecodeError:
-        return str(value)
+    return _to_unicode(value)
 
 
 def _print_line(value):
     text = _display(value)
-    try:
-        if isinstance(text, bytes):
-            sys.stdout.write(text + b"\n")
-        else:
-            sys.stdout.write(text + "\n")
-    except TypeError:
-        sys.stdout.write(str(text) + "\n")
+    sys.stdout.write(str(text) + "\n")
 
 
 def resolve_notification_settings(config, args):

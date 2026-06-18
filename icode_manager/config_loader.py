@@ -212,14 +212,13 @@ def _optional_positive_int(value, field_name):
 def _stringify(value):
     if value is None:
         return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "ignore")
     try:
         unicode_type = unicode  # noqa: F821
     except NameError:
-        unicode_type = str
+        return str(value)
 
     if isinstance(value, unicode_type):
-        try:
-            return value.encode("utf-8")
-        except AttributeError:
-            return value
+        return value
     return str(value)

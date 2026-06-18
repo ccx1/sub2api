@@ -1,6 +1,9 @@
 (function (root, factory) {
   const api = factory(root)
   root.CodexSub2apiConverter = api
+  if (typeof window !== 'undefined') window.CodexSub2apiConverter = api
+  if (typeof globalThis !== 'undefined') globalThis.CodexSub2apiConverter = api
+  if (typeof self !== 'undefined') self.CodexSub2apiConverter = api
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api
   }

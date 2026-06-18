@@ -1,0 +1,13 @@
+config.json
+sub2api-config.json
+lianjia-config.json
+product_listing_config.json
+codex_import_settings.json
+__pycache__/
+*.db
+*.db-shm
+*.db-wal
+codes*.txt
+!codes.example.txt
+public/
+outputs/

@@ -8,6 +8,7 @@
     <!-- REDEEM_CLAIM_STATIC_CONFIG -->
   </head>
   <body>
+    <div class="animation-layer" id="animationLayer" aria-hidden="true"></div>
     <main>
       <section class="top">
         <span class="badge">限时福利</span>
@@ -165,7 +166,8 @@
           codeVisible = true;
           codeBox.style.display = "flex";
           showUseButton(true);
-          setMessage(data.already_claimed ? "你已经领取过，本次显示原兑换码。" : "领取成功。", "ok");
+          setMessage(data.already_claimed ? "你已经领取过，本次显示原兑换码。" : data.claim.message || "领取成功。", "ok");
+          if (!data.already_claimed) playAnimations(data.claim.animations || []);
           await loadRecords();
           await loadActivity();
         } catch (err) {
@@ -195,6 +197,86 @@
           setMessage("已复制到剪贴板。", "ok");
         } catch {
           setMessage("复制失败，请长按或手动选择兑换码。", "error");
+        }
+      }
+
+      function playAnimations(keys) {
+        const layer = document.getElementById("animationLayer");
+        if (!layer || !Array.isArray(keys) || !keys.length) return;
+        const unique = [...new Set(keys.filter(Boolean))];
+        layer.innerHTML = "";
+        layer.style.display = "block";
+        for (const key of unique) {
+          if (key === "fireworks") createFireworks(layer);
+          if (key === "confetti") createConfetti(layer);
+          if (key === "salute") createSalute(layer);
+          if (key === "sparkles") createSparkles(layer);
+        }
+        window.setTimeout(() => {
+          layer.innerHTML = "";
+          layer.style.display = "none";
+        }, 2600);
+      }
+
+      function createFireworks(layer) {
+        const colors = ["#d71920", "#ffcf33", "#22a06b", "#2f6fed", "#d86cf0"];
+        for (let burst = 0; burst < 4; burst += 1) {
+          const originX = 18 + Math.random() * 64;
+          const originY = 16 + Math.random() * 36;
+          for (let i = 0; i < 18; i += 1) {
+            const dot = document.createElement("i");
+            const angle = (Math.PI * 2 * i) / 18;
+            const distance = 60 + Math.random() * 70;
+            dot.className = "firework-dot";
+            dot.style.left = `${originX}%`;
+            dot.style.top = `${originY}%`;
+            dot.style.background = colors[i % colors.length];
+            dot.style.setProperty("--x", `${Math.cos(angle) * distance}px`);
+            dot.style.setProperty("--y", `${Math.sin(angle) * distance}px`);
+            dot.style.animationDelay = `${burst * 120}ms`;
+            layer.appendChild(dot);
+          }
+        }
+      }
+
+      function createConfetti(layer) {
+        const colors = ["#d71920", "#ffcf33", "#12b76a", "#2e90fa", "#f97066"];
+        for (let i = 0; i < 72; i += 1) {
+          const piece = document.createElement("i");
+          piece.className = "confetti-piece";
+          piece.style.left = `${Math.random() * 100}%`;
+          piece.style.background = colors[i % colors.length];
+          piece.style.animationDelay = `${Math.random() * 320}ms`;
+          piece.style.setProperty("--drift", `${-80 + Math.random() * 160}px`);
+          piece.style.setProperty("--spin", `${180 + Math.random() * 540}deg`);
+          layer.appendChild(piece);
+        }
+      }
+
+      function createSalute(layer) {
+        for (const side of ["left", "right"]) {
+          const cannon = document.createElement("i");
+          cannon.className = `salute-cannon ${side}`;
+          layer.appendChild(cannon);
+          for (let i = 0; i < 28; i += 1) {
+            const shot = document.createElement("i");
+            shot.className = `salute-shot ${side}`;
+            shot.style.setProperty("--x", `${(side === "left" ? 1 : -1) * (80 + Math.random() * 180)}px`);
+            shot.style.setProperty("--y", `${-80 - Math.random() * 180}px`);
+            shot.style.animationDelay = `${Math.random() * 180}ms`;
+            layer.appendChild(shot);
+          }
+        }
+      }
+
+      function createSparkles(layer) {
+        for (let i = 0; i < 34; i += 1) {
+          const sparkle = document.createElement("i");
+          sparkle.className = "sparkle";
+          sparkle.style.left = `${8 + Math.random() * 84}%`;
+          sparkle.style.top = `${12 + Math.random() * 70}%`;
+          sparkle.style.animationDelay = `${Math.random() * 900}ms`;
+          layer.appendChild(sparkle);
         }
       }
 

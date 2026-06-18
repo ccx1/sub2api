@@ -103,11 +103,11 @@ def resolve_input_path(raw_input, output_dir, product_key):
 def _display(value):
     if value is None:
         return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "ignore")
     try:
-        return unicode(value).encode("utf-8")  # noqa: F821
+        return unicode(value)  # noqa: F821
     except NameError:
-        return str(value)
-    except UnicodeDecodeError:
         return str(value)
 
 

@@ -1,0 +1,1394 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iCode功能增强</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/manager.css" />
+  </head>
+  <body>
+    <main class="manager-shell">
+      <section class="top">
+        <span class="badge">管理台</span>
+        <h1>iCode功能增强</h1>
+      </section>
+
+      <section class="panel login-panel" id="loginPanel">
+        <h2>请输入管理密码</h2>
+        <div class="login-form">
+          <label class="field">
+            管理密码
+            <input id="adminToken" type="password" autocomplete="current-password" placeholder="请输入管理密码" />
+          </label>
+          <button class="primary" id="loginButton" type="button">进入管理台</button>
+        </div>
+        <div class="message" id="loginMessage"></div>
+      </section>
+
+      <div class="manager-app" id="managerApp" hidden>
+        <nav class="tabs" aria-label="功能管理">
+          <button class="tab active" data-tab="redpack" type="button">红包管理</button>
+          <button class="tab" data-tab="affiliate" type="button">返利管理</button>
+          <button class="tab" data-tab="listing" type="button">商品上架</button>
+          <button class="tab" data-tab="import" type="button">导入设置</button>
+        </nav>
+
+      <section class="tab-page active" id="redpackTab">
+        <section class="panel">
+          <div class="manager-grid">
+            <label class="field">
+              活动 ID
+              <input id="activityId" placeholder="例如 spring2026" />
+            </label>
+            <label class="field">
+              活动标题
+              <input id="name" placeholder="例如 iCode 周年兑换码" />
+            </label>
+            <label class="field full">
+              活动说明
+              <input id="description" placeholder="展示在领取页标题下方" />
+            </label>
+            <label class="field full">
+              领取后跳转地址
+              <input id="useUrl" placeholder="例如 https://icode.sampleccx.cn 或 /console" />
+            </label>
+            <label class="field">
+              红包类型
+              <select id="packetType">
+                <option value="ordinary">普通红包</option>
+                <option value="tier">档次红包</option>
+              </select>
+            </label>
+            <label class="field full" id="messageTemplateSection">
+              成功提示模板
+              <input id="messageTemplate" placeholder="欢迎您，尊贵的{vip等级}用户，下面是您本次的兑换码。" />
+            </label>
+
+            <div class="field full tier-config" id="tierConfig">
+              <div class="field-title">档次红包配置</div>
+              <div class="tier-editor">
+                <label class="field">
+                  档次标识
+                  <input id="tierKey" placeholder="例如 vip1" />
+                </label>
+                <label class="field">
+                  VIP 名称
+                  <input id="tierName" placeholder="例如 VIP1" />
+                </label>
+                <label class="field">
+                  门槛金额
+                  <input id="tierThreshold" type="number" min="0" step="0.01" placeholder="例如 100" />
+                </label>
+                <div class="field full">
+                  <div class="field-title">动画组合</div>
+                  <div class="animation-options" id="animationOptions">
+                    <label><input type="checkbox" value="fireworks" /> 烟花</label>
+                    <label><input type="checkbox" value="confetti" /> 彩带</label>
+                    <label><input type="checkbox" value="salute" /> 礼炮</label>
+                    <label><input type="checkbox" value="sparkles" /> 闪光</label>
+                  </div>
+                </div>
+                <button class="secondary" id="addTierButton" type="button">添加/更新档次</button>
+              </div>
+              <div class="tier-list" id="tierList"></div>
+            </div>
+
+            <div class="field full">
+              <div class="field-title">活动时间区间</div>
+              <div class="date-range">
+                <label class="date-control" for="startsAt">
+                  <span>开始</span>
+                  <input id="startsAt" type="datetime-local" step="60" />
+                </label>
+                <span class="date-separator">至</span>
+                <label class="date-control" for="endsAt">
+                  <span>结束</span>
+                  <input id="endsAt" type="datetime-local" step="60" />
+                </label>
+              </div>
+            </div>
+            <div class="field full status-row">
+              <label for="status">活动状态</label>
+              <div class="status-line">
+                <select id="status">
+                  <option value="draft">草稿</option>
+                  <option value="open">开放领取</option>
+                  <option value="closed">已结束</option>
+                </select>
+                <p class="field-help">开放后按时间区间生效。</p>
+              </div>
+            </div>
+            <div class="field full codes-field" id="ordinaryCodesSection">
+              <label for="codes">普通红包兑换码列表</label>
+              <textarea id="codes" placeholder="一行一个兑换码"></textarea>
+            </div>
+          </div>
+          <div class="manager-actions">
+            <button class="primary" id="savePublishButton">保存、导入并生成链接</button>
+            <button class="secondary" id="importButton" type="button">导入兑换码</button>
+            <button class="secondary" id="closeButton" type="button">结束活动</button>
+            <button class="text-action" id="loadButton" type="button">刷新活动列表</button>
+          </div>
+          <div class="message" id="message"></div>
+          <div class="link-box" id="linkBox"></div>
+        </section>
+
+        <section class="panel">
+          <h2>已有活动</h2>
+          <div class="activity-list" id="activityList"></div>
+        </section>
+      </section>
+
+      <section class="tab-page" id="affiliateTab">
+        <section class="panel">
+          <div class="affiliate-header">
+            <h2>返利关系绑定</h2>
+          </div>
+          <div class="manager-grid affiliate-form">
+            <label class="field">
+              邀请人邮箱
+              <input id="inviterEmail" autocomplete="off" placeholder="inviter@example.com" />
+            </label>
+            <label class="field">
+              被邀请人邮箱
+              <input id="inviteeEmail" autocomplete="off" placeholder="invitee@example.com" />
+            </label>
+            <label class="check-field full">
+              <input id="allowRebind" type="checkbox" />
+              <span>允许改绑已有邀请人</span>
+            </label>
+          </div>
+          <div class="manager-actions">
+            <button class="primary" id="previewAffiliateButton" type="button">预览关系</button>
+            <label class="check-field inline-confirm">
+              <input id="confirmAffiliateExecute" type="checkbox" />
+              <span>确认执行</span>
+            </label>
+            <button class="secondary" id="executeAffiliateButton" type="button" disabled>执行绑定</button>
+          </div>
+          <div class="message" id="affiliateMessage"></div>
+        </section>
+
+        <section class="panel" id="affiliatePreviewPanel">
+          <h2>预览结果</h2>
+          <div id="affiliatePreview"></div>
+        </section>
+
+        <section class="panel" id="affiliateResultPanel">
+          <h2>执行结果</h2>
+          <div id="affiliateResult"></div>
+        </section>
+      </section>
+
+      <section class="tab-page" id="listingTab">
+        <section class="panel">
+          <div class="affiliate-header">
+            <h2>商品管理</h2>
+            <div class="manager-actions inline-actions">
+              <button class="secondary" id="openListingAuthModalButton" type="button">链动设置</button>
+              <button class="text-action" id="refreshListingButton" type="button">刷新商品配置</button>
+            </div>
+          </div>
+          <div class="message" id="listingAuthState"></div>
+          <div id="productList" class="product-list"></div>
+          <div class="manager-grid">
+            <label class="field">
+              商品标识
+              <input id="productKey" placeholder="例如 balance_50" />
+            </label>
+            <label class="field">
+              商品名称
+              <input id="productLabel" placeholder="例如 50元余额卡" />
+            </label>
+            <label class="field">
+              兑换码类型
+              <select id="productRedeemType">
+                <option value="balance">余额</option>
+                <option value="subscription">订阅</option>
+                <option value="concurrency">并发</option>
+                <option value="invitation">邀请</option>
+              </select>
+            </label>
+            <label class="field">
+              兑换码面值
+              <input id="productRedeemValue" placeholder="例如 50 或 1" />
+            </label>
+            <label class="field">
+              默认生成数量
+              <input id="productRedeemCount" type="number" min="1" step="1" placeholder="例如 10" />
+            </label>
+            <label class="field">
+              分组 ID
+              <input id="productGroupId" type="number" min="1" step="1" placeholder="可选" />
+            </label>
+            <label class="field">
+              有效期天数
+              <input id="productValidityDays" type="number" min="1" step="1" placeholder="订阅类可填" />
+            </label>
+            <label class="field">
+              过期天数
+              <input id="productExpiresInDays" type="number" min="1" step="1" placeholder="可选" />
+            </label>
+            <label class="field full">
+              链动 Goods ID
+              <input id="productGoodsIds" placeholder="一个或多个，多个用英文逗号分隔" />
+            </label>
+          </div>
+          <div class="manager-actions">
+            <button class="secondary" id="saveProductButton" type="button">保存商品</button>
+            <button class="text-action" id="clearProductButton" type="button">清空表单</button>
+          </div>
+          <div class="message" id="productMessage"></div>
+        </section>
+
+        <section class="panel">
+          <h2>上架操作</h2>
+          <div class="manager-grid">
+            <label class="field">
+              上架商品
+              <select id="listingProduct"></select>
+            </label>
+            <label class="field">
+              本次生成张数
+              <input id="listingCount" type="number" min="1" step="1" placeholder="留空使用商品默认数量" />
+            </label>
+            <p class="field-help full" id="listingProductHint">选择商品后填写本次要生成的兑换码张数。</p>
+            <label class="check-field full">
+              <input id="listingUpload" type="checkbox" checked />
+              <span>生成后立即上架到链动商品</span>
+            </label>
+          </div>
+          <div class="manager-actions">
+            <button class="primary" id="generateUploadButton" type="button">生成并上架</button>
+          </div>
+          <div class="message" id="listingMessage"></div>
+        </section>
+
+        <div class="modal-backdrop" id="listingAuthModal" hidden>
+          <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="listingAuthTitle">
+            <div class="modal-head">
+              <h2 id="listingAuthTitle">链动设置</h2>
+              <button class="text-action" id="closeListingAuthModalButton" type="button">关闭</button>
+            </div>
+            <div class="manager-grid">
+              <label class="field full">
+                链动 Cookie
+                <textarea id="listingCookie" placeholder="填写浏览器里抓到的完整 Cookie；留空则保留当前配置"></textarea>
+              </label>
+              <label class="field full">
+                Merchant-Token
+                <input id="listingMerchantToken" autocomplete="off" placeholder="填写 Merchant-Token；留空则保留当前配置" />
+              </label>
+            </div>
+            <div class="manager-actions">
+              <button class="primary" id="saveListingAuthButton" type="button">保存设置</button>
+              <button class="secondary" id="cancelListingAuthButton" type="button">取消</button>
+            </div>
+            <div class="message" id="listingAuthModalMessage"></div>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>定时补库存</h2>
+          <div class="manager-grid">
+            <label class="check-field full">
+              <input id="schedulerEnabled" type="checkbox" />
+              <span>启用内置定时器</span>
+            </label>
+            <label class="field">
+              执行间隔（分钟）
+              <input id="schedulerInterval" type="number" min="1" step="1" />
+            </label>
+            <label class="field">
+              库存阈值
+              <input id="schedulerThreshold" type="number" min="0" step="1" />
+            </label>
+            <label class="field">
+              最小补货缺口
+              <input id="schedulerMinShortage" type="number" min="0" step="1" />
+            </label>
+            <label class="field">
+              固定补货数量
+              <input id="schedulerRestockCount" type="number" min="1" step="1" placeholder="留空按缺口补" />
+            </label>
+            <label class="field">
+              定时商品
+              <select id="schedulerProduct"></select>
+            </label>
+            <label class="check-field full">
+              <input id="schedulerSummaryOnly" type="checkbox" />
+              <span>仅汇总库存，不自动补货</span>
+            </label>
+            <label class="check-field full">
+              <input id="schedulerDryRun" type="checkbox" />
+              <span>演练模式，不生成或上架</span>
+            </label>
+          </div>
+          <div class="manager-actions">
+            <button class="secondary" id="saveSchedulerButton" type="button">保存定时器</button>
+            <button class="secondary" id="runRestockButton" type="button">立即执行一次</button>
+          </div>
+          <div class="message" id="schedulerMessage"></div>
+        </section>
+
+        <section class="panel">
+          <h2>商品上架结果</h2>
+          <div id="listingResult"></div>
+        </section>
+      </section>
+
+      <section class="tab-page" id="importTab">
+        <section class="panel">
+          <h2>Codex JSON 导入设置</h2>
+          <div class="manager-grid">
+            <label class="field">
+              账号名前缀
+              <input id="importNamePrefix" placeholder="可留空" />
+            </label>
+            <label class="field">
+              备注
+              <input id="importNotes" placeholder="可留空" />
+            </label>
+            <label class="field">
+              并发数
+              <input id="importConcurrency" type="number" min="0" step="1" />
+            </label>
+            <label class="field">
+              优先级
+              <input id="importPriority" type="number" min="0" step="1" />
+            </label>
+            <label class="field">
+              去重
+              <select id="importDedupe">
+                <option value="email">按邮箱</option>
+                <option value="file">按文件名</option>
+                <option value="none">不去重</option>
+              </select>
+            </label>
+            <label class="field">
+              输出格式
+              <select id="importOutputMode">
+                <option value="bundle">完整导入包</option>
+                <option value="accounts">仅账号数组</option>
+              </select>
+            </label>
+          </div>
+          <div class="manager-actions">
+            <button class="secondary" id="saveImportSettingsButton" type="button">保存导入设置</button>
+            <button class="text-action" id="refreshImportSettingsButton" type="button">刷新设置</button>
+          </div>
+          <div class="message" id="importSettingsMessage"></div>
+        </section>
+
+        <section class="panel">
+          <h2>生成导入包</h2>
+          <div class="import-drop-zone" id="importDropZone" tabindex="0">
+            <input id="importFileInput" class="sr-only" type="file" accept=".json,application/json" multiple />
+            <input id="importFolderInput" class="sr-only" type="file" accept=".json,application/json" webkitdirectory directory multiple />
+            <div class="manager-actions">
+              <button class="primary" id="pickImportFilesButton" type="button">选择 JSON</button>
+              <button class="secondary" id="pickImportFolderButton" type="button">选择文件夹</button>
+              <button class="secondary" id="copyImportOutputButton" type="button" disabled>复制 JSON</button>
+              <button class="secondary" id="downloadImportOutputButton" type="button" disabled>下载 JSON</button>
+              <button class="text-action" id="clearImportButton" type="button" disabled>清空</button>
+            </div>
+            <p class="meta">也可以拖入多个 Codex/OpenAI OAuth JSON 文件；转换只在浏览器本地执行。</p>
+          </div>
+          <div class="summary-strip import-summary" aria-live="polite">
+            <span><strong id="importFileCount">0</strong> 文件</span>
+            <span><strong id="importAccountCount">0</strong> 账号</span>
+            <span><strong id="importErrorCount">0</strong> 问题</span>
+          </div>
+          <div class="message" id="importMessage"></div>
+        </section>
+
+        <section class="panel">
+          <h2>导入预览</h2>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>状态</th><th>账号名</th><th>邮箱</th><th>来源</th></tr></thead>
+              <tbody id="importRows"><tr><td colspan="4">暂无文件</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>JSON 预览</h2>
+          <pre class="json-preview" id="importJsonPreview">{}</pre>
+        </section>
+      </section>
+      </div>
+    </main>
+
+    <script src="/static/codex-converter-core.js"></script>
+    <script>
+      const DEFAULT_MESSAGE_TEMPLATE = "欢迎您，尊贵的{vip等级}用户，下面是您本次的兑换码。";
+      const fields = {
+        adminToken: document.getElementById("adminToken"),
+        activityId: document.getElementById("activityId"),
+        name: document.getElementById("name"),
+        description: document.getElementById("description"),
+        useUrl: document.getElementById("useUrl"),
+        packetType: document.getElementById("packetType"),
+        messageTemplate: document.getElementById("messageTemplate"),
+        tierKey: document.getElementById("tierKey"),
+        tierName: document.getElementById("tierName"),
+        tierThreshold: document.getElementById("tierThreshold"),
+        startsAt: document.getElementById("startsAt"),
+        endsAt: document.getElementById("endsAt"),
+        status: document.getElementById("status"),
+        codes: document.getElementById("codes"),
+      };
+      const loginPanel = document.getElementById("loginPanel");
+      const managerApp = document.getElementById("managerApp");
+      const loginMessage = document.getElementById("loginMessage");
+      const message = document.getElementById("message");
+      const list = document.getElementById("activityList");
+      const linkBox = document.getElementById("linkBox");
+      const tierConfig = document.getElementById("tierConfig");
+      const tierList = document.getElementById("tierList");
+      const ordinaryCodesSection = document.getElementById("ordinaryCodesSection");
+      const messageTemplateSection = document.getElementById("messageTemplateSection");
+      const animationOptions = document.getElementById("animationOptions");
+      const affiliateMessage = document.getElementById("affiliateMessage");
+      const affiliatePreview = document.getElementById("affiliatePreview");
+      const affiliateResult = document.getElementById("affiliateResult");
+      const executeAffiliateButton = document.getElementById("executeAffiliateButton");
+      const importButton = document.getElementById("importButton");
+      const savePublishButton = document.getElementById("savePublishButton");
+      const listingMessage = document.getElementById("listingMessage");
+      const productMessage = document.getElementById("productMessage");
+      const schedulerMessage = document.getElementById("schedulerMessage");
+      const listingAuthState = document.getElementById("listingAuthState");
+      const listingAuthModalMessage = document.getElementById("listingAuthModalMessage");
+      const listingResult = document.getElementById("listingResult");
+      const importSettingsMessage = document.getElementById("importSettingsMessage");
+      const importMessage = document.getElementById("importMessage");
+      const importState = { files: [], outputText: "{}", outputPayload: null };
+      let tiers = [];
+      let affiliateCanExecute = false;
+      let listingProducts = [];
+      let importSettingsLoaded = false;
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        }[ch]));
+      }
+
+      function setMessage(text, type = "") {
+        message.textContent = text;
+        message.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setAffiliateMessage(text, type = "") {
+        affiliateMessage.textContent = text;
+        affiliateMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setListingMessage(text, type = "") {
+        listingMessage.textContent = text;
+        listingMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setProductMessage(text, type = "") {
+        productMessage.textContent = text;
+        productMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setListingAuthModalMessage(text, type = "") {
+        listingAuthModalMessage.textContent = text;
+        listingAuthModalMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setSchedulerMessage(text, type = "") {
+        schedulerMessage.textContent = text;
+        schedulerMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setImportSettingsMessage(text, type = "") {
+        importSettingsMessage.textContent = text;
+        importSettingsMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setImportMessage(text, type = "") {
+        importMessage.textContent = text;
+        importMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function setLoginMessage(text, type = "") {
+        loginMessage.textContent = text;
+        loginMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
+      function headers() {
+        return { "Content-Type": "application/json", "X-Admin-Token": fields.adminToken.value.trim() };
+      }
+
+      async function api(path, options = {}) {
+        const res = await fetch(path, { headers: headers(), ...options });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || `请求失败：${res.status}`);
+        return data;
+      }
+
+      function switchTab(name) {
+        document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
+        document.querySelectorAll(".tab-page").forEach((page) => page.classList.remove("active"));
+        const pageId = { redpack: "redpackTab", affiliate: "affiliateTab", listing: "listingTab", import: "importTab" }[name] || "redpackTab";
+        document.getElementById(pageId).classList.add("active");
+        if (name === "listing" && !listingProducts.length) loadListingStatus().catch((e) => setListingMessage(e.message, "error"));
+        if (name === "import" && !importSettingsLoaded) loadImportSettings().catch((e) => setImportSettingsMessage(e.message, "error"));
+      }
+
+      function currentId() {
+        return fields.activityId.value.trim();
+      }
+
+      function payload() {
+        const startsAt = toOffsetIso(fields.startsAt.value);
+        const endsAt = toOffsetIso(fields.endsAt.value);
+        const packetType = fields.packetType.value;
+        if (!startsAt || !endsAt) throw new Error("请选择完整的活动时间区间。");
+        if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) throw new Error("结束时间必须晚于开始时间。");
+        if (packetType === "tier" && !tiers.length) throw new Error("档次红包至少需要配置一个档次。");
+        const data = {
+          activity_id: currentId(),
+          name: fields.name.value,
+          description: fields.description.value,
+          use_url: fields.useUrl.value,
+          packet_type: packetType,
+          tiers: packetType === "tier" ? tiers : [],
+          starts_at: startsAt,
+          ends_at: endsAt,
+          status: fields.status.value,
+        };
+        if (packetType === "tier") data.message_template = fields.messageTemplate.value || DEFAULT_MESSAGE_TEMPLATE;
+        return data;
+      }
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function toOffsetIso(value) {
+        const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+        if (!match) return "";
+        const [, year, month, day, hour, minute, second = "00"] = match;
+        const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+        const offsetMinutes = -date.getTimezoneOffset();
+        const sign = offsetMinutes >= 0 ? "+" : "-";
+        const absOffset = Math.abs(offsetMinutes);
+        return `${year}-${month}-${day}T${hour}:${minute}:${second}${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+      }
+
+      function toDatetimeLocalValue(value) {
+        if (!value) return "";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function fillActivity(activity) {
+        fields.activityId.value = activity.slug || "";
+        fields.name.value = activity.name || "";
+        fields.description.value = activity.description || "";
+        fields.useUrl.value = activity.use_url || "";
+        fields.packetType.value = activity.packet_type || "ordinary";
+        fields.messageTemplate.value = fields.packetType.value === "tier" ? (activity.message_template || DEFAULT_MESSAGE_TEMPLATE) : DEFAULT_MESSAGE_TEMPLATE;
+        tiers = Array.isArray(activity.tiers) ? activity.tiers.map(normalizeTier) : [];
+        fields.startsAt.value = toDatetimeLocalValue(activity.starts_at);
+        fields.endsAt.value = toDatetimeLocalValue(activity.ends_at);
+        fields.status.value = activity.status || "draft";
+        renderTiers();
+        syncPacketType();
+      }
+
+      function normalizeTier(tier, index = 0) {
+        return {
+          tier_key: tier.tier_key || "",
+          name: tier.name || "",
+          threshold_amount: Number(tier.threshold_amount || 0),
+          animations: Array.isArray(tier.animations) ? tier.animations : [],
+          sort_order: Number(tier.sort_order ?? index),
+          remaining_count: Number(tier.remaining_count || 0),
+          claimed_count: Number(tier.claimed_count || 0),
+        };
+      }
+
+      function syncPacketType() {
+        const isTier = fields.packetType.value === "tier";
+        tierConfig.style.display = isTier ? "grid" : "none";
+        messageTemplateSection.style.display = isTier ? "grid" : "none";
+        fields.messageTemplate.disabled = !isTier;
+        ordinaryCodesSection.style.display = isTier ? "none" : "grid";
+        importButton.style.display = isTier ? "none" : "inline-flex";
+        savePublishButton.textContent = isTier ? "保存并生成链接" : "保存、导入并生成链接";
+      }
+
+      function selectedAnimations() {
+        return [...animationOptions.querySelectorAll("input:checked")].map((input) => input.value);
+      }
+
+      function setSelectedAnimations(values) {
+        const set = new Set(values || []);
+        for (const input of animationOptions.querySelectorAll("input")) input.checked = set.has(input.value);
+      }
+
+      function addOrUpdateTier() {
+        const tierKey = fields.tierKey.value.trim();
+        const name = fields.tierName.value.trim();
+        const threshold = Number(fields.tierThreshold.value || 0);
+        if (!tierKey || !name) throw new Error("请填写档次标识和 VIP 名称。");
+        if (!Number.isFinite(threshold) || threshold < 0) throw new Error("门槛金额必须是不小于 0 的数字。");
+        const next = normalizeTier({
+          tier_key: tierKey,
+          name,
+          threshold_amount: threshold,
+          animations: selectedAnimations(),
+          sort_order: tiers.length,
+        });
+        const existing = tiers.findIndex((tier) => tier.tier_key === tierKey);
+        if (existing >= 0) {
+          next.remaining_count = tiers[existing].remaining_count || 0;
+          next.claimed_count = tiers[existing].claimed_count || 0;
+          tiers.splice(existing, 1, next);
+        } else {
+          tiers.push(next);
+        }
+        tiers.sort((a, b) => a.threshold_amount - b.threshold_amount || a.sort_order - b.sort_order);
+        fields.tierKey.value = "";
+        fields.tierName.value = "";
+        fields.tierThreshold.value = "";
+        setSelectedAnimations([]);
+        renderTiers();
+      }
+
+      function editTier(tierKey) {
+        const tier = tiers.find((item) => item.tier_key === tierKey);
+        if (!tier) return;
+        fields.tierKey.value = tier.tier_key;
+        fields.tierName.value = tier.name;
+        fields.tierThreshold.value = tier.threshold_amount;
+        setSelectedAnimations(tier.animations);
+      }
+
+      function removeTier(tierKey) {
+        tiers = tiers.filter((item) => item.tier_key !== tierKey);
+        renderTiers();
+      }
+
+      function renderTiers() {
+        tierList.innerHTML = "";
+        if (!tiers.length) {
+          tierList.innerHTML = '<p class="meta">暂无档次。</p>';
+          return;
+        }
+        for (const tier of tiers) {
+          const node = document.createElement("div");
+          node.className = "tier-item";
+          node.innerHTML = `
+            <div class="tier-item-head">
+              <div>
+                <strong>${escapeHtml(tier.name)} (${escapeHtml(tier.tier_key)})</strong>
+                <div class="meta">门槛：${escapeHtml(tier.threshold_amount)} · 动画：${escapeHtml(tier.animations.join("、") || "无")} · 剩余：${escapeHtml(tier.remaining_count || 0)} · 已领：${escapeHtml(tier.claimed_count || 0)}</div>
+              </div>
+              <div class="tier-actions">
+                <button class="secondary edit-tier" type="button">编辑</button>
+                <button class="secondary remove-tier" type="button">删除</button>
+              </div>
+            </div>
+            <div class="tier-code-import">
+              <label class="field tier-code-field">
+                ${escapeHtml(tier.name)} 兑换码
+                <textarea class="tier-codes" placeholder="一行一个兑换码，只导入到 ${escapeHtml(tier.name)}"></textarea>
+              </label>
+              <button class="secondary import-tier-codes" type="button">导入该档次兑换码</button>
+            </div>
+          `;
+          node.querySelector(".edit-tier").addEventListener("click", () => editTier(tier.tier_key));
+          node.querySelector(".remove-tier").addEventListener("click", () => removeTier(tier.tier_key));
+          node.querySelector(".import-tier-codes").addEventListener("click", () => {
+            const textarea = node.querySelector(".tier-codes");
+            importTierCodes(tier.tier_key, textarea.value).catch((e) => setMessage(e.message, "error"));
+          });
+          tierList.appendChild(node);
+        }
+      }
+
+      function showLink(url, outputDir) {
+        linkBox.style.display = "block";
+        linkBox.textContent = `用户链接：${url}  生成目录：${outputDir}`;
+      }
+
+      async function saveActivity() {
+        const data = await api("/api/manager/activities", { method: "POST", body: JSON.stringify(payload()) });
+        fillActivity(data.activity);
+        return data.activity;
+      }
+
+      async function publishActivity() {
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/publish`, { method: "POST" });
+        showLink(data.url, data.output_dir);
+        return data;
+      }
+
+      async function saveAndPublish() {
+        await saveActivity();
+        if (fields.packetType.value === "ordinary" && fields.codes.value.trim()) await importCodes({ silent: true });
+        const published = await publishActivity();
+        setMessage("活动已保存，静态页已生成。", "ok");
+        await loadActivities();
+        return published;
+      }
+
+      async function importCodes(options = {}) {
+        if (fields.packetType.value !== "ordinary") throw new Error("档次红包请在对应档次里导入兑换码。");
+        if (!fields.codes.value.trim()) throw new Error("请填写普通红包兑换码。");
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/codes`, {
+          method: "POST",
+          body: JSON.stringify({ codes: fields.codes.value }),
+        });
+        fields.codes.value = "";
+        if (!options.silent) {
+          setMessage(`导入完成：新增 ${data.imported_count} 条。`, "ok");
+          await loadActivities();
+        }
+        return data;
+      }
+
+      async function importTierCodes(tierKey, codes) {
+        if (fields.packetType.value !== "tier") throw new Error("只有档次红包可以按档次导入兑换码。");
+        if (!String(codes || "").trim()) throw new Error("请填写该档次的兑换码。");
+        await saveActivity();
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/codes`, {
+          method: "POST",
+          body: JSON.stringify({ codes, tier_key: tierKey }),
+        });
+        await saveActivity();
+        await loadActivities();
+        setMessage(`已导入 ${data.imported_count} 条到档次 ${tierKey}。`, "ok");
+        return data;
+      }
+
+      async function closeActivity() {
+        const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/close`, { method: "POST" });
+        fillActivity(data.activity);
+        await publishActivity();
+        setMessage("活动已结束，静态页已重新生成。", "ok");
+        await loadActivities();
+      }
+
+      function renderActivities(items) {
+        list.innerHTML = "";
+        if (!items.length) {
+          list.innerHTML = '<p class="meta">暂无活动。</p>';
+          return;
+        }
+        for (const item of items) {
+          const node = document.createElement("div");
+          node.className = "activity-item";
+          node.innerHTML = `
+            <strong>${escapeHtml(item.name)} (${escapeHtml(item.slug)})</strong>
+            <div class="meta">类型：${item.packet_type === "tier" ? "档次红包" : "普通红包"} · 状态：${escapeHtml(item.status_text)} · 剩余：${escapeHtml(item.remaining_count)} · 已领：${escapeHtml(item.claimed_count)}</div>
+            <button class="text-action" type="button">编辑</button>
+          `;
+          node.querySelector("button").addEventListener("click", () => fillActivity(item));
+          list.appendChild(node);
+        }
+      }
+
+      async function loadActivities() {
+        const data = await api("/api/manager/activities");
+        renderActivities(data.activities || []);
+      }
+
+      function affiliatePayload(confirm = false) {
+        return {
+          inviter_email: document.getElementById("inviterEmail").value.trim(),
+          invitee_email: document.getElementById("inviteeEmail").value.trim(),
+          allow_rebind: document.getElementById("allowRebind").checked,
+          confirm,
+        };
+      }
+
+      async function previewAffiliate() {
+        affiliateCanExecute = false;
+        executeAffiliateButton.disabled = true;
+        affiliateResult.innerHTML = "";
+        setAffiliateMessage("正在预览...", "");
+        const data = await api("/api/manager/affiliate/preview", {
+          method: "POST",
+          body: JSON.stringify(affiliatePayload()),
+        });
+        renderAffiliatePreview(data.preview || {});
+        affiliateCanExecute = Boolean(data.preview && data.preview.can_execute);
+        executeAffiliateButton.disabled = !affiliateCanExecute;
+        setAffiliateMessage(affiliateCanExecute ? "预览完成，可以执行。" : "预览完成。", affiliateCanExecute ? "ok" : "");
+      }
+
+      async function executeAffiliate() {
+        if (!affiliateCanExecute) throw new Error("请先完成可执行的预览。");
+        if (!document.getElementById("confirmAffiliateExecute").checked) throw new Error("执行前请勾选确认。");
+        setAffiliateMessage("正在执行...", "");
+        const data = await api("/api/manager/affiliate/execute", {
+          method: "POST",
+          body: JSON.stringify(affiliatePayload(true)),
+        });
+        affiliateResult.innerHTML = renderExecuteResult(data.result || {});
+        setAffiliateMessage("执行完成。", "ok");
+        affiliateCanExecute = false;
+        executeAffiliateButton.disabled = true;
+      }
+
+      function renderAffiliatePreview(preview) {
+        const messages = (preview.messages || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("") || "<p>无消息</p>";
+        const plan = (preview.plan || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("") || "<li>无待执行更新</li>";
+        affiliatePreview.innerHTML = `
+          <div class="notice ${preview.can_execute ? "ok" : preview.status === "noop" ? "warn" : "bad"}">${messages}</div>
+          <div class="grid two">
+            ${renderAccountCard("邀请人", preview.inviter)}
+            ${renderAccountCard("被邀请人", preview.invitee)}
+          </div>
+          <h3>执行计划</h3>
+          <ul>${plan}</ul>
+          <h3>邀请人当前名单</h3>
+          ${renderInvitees(preview.invitees || [])}
+        `;
+      }
+
+      function renderAccountCard(title, account) {
+        if (!account) return `<div class="mini-card"><h3>${escapeHtml(title)}</h3><p class="meta">无数据</p></div>`;
+        if (account.match_count !== 1) return `<div class="mini-card"><h3>${escapeHtml(title)}</h3><p>匹配数量：${escapeHtml(account.match_count || 0)}</p></div>`;
+        return `<div class="mini-card"><h3>${escapeHtml(title)}</h3>${renderKeyValueTable({
+          "User ID": account.id,
+          "Email": account.email,
+          "Username": account.username,
+          "Status": account.status,
+          "Aff Code": account.aff_code,
+          "Inviter ID": account.inviter_id,
+          "Inviter Email": account.inviter_email,
+          "Aff Count": account.aff_count,
+          "Aff Quota": account.aff_quota,
+          "Affiliate Updated": account.affiliate_updated_at,
+        })}</div>`;
+      }
+
+      function renderInvitees(items) {
+        if (!items.length) return '<p class="meta">暂无被邀请人。</p>';
+        const rows = items.map((item) => `
+          <tr>
+            <td>${escapeHtml(item.invitee_id)}</td>
+            <td>${escapeHtml(item.invitee_email)}</td>
+            <td>${escapeHtml(item.invitee_username)}</td>
+            <td>${escapeHtml(item.relation_created_at)}</td>
+            <td>${escapeHtml(item.relation_updated_at)}</td>
+          </tr>
+        `).join("");
+        return `<div class="table-scroll"><table><thead><tr><th>User ID</th><th>Email</th><th>Username</th><th>Created</th><th>Updated</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      }
+
+      function renderExecuteResult(result) {
+        const after = result.after || {};
+        const created = result.created_profiles || [];
+        const createdHtml = created.length
+          ? `<ul>${created.map((item) => `<li>${escapeHtml(item.email)} / user_id=${escapeHtml(item.user_id)}</li>`).join("")}</ul>`
+          : '<p class="meta">没有补齐新的 user_affiliates 记录。</p>';
+        return `
+          <div class="notice ${result.noop ? "warn" : "ok"}"><p>${result.noop ? "当前关系已经存在，未做实际更新。" : "事务已提交。"}</p></div>
+          ${renderKeyValueTable({
+            "Invitee ID": after.invitee_id,
+            "Invitee Email": after.invitee_email,
+            "Inviter ID": after.inviter_id,
+            "Inviter Email": after.inviter_email,
+            "Inviter Aff Count": after.inviter_aff_count,
+            "Relation Updated": after.relation_updated_at,
+            "Bind Command": result.bind_command,
+            "Increment Command": result.increment_command,
+            "Decrement Command": result.decrement_command,
+            "Old Inviter ID": result.old_inviter_id,
+            "Old Inviter Email": result.old_inviter_email,
+          })}
+          <h3>补齐返利档案</h3>
+          ${createdHtml}
+        `;
+      }
+
+      function renderKeyValueTable(data) {
+        const rows = Object.entries(data).map(([key, value]) => `<tr><th>${escapeHtml(key)}</th><td>${escapeHtml(value)}</td></tr>`).join("");
+        return `<div class="table-scroll"><table>${rows}</table></div>`;
+      }
+
+      function numberOrNull(id) {
+        const value = document.getElementById(id).value;
+        return value === "" ? null : Number(value);
+      }
+
+      function selectedProduct(id) {
+        return document.getElementById(id).value;
+      }
+
+      function renderProductOptions() {
+        const options = listingProducts.map((item) => {
+          const goods = (item.goods_ids || []).join(",");
+          return `<option value="${escapeHtml(item.key)}">${escapeHtml(item.label)} / ${escapeHtml(item.key)}${goods ? ` / goods ${escapeHtml(goods)}` : ""}</option>`;
+        }).join("");
+        document.getElementById("listingProduct").innerHTML = options || '<option value="">暂无商品配置</option>';
+        document.getElementById("schedulerProduct").innerHTML = '<option value="">全部商品</option>' + options;
+        renderProductList();
+        syncListingProductHint();
+      }
+
+      function renderProductList() {
+        const box = document.getElementById("productList");
+        if (!listingProducts.length) {
+          box.innerHTML = '<p class="meta">暂无商品配置。</p>';
+          return;
+        }
+        box.innerHTML = listingProducts.map((item) => {
+          const goods = (item.goods_ids || []).join(", ") || "-";
+          return `
+            <div class="product-item">
+              <div>
+                <strong>${escapeHtml(item.label || item.key)}</strong>
+                <div class="meta">标识：${escapeHtml(item.key)} · 类型：${escapeHtml(item.redeem_type || "-")} · 面值：${escapeHtml(item.redeem_value ?? "-")} · 默认生成：${escapeHtml(item.redeem_count ?? "-")} · Goods：${escapeHtml(goods)}</div>
+              </div>
+              <button class="secondary edit-product" data-key="${escapeHtml(item.key)}" type="button">编辑</button>
+            </div>
+          `;
+        }).join("");
+        box.querySelectorAll(".edit-product").forEach((button) => {
+          button.addEventListener("click", () => {
+            const product = listingProducts.find((item) => item.key === button.dataset.key);
+            if (!product) return;
+            fillProductForm(product);
+            setProductMessage(`已载入商品：${product.label || product.key}`, "ok");
+          });
+        });
+      }
+
+      function syncListingProductHint() {
+        const product = listingProducts.find((item) => item.key === selectedProduct("listingProduct"));
+        const hint = document.getElementById("listingProductHint");
+        if (!product) {
+          hint.textContent = "选择商品后填写本次要生成的兑换码张数。";
+          return;
+        }
+        const goods = (product.goods_ids || []).join(", ") || "-";
+        hint.textContent = `默认生成 ${product.redeem_count || "-"} 张，链动 Goods ID：${goods}。本次生成张数留空时使用商品默认数量。`;
+      }
+
+      function fillProductForm(product) {
+        document.getElementById("productKey").value = product.key || "";
+        document.getElementById("productLabel").value = product.label || "";
+        document.getElementById("productRedeemType").value = product.redeem_type || "balance";
+        document.getElementById("productRedeemValue").value = product.redeem_value ?? "";
+        document.getElementById("productRedeemCount").value = product.redeem_count ?? "";
+        document.getElementById("productGroupId").value = product.group_id ?? "";
+        document.getElementById("productValidityDays").value = product.validity_days ?? "";
+        document.getElementById("productExpiresInDays").value = product.expires_in_days ?? "";
+        document.getElementById("productGoodsIds").value = (product.goods_ids || []).join(",");
+      }
+
+      function clearProductForm() {
+        for (const id of ["productKey", "productLabel", "productRedeemValue", "productRedeemCount", "productGroupId", "productValidityDays", "productExpiresInDays", "productGoodsIds"]) {
+          document.getElementById(id).value = "";
+        }
+        document.getElementById("productRedeemType").value = "balance";
+      }
+
+      function renderListingAuth(lianjia) {
+        listingAuthState.className = "message ok";
+        listingAuthState.textContent = `Cookie：${lianjia.cookie_configured ? lianjia.cookie_preview : "未配置"}；Merchant-Token：${lianjia.merchant_token_configured ? lianjia.merchant_token_preview : "未配置"}`;
+      }
+
+      function openListingAuthModal() {
+        setListingAuthModalMessage("", "");
+        document.getElementById("listingAuthModal").hidden = false;
+        document.getElementById("listingCookie").focus();
+      }
+
+      function closeListingAuthModal() {
+        document.getElementById("listingAuthModal").hidden = true;
+        document.getElementById("listingCookie").value = "";
+        document.getElementById("listingMerchantToken").value = "";
+        setListingAuthModalMessage("", "");
+      }
+
+      function fillScheduler(scheduler) {
+        document.getElementById("schedulerEnabled").checked = Boolean(scheduler.enabled);
+        document.getElementById("schedulerInterval").value = scheduler.interval_minutes || 30;
+        document.getElementById("schedulerThreshold").value = scheduler.stock_threshold ?? 99;
+        document.getElementById("schedulerMinShortage").value = scheduler.min_shortage_to_restock ?? 51;
+        document.getElementById("schedulerRestockCount").value = scheduler.restock_count || "";
+        document.getElementById("schedulerProduct").value = scheduler.product_key || "";
+        document.getElementById("schedulerSummaryOnly").checked = Boolean(scheduler.summary_only);
+        document.getElementById("schedulerDryRun").checked = Boolean(scheduler.dry_run);
+      }
+
+      async function loadListingStatus() {
+        const data = await api("/api/manager/listing/status");
+        const status = data.status || {};
+        listingProducts = status.products || [];
+        renderProductOptions();
+        renderListingAuth(status.lianjia || {});
+        fillScheduler((status.scheduler_status && status.scheduler_status.config) || status.scheduler || {});
+        renderListingResult(status.scheduler_status || {});
+        return status;
+      }
+
+      async function saveListingAuth() {
+        const data = await api("/api/manager/listing/auth", {
+          method: "POST",
+          body: JSON.stringify({
+            cookie: document.getElementById("listingCookie").value,
+            merchant_token: document.getElementById("listingMerchantToken").value,
+          }),
+        });
+        document.getElementById("listingCookie").value = "";
+        document.getElementById("listingMerchantToken").value = "";
+        renderListingAuth(data.lianjia || {});
+        setListingAuthModalMessage("链动设置已保存。", "ok");
+        setListingMessage("链动设置已保存。", "ok");
+        closeListingAuthModal();
+      }
+
+      async function generateUpload() {
+        setListingMessage("正在生成...", "");
+        listingResult.innerHTML = "";
+        const data = await api("/api/manager/listing/generate-upload", {
+          method: "POST",
+          body: JSON.stringify({
+            product_key: selectedProduct("listingProduct"),
+            count: numberOrNull("listingCount"),
+            upload: document.getElementById("listingUpload").checked,
+          }),
+        });
+        renderGenerateResult(data.result || {});
+        setListingMessage("执行完成。", "ok");
+      }
+
+      async function saveProduct() {
+        const data = await api("/api/manager/listing/products", {
+          method: "POST",
+          body: JSON.stringify({
+            product_key: document.getElementById("productKey").value.trim(),
+            label: document.getElementById("productLabel").value.trim(),
+            redeem_type: document.getElementById("productRedeemType").value,
+            redeem_value: document.getElementById("productRedeemValue").value.trim(),
+            redeem_count: numberOrNull("productRedeemCount"),
+            group_id: numberOrNull("productGroupId"),
+            validity_days: numberOrNull("productValidityDays"),
+            expires_in_days: numberOrNull("productExpiresInDays"),
+            goods_ids: document.getElementById("productGoodsIds").value.trim(),
+          }),
+        });
+        const status = data.status || {};
+        listingProducts = status.products || [];
+        renderProductOptions();
+        fillProductForm((listingProducts || []).find((item) => item.key === data.product.key) || {});
+        setProductMessage("商品配置已保存。", "ok");
+      }
+
+      function schedulerPayload() {
+        return {
+          enabled: document.getElementById("schedulerEnabled").checked,
+          interval_minutes: numberOrNull("schedulerInterval"),
+          stock_threshold: numberOrNull("schedulerThreshold"),
+          min_shortage_to_restock: numberOrNull("schedulerMinShortage"),
+          restock_count: numberOrNull("schedulerRestockCount"),
+          product_key: selectedProduct("schedulerProduct"),
+          summary_only: document.getElementById("schedulerSummaryOnly").checked,
+          dry_run: document.getElementById("schedulerDryRun").checked,
+        };
+      }
+
+      async function saveScheduler() {
+        const data = await api("/api/manager/listing/scheduler", {
+          method: "POST",
+          body: JSON.stringify(schedulerPayload()),
+        });
+        fillScheduler(data.scheduler || {});
+        renderListingResult(data.scheduler_status || {});
+        setSchedulerMessage(data.scheduler && data.scheduler.enabled ? "定时器已启用。" : "定时器配置已保存，当前未启用。", "ok");
+      }
+
+      async function runRestockOnce() {
+        setSchedulerMessage("正在执行补库存...", "");
+        listingResult.innerHTML = "";
+        const data = await api("/api/manager/listing/restock-once", {
+          method: "POST",
+          body: JSON.stringify(schedulerPayload()),
+        });
+        renderRestockResult(data.result || {});
+        setSchedulerMessage("补库存执行完成。", "ok");
+      }
+
+      function renderGenerateResult(result) {
+        const uploads = result.upload_results || [];
+        const uploadRows = uploads.length
+          ? uploads.map((item) => `<tr><td>${escapeHtml(item.goods_id)}</td><td>${item.ok ? "成功" : "失败"}</td><td>${escapeHtml(item.error || "")}</td></tr>`).join("")
+          : '<tr><td colspan="3">未执行上架。</td></tr>';
+        listingResult.innerHTML = `
+          <div class="notice ok"><p>商品：${escapeHtml(result.label || result.product_key)}，生成 ${escapeHtml(result.generated_count || 0)} 个兑换码。</p></div>
+          ${renderKeyValueTable({
+            "Product Key": result.product_key,
+            "输出文件": result.output_kept ? result.output_path : "已上架成功并删除",
+            "兑换码类型": result.generate_payload && result.generate_payload.type,
+            "兑换码面值": result.generate_payload && result.generate_payload.value,
+            "分组": result.generate_payload && (result.generate_payload.group_id || "-"),
+          })}
+          <h3>上架结果</h3>
+          <div class="table-scroll"><table><thead><tr><th>Goods ID</th><th>状态</th><th>错误</th></tr></thead><tbody>${uploadRows}</tbody></table></div>
+        `;
+      }
+
+      function renderRestockResult(result) {
+        const rows = (result.products || []).map((item) => `
+          <tr>
+            <td>${escapeHtml(item.label || item.product_key)}</td>
+            <td>${escapeHtml(item.status)}</td>
+            <td>${escapeHtml(item.min_stock ?? "-")}</td>
+            <td>${escapeHtml(item.shortage ?? "-")}</td>
+            <td>${escapeHtml(item.target_count ?? "-")}</td>
+            <td>${escapeHtml(item.message || "")}</td>
+          </tr>
+        `).join("");
+        listingResult.innerHTML = `
+          <div class="notice ok"><p>执行时间：${escapeHtml(result.ran_at || "")}</p></div>
+          <div class="table-scroll"><table><thead><tr><th>商品</th><th>状态</th><th>最低库存</th><th>缺口</th><th>补货数</th><th>说明</th></tr></thead><tbody>${rows || '<tr><td colspan="6">无结果</td></tr>'}</tbody></table></div>
+        `;
+      }
+
+      function renderListingResult(status) {
+        const last = status.last_run;
+        if (!last) {
+          listingResult.innerHTML = '<p class="meta">暂无执行结果。</p>';
+          return;
+        }
+        if (last.ok) renderRestockResult(last.result || {});
+        else listingResult.innerHTML = `<div class="notice bad"><p>${escapeHtml(last.error || "上次执行失败")}</p></div>`;
+      }
+
+      function readImportSettings() {
+        return {
+          name_prefix: document.getElementById("importNamePrefix").value.trim(),
+          notes: document.getElementById("importNotes").value,
+          concurrency: Math.max(0, Number(document.getElementById("importConcurrency").value || 0)),
+          priority: Math.max(0, Number(document.getElementById("importPriority").value || 0)),
+          dedupe: document.getElementById("importDedupe").value,
+          output_mode: document.getElementById("importOutputMode").value,
+        };
+      }
+
+      function converterSettings() {
+        const settings = readImportSettings();
+        return {
+          namePrefix: settings.name_prefix,
+          notes: settings.notes,
+          concurrency: settings.concurrency,
+          priority: settings.priority,
+          dedupe: settings.dedupe,
+          outputMode: settings.output_mode,
+        };
+      }
+
+      function getImportConverter() {
+        const converter = window.CodexSub2apiConverter;
+        if (!converter) throw new Error("Codex 导入转换器未加载，请刷新页面后重试。");
+        return converter;
+      }
+
+      function fillImportSettings(settings) {
+        document.getElementById("importNamePrefix").value = settings.name_prefix || "";
+        document.getElementById("importNotes").value = settings.notes || "";
+        document.getElementById("importConcurrency").value = settings.concurrency ?? 3;
+        document.getElementById("importPriority").value = settings.priority ?? 50;
+        document.getElementById("importDedupe").value = settings.dedupe || "email";
+        document.getElementById("importOutputMode").value = settings.output_mode || "bundle";
+      }
+
+      async function loadImportSettings() {
+        const data = await api("/api/manager/import-settings");
+        fillImportSettings((data.status && data.status.settings) || {});
+        importSettingsLoaded = true;
+        regenerateImportOutput();
+      }
+
+      async function saveImportSettings() {
+        const data = await api("/api/manager/import-settings", {
+          method: "POST",
+          body: JSON.stringify(readImportSettings()),
+        });
+        fillImportSettings(data.settings || {});
+        regenerateImportOutput();
+        setImportSettingsMessage("导入设置已保存。", "ok");
+      }
+
+      async function processImportFiles(files) {
+        const importConverter = getImportConverter();
+        const settings = converterSettings();
+        const jsonFiles = files.filter((file) => file.name.toLowerCase().endsWith(".json"));
+        const items = [];
+        for (const file of jsonFiles) {
+          try {
+            const data = JSON.parse(await file.text());
+            if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("顶层必须是 JSON 对象");
+            const account = await importConverter.buildAccount(file.name, data, settings);
+            items.push({ file, account, error: "" });
+          } catch (error) {
+            items.push({ file, account: null, error: error.message || String(error) });
+          }
+        }
+        importState.files = items;
+        regenerateImportOutput();
+      }
+
+      function regenerateImportOutput() {
+        const importConverter = getImportConverter();
+        const settings = converterSettings();
+        const valid = importState.files
+          .filter((item) => item.account)
+          .map((item) => importConverter.applySettings(item.account, settings));
+        const accounts = importConverter.dedupeAccounts(valid, settings.dedupe);
+        importState.outputPayload = settings.outputMode === "accounts" ? accounts : importConverter.buildBundle(accounts);
+        importState.outputText = accounts.length ? JSON.stringify(importState.outputPayload, null, 2) : "{}";
+        renderImportOutput(accounts);
+      }
+
+      function renderImportOutput(accounts) {
+        const errors = importState.files.filter((item) => item.error).length;
+        document.getElementById("importFileCount").textContent = String(importState.files.length);
+        document.getElementById("importAccountCount").textContent = String(accounts.length);
+        document.getElementById("importErrorCount").textContent = String(errors);
+        document.getElementById("importJsonPreview").textContent = importState.outputText;
+        const ready = accounts.length > 0 && errors === 0;
+        document.getElementById("copyImportOutputButton").disabled = !ready;
+        document.getElementById("downloadImportOutputButton").disabled = !ready;
+        document.getElementById("clearImportButton").disabled = importState.files.length === 0;
+        setImportMessage(ready ? "已生成导入 JSON。" : errors ? "存在无法转换的文件。" : "等待文件。", ready ? "ok" : errors ? "error" : "");
+        renderImportRows();
+      }
+
+      function renderImportRows() {
+        const rows = document.getElementById("importRows");
+        if (!importState.files.length) {
+          rows.innerHTML = '<tr><td colspan="4">暂无文件</td></tr>';
+          return;
+        }
+        rows.innerHTML = importState.files.map((item) => {
+          const account = item.account || {};
+          const ok = !item.error;
+          return `<tr><td>${ok ? "可导入" : "错误"}</td><td>${escapeHtml(account.name || item.error)}</td><td>${escapeHtml(account.credentials?.email || "-")}</td><td>${escapeHtml(item.file.name)}</td></tr>`;
+        }).join("");
+      }
+
+      async function copyImportOutput() {
+        await navigator.clipboard.writeText(importState.outputText);
+        setImportMessage("已复制到剪贴板。", "ok");
+      }
+
+      function downloadImportOutput() {
+        const blob = new Blob([importState.outputText], { type: "application/json;charset=utf-8" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `sub2api-import-${Date.now()}.json`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+      }
+
+      function clearImportFiles() {
+        importState.files = [];
+        importState.outputText = "{}";
+        document.getElementById("importFileInput").value = "";
+        document.getElementById("importFolderInput").value = "";
+        regenerateImportOutput();
+      }
+
+      async function loginManager() {
+        if (!fields.adminToken.value.trim()) {
+          setLoginMessage("请输入管理密码。", "error");
+          return;
+        }
+        setLoginMessage("正在验证...", "");
+        await loadActivities();
+        loginPanel.hidden = true;
+        managerApp.hidden = false;
+        setLoginMessage("", "");
+      }
+
+      document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
+      document.getElementById("loginButton").addEventListener("click", () => loginManager().catch((e) => setLoginMessage(e.message, "error")));
+      fields.adminToken.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") loginManager().catch((e) => setLoginMessage(e.message, "error"));
+      });
+      document.getElementById("savePublishButton").addEventListener("click", () => saveAndPublish().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("importButton").addEventListener("click", () => importCodes().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("closeButton").addEventListener("click", () => closeActivity().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("loadButton").addEventListener("click", () => loadActivities().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("addTierButton").addEventListener("click", () => {
+        try {
+          addOrUpdateTier();
+          setMessage("档次已更新。", "ok");
+        } catch (err) {
+          setMessage(err.message, "error");
+        }
+      });
+      document.getElementById("previewAffiliateButton").addEventListener("click", () => previewAffiliate().catch((e) => setAffiliateMessage(e.message, "error")));
+      document.getElementById("executeAffiliateButton").addEventListener("click", () => executeAffiliate().catch((e) => setAffiliateMessage(e.message, "error")));
+      document.getElementById("refreshListingButton").addEventListener("click", () => loadListingStatus().catch((e) => setListingMessage(e.message, "error")));
+      document.getElementById("openListingAuthModalButton").addEventListener("click", openListingAuthModal);
+      document.getElementById("closeListingAuthModalButton").addEventListener("click", closeListingAuthModal);
+      document.getElementById("cancelListingAuthButton").addEventListener("click", closeListingAuthModal);
+      document.getElementById("listingAuthModal").addEventListener("click", (event) => {
+        if (event.target.id === "listingAuthModal") closeListingAuthModal();
+      });
+      document.getElementById("saveListingAuthButton").addEventListener("click", () => saveListingAuth().catch((e) => setListingAuthModalMessage(e.message, "error")));
+      document.getElementById("generateUploadButton").addEventListener("click", () => generateUpload().catch((e) => setListingMessage(e.message, "error")));
+      document.getElementById("saveProductButton").addEventListener("click", () => saveProduct().catch((e) => setProductMessage(e.message, "error")));
+      document.getElementById("clearProductButton").addEventListener("click", () => {
+        clearProductForm();
+        setProductMessage("", "");
+      });
+      document.getElementById("listingProduct").addEventListener("change", syncListingProductHint);
+      document.getElementById("saveSchedulerButton").addEventListener("click", () => saveScheduler().catch((e) => setSchedulerMessage(e.message, "error")));
+      document.getElementById("runRestockButton").addEventListener("click", () => runRestockOnce().catch((e) => setSchedulerMessage(e.message, "error")));
+      document.getElementById("saveImportSettingsButton").addEventListener("click", () => saveImportSettings().catch((e) => setImportSettingsMessage(e.message, "error")));
+      document.getElementById("refreshImportSettingsButton").addEventListener("click", () => loadImportSettings().catch((e) => setImportSettingsMessage(e.message, "error")));
+      document.getElementById("pickImportFilesButton").addEventListener("click", () => document.getElementById("importFileInput").click());
+      document.getElementById("pickImportFolderButton").addEventListener("click", () => document.getElementById("importFolderInput").click());
+      document.getElementById("importFileInput").addEventListener("change", (event) => processImportFiles([...event.target.files]).catch((e) => setImportMessage(e.message, "error")));
+      document.getElementById("importFolderInput").addEventListener("change", (event) => processImportFiles([...event.target.files]).catch((e) => setImportMessage(e.message, "error")));
+      document.getElementById("copyImportOutputButton").addEventListener("click", () => copyImportOutput().catch((e) => setImportMessage(e.message, "error")));
+      document.getElementById("downloadImportOutputButton").addEventListener("click", downloadImportOutput);
+      document.getElementById("clearImportButton").addEventListener("click", clearImportFiles);
+      for (const id of ["importNamePrefix", "importNotes", "importConcurrency", "importPriority", "importDedupe", "importOutputMode"]) {
+        document.getElementById(id).addEventListener("input", regenerateImportOutput);
+      }
+      const importDropZone = document.getElementById("importDropZone");
+      for (const eventName of ["dragenter", "dragover"]) {
+        importDropZone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          importDropZone.classList.add("is-dragging");
+        });
+      }
+      for (const eventName of ["dragleave", "drop"]) {
+        importDropZone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          importDropZone.classList.remove("is-dragging");
+        });
+      }
+      importDropZone.addEventListener("drop", (event) => {
+        processImportFiles([...event.dataTransfer.files]).catch((e) => setImportMessage(e.message, "error"));
+      });
+      fields.packetType.addEventListener("change", syncPacketType);
+      fields.messageTemplate.value = DEFAULT_MESSAGE_TEMPLATE;
+      syncPacketType();
+    </script>
+  </body>
+</html>

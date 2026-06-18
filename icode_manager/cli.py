@@ -4,7 +4,11 @@ from http.server import HTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from affiliate_admin import AffiliateBindingService
+from balance_history import RechargeCalculator
 from common import ROOT, db_path_from_config, load_config, read_codes
+from import_settings import ImportSettingsService
+from product_listing import ProductListingScheduler, ProductListingService
 from publisher import publish_activity
 from store import Store
 from verifier import UserVerifier
@@ -28,6 +32,7 @@ def cmd_init(args: argparse.Namespace, config: Dict[str, Any], store: Store) -> 
         name=args.name,
         description=args.description or "",
         use_url=args.use_url or "",
+        packet_type="ordinary",
         starts_at=args.starts_at,
         ends_at=args.ends_at,
         status=args.status,
@@ -72,7 +77,15 @@ def cmd_publish(args: argparse.Namespace, config: Dict[str, Any], store: Store) 
 def cmd_serve(args: argparse.Namespace, config: Dict[str, Any], store: Store) -> None:
     ClaimHandler.store = store
     ClaimHandler.config = config
-    ClaimHandler.verifier = UserVerifier(config.get("sub2api", {}))
+    ClaimHandler.verifier = UserVerifier(config)
+    ClaimHandler.recharge_calculator = RechargeCalculator(config, store)
+    ClaimHandler.affiliate_service = AffiliateBindingService(config)
+    product_listing_service = ProductListingService()
+    product_listing_scheduler = ProductListingScheduler(product_listing_service)
+    ClaimHandler.product_listing_service = product_listing_service
+    ClaimHandler.product_listing_scheduler = product_listing_scheduler
+    ClaimHandler.import_settings_service = ImportSettingsService()
+    product_listing_scheduler.start()
     host = args.host or config.get("server", {}).get("host", "127.0.0.1")
     port = int(args.port or config.get("server", {}).get("port", 8099))
     server = ThreadingHTTPServer((host, port), ClaimHandler)
@@ -84,6 +97,7 @@ def cmd_serve(args: argparse.Namespace, config: Dict[str, Any], store: Store) ->
     except KeyboardInterrupt:
         print("\n服务已停止")
     finally:
+        product_listing_scheduler.stop()
         server.server_close()
 
 
