@@ -19,6 +19,7 @@ const messages: Record<string, string> = {
   'availableChannels.pricing.cacheWritePrice': 'Cache Write',
   'availableChannels.pricing.cacheReadPrice': 'Cache Read',
   'availableChannels.pricing.perRequestPrice': 'Price per Request',
+  'availableChannels.pricing.unitPerMillion': '/ 1M tokens',
   'availableChannels.pricing.unitPerRequest': '/ request',
   'availableChannels.pricing.imageOutputPrice': 'Image Output',
   'admin.usage.billingModeToken': 'Token',
@@ -72,7 +73,7 @@ function makePricing(overrides: Record<string, unknown>) {
   }
 }
 
-describe('AvailableChannelsView pricing table', () => {
+describe('AvailableChannelsView model cards', () => {
   beforeEach(() => {
     getAvailable.mockReset()
     showError.mockReset()
@@ -136,11 +137,11 @@ describe('AvailableChannelsView pricing table', () => {
 
     const text = wrapper.text()
     expect(text).toContain('Price per Request')
-    expect(text).toContain('$1')
-    expect(text).toContain('$2')
-    expect(text).toContain('$0.04')
-    expect(text).toContain('Default: $0.08')
-    expect(text).toContain('HD: $0.12')
+    expect(text).toContain('Input$1/ 1M tokens')
+    expect(text).toContain('Output$2/ 1M tokens')
+    expect(text).toContain('Price per Request$0.04/ request')
+    expect(text).toContain('Default$0.08/ request')
+    expect(text).toContain('HD$0.12/ request')
   })
 
   it('falls back to legacy image output price for image request pricing', async () => {

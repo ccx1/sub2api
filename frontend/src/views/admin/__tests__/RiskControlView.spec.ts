@@ -11,8 +11,6 @@ const {
   updateConfig,
   getStatus,
   listLogs,
-  listRequestRecords,
-  extractKeywords,
   getGroups,
   showError,
   showSuccess,
@@ -21,8 +19,6 @@ const {
   updateConfig: vi.fn(),
   getStatus: vi.fn(),
   listLogs: vi.fn(),
-  listRequestRecords: vi.fn(),
-  extractKeywords: vi.fn(),
   getGroups: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -35,8 +31,6 @@ vi.mock('@/api/admin', () => ({
       updateConfig,
       getStatus,
       listLogs,
-      listRequestRecords,
-      extractKeywords,
       testAPIKeys: vi.fn(),
       deleteFlaggedHash: vi.fn(),
       clearFlaggedHashes: vi.fn(),
@@ -89,7 +83,6 @@ const baseConfig = (): ContentModerationConfig => ({
   all_groups: true,
   group_ids: [],
   record_non_hits: false,
-  request_records_enabled: false,
   worker_count: 4,
   queue_size: 32768,
   block_status: 403,
@@ -104,7 +97,6 @@ const baseConfig = (): ContentModerationConfig => ({
   pre_hash_check_enabled: false,
   blocked_keywords: [],
   keyword_blocking_mode: 'keyword_and_api',
-  keyword_ban_duration_minutes: 10,
   thresholds: {
     harassment: 0.98,
     sexual: 0.65,
@@ -184,24 +176,6 @@ const ModelWhitelistSelectorStub = defineComponent({
   },
 })
 
-const ToggleButtonStub = defineComponent({
-  props: {
-    modelValue: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  emits: ['update:modelValue'],
-  setup(props, { attrs, emit }) {
-    return () =>
-      h('button', {
-        ...attrs,
-        type: 'button',
-        onClick: () => emit('update:modelValue', !props.modelValue),
-      }, String(props.modelValue))
-  },
-})
-
 function findButtonByText(wrapper: VueWrapper, text: string): DOMWrapper<HTMLButtonElement> {
   const button = wrapper.findAll<HTMLButtonElement>('button').find((item) => item.text().includes(text))
   if (!button) {
@@ -216,8 +190,6 @@ describe('admin RiskControlView', () => {
     updateConfig.mockReset()
     getStatus.mockReset()
     listLogs.mockReset()
-    listRequestRecords.mockReset()
-    extractKeywords.mockReset()
     getGroups.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
@@ -225,8 +197,6 @@ describe('admin RiskControlView', () => {
     getConfig.mockResolvedValue(baseConfig())
     getStatus.mockResolvedValue(runtimeStatus())
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
-    listRequestRecords.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10, pages: 1 })
-    extractKeywords.mockResolvedValue({ keywords: ['\u98ce\u9669\u5173\u952e\u8bcd'], model: 'gpt-test' })
     getGroups.mockResolvedValue([])
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
@@ -433,133 +403,5 @@ describe('admin RiskControlView', () => {
       'max-h-[280px]',
       'overflow-y-auto',
     ]))
-  })
-
-  it('saves keyword hit temporary ban duration', async () => {
-    const wrapper = mount(RiskControlView, {
-      global: {
-        stubs: {
-          AppLayout: AppLayoutStub,
-          BaseDialog: BaseDialogStub,
-          Icon: true,
-          Select: true,
-          Toggle: true,
-          Pagination: true,
-          ModelWhitelistSelector: ModelWhitelistSelectorStub,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.keywords').trigger('click')
-    await wrapper.get('[data-test="keyword-ban-duration"]').setValue('15')
-    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
-    await flushPromises()
-
-    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
-      keyword_ban_duration_minutes: 15,
-    }))
-    expect(showError).not.toHaveBeenCalled()
-  })
-
-  it('submits the request record switch separately from content moderation', async () => {
-    const wrapper = mount(RiskControlView, {
-      global: {
-        stubs: {
-          AppLayout: AppLayoutStub,
-          BaseDialog: BaseDialogStub,
-          Icon: true,
-          Select: true,
-          Toggle: ToggleButtonStub,
-          Pagination: true,
-          ModelWhitelistSelector: ModelWhitelistSelectorStub,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.runtime').trigger('click')
-    await wrapper.get('[data-test="request-records-enabled"]').trigger('click')
-    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
-    await flushPromises()
-
-    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
-      request_records_enabled: true,
-    }))
-    expect(showError).not.toHaveBeenCalled()
-  })
-
-  it('extracts keywords from a request record and adds them to blocked keywords', async () => {
-    const extractedKeywords = ['\u98ce\u9669\u5173\u952e\u8bcd', '\u8fdd\u89c4\u8bf7\u6c42']
-    listRequestRecords.mockResolvedValue({
-      items: [
-        {
-          id: 101,
-          sequence: 1,
-          request_id: 'req-101',
-          group_id: 1,
-          group_name: 'default',
-          user_id: 7,
-          user_email: 'user@example.com',
-          api_key_id: 9,
-          api_key_name: 'manual-key',
-          input_excerpt: 'please audit this risky request',
-          model: 'gpt-5.5',
-          action: 'allow',
-          flagged: false,
-          created_at: '2026-05-27T00:00:00Z',
-        },
-      ],
-      total: 1,
-      page: 1,
-      page_size: 10,
-      pages: 1,
-    })
-    extractKeywords.mockResolvedValue({ keywords: extractedKeywords, model: 'gpt-test' })
-    updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
-      ...baseConfig(),
-      ...payload,
-      blocked_keywords: payload.blocked_keywords ?? [],
-      model_filter: payload.model_filter ?? baseConfig().model_filter,
-      api_key_configured: false,
-      api_key_masked: '',
-      api_key_count: 0,
-      api_key_masks: [],
-      api_key_statuses: [],
-    }))
-
-    const wrapper = mount(RiskControlView, {
-      global: {
-        stubs: {
-          AppLayout: AppLayoutStub,
-          BaseDialog: BaseDialogStub,
-          Icon: true,
-          Select: true,
-          Toggle: true,
-          Pagination: true,
-          ModelWhitelistSelector: ModelWhitelistSelectorStub,
-        },
-      },
-    })
-
-    await flushPromises()
-
-    await wrapper.get('[data-test="request-record-extract"]').trigger('click')
-    await wrapper.get('[data-test="keyword-extract-submit"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-test="keyword-confirm-add"]').trigger('click')
-    await flushPromises()
-
-    expect(extractKeywords).toHaveBeenCalledWith({
-      text: 'please audit this risky request',
-    })
-    expect(updateConfig).toHaveBeenCalledWith({
-      blocked_keywords: extractedKeywords,
-    })
-    expect(showSuccess).toHaveBeenCalledWith('admin.riskControl.keywordExtractionAdded')
   })
 })

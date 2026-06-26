@@ -24,7 +24,6 @@ export interface ContentModerationConfig {
   all_groups: boolean
   group_ids: number[]
   record_non_hits: boolean
-  request_records_enabled: boolean
   thresholds: Record<string, number>
   worker_count: number
   queue_size: number
@@ -40,7 +39,6 @@ export interface ContentModerationConfig {
   pre_hash_check_enabled: boolean
   blocked_keywords: string[]
   keyword_blocking_mode: KeywordBlockingMode
-  keyword_ban_duration_minutes: number
   model_filter: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count: boolean
 }
@@ -102,7 +100,6 @@ export interface UpdateContentModerationConfig {
   all_groups?: boolean
   group_ids?: number[]
   record_non_hits?: boolean
-  request_records_enabled?: boolean
   thresholds?: Record<string, number>
   worker_count?: number
   queue_size?: number
@@ -118,7 +115,6 @@ export interface UpdateContentModerationConfig {
   pre_hash_check_enabled?: boolean
   blocked_keywords?: string[]
   keyword_blocking_mode?: KeywordBlockingMode
-  keyword_ban_duration_minutes?: number
   model_filter?: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count?: boolean
 }
@@ -199,23 +195,6 @@ export interface ContentModerationLog {
   created_at: string
 }
 
-export interface ContentModerationRequestRecord {
-  id: number
-  sequence: number
-  request_id: string
-  group_id: number | null
-  group_name: string
-  user_id: number | null
-  user_email: string
-  api_key_id: number | null
-  api_key_name: string
-  input_excerpt: string
-  model: string
-  action: string
-  flagged: boolean
-  created_at: string
-}
-
 export interface ListContentModerationLogsParams {
   page?: number
   page_size?: number
@@ -227,39 +206,12 @@ export interface ListContentModerationLogsParams {
   to?: string
 }
 
-export interface ListContentModerationRequestRecordsParams {
-  page?: number
-  page_size?: number
-  group_id?: number
-  search?: string
-  from?: string
-  to?: string
-}
-
 export interface ContentModerationLogsResponse {
   items: ContentModerationLog[]
   total: number
   page: number
   page_size: number
   pages: number
-}
-
-export interface ContentModerationRequestRecordsResponse {
-  items: ContentModerationRequestRecord[]
-  total: number
-  page: number
-  page_size: number
-  pages: number
-}
-
-export interface ExtractContentModerationKeywordsPayload {
-  text: string
-  model?: string
-}
-
-export interface ExtractContentModerationKeywordsResponse {
-  keywords: string[]
-  model: string
 }
 
 export interface ContentModerationUnbanUserResponse {
@@ -309,22 +261,6 @@ export async function listLogs(
   return data
 }
 
-export async function listRequestRecords(
-  params: ListContentModerationRequestRecordsParams = {}
-): Promise<ContentModerationRequestRecordsResponse> {
-  const { data } = await apiClient.get<ContentModerationRequestRecordsResponse>('/admin/risk-control/request-records', {
-    params,
-  })
-  return data
-}
-
-export async function extractKeywords(
-  payload: ExtractContentModerationKeywordsPayload
-): Promise<ExtractContentModerationKeywordsResponse> {
-  const { data } = await apiClient.post<ExtractContentModerationKeywordsResponse>('/admin/risk-control/keywords/extract', payload)
-  return data
-}
-
 export async function unbanUser(userID: number): Promise<ContentModerationUnbanUserResponse> {
   const { data } = await apiClient.post<ContentModerationUnbanUserResponse>(
     `/admin/risk-control/users/${userID}/unban`
@@ -350,8 +286,6 @@ export const riskControlAPI = {
   getStatus,
   testAPIKeys,
   listLogs,
-  listRequestRecords,
-  extractKeywords,
   unbanUser,
   deleteFlaggedHash,
   clearFlaggedHashes,

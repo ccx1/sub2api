@@ -234,91 +234,6 @@
           <div class="flex flex-col gap-4 border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.requestRecords') }}</h2>
-                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.requestRecordsHint') }}</p>
-              </div>
-              <button type="button" class="btn btn-secondary inline-flex items-center gap-2" :disabled="requestRecordsLoading" @click="loadRequestRecords">
-                <Icon name="refresh" size="sm" :class="requestRecordsLoading ? 'animate-spin' : ''" />
-                {{ t('admin.riskControl.refresh') }}
-              </button>
-            </div>
-
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Select v-model="requestRecordFilters.group_id" :options="groupFilterOptions" @change="reloadRequestRecordsFromFirstPage" />
-              <input v-model.trim="requestRecordFilters.search" type="search" class="input" :placeholder="t('admin.riskControl.filters.requestSearch')" @keyup.enter="reloadRequestRecordsFromFirstPage" />
-              <input v-model="requestRecordFilters.from" type="datetime-local" class="input" :title="t('admin.riskControl.filters.from')" @change="reloadRequestRecordsFromFirstPage" />
-              <input v-model="requestRecordFilters.to" type="datetime-local" class="input" :title="t('admin.riskControl.filters.to')" @change="reloadRequestRecordsFromFirstPage" />
-            </div>
-          </div>
-
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
-              <thead class="bg-gray-50 dark:bg-dark-800">
-                <tr>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.sequence') }}</th>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.group') }}</th>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.account') }}</th>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.apiKey') }}</th>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.requestContent') }}</th>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.model') }}</th>
-                  <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.disposition') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-800 dark:bg-dark-800">
-                <tr v-if="requestRecordsLoading">
-                  <td colspan="7" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</td>
-                </tr>
-                <tr v-else-if="requestRecords.length === 0">
-                  <td colspan="7" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.emptyRequestRecords') }}</td>
-                </tr>
-                <template v-else>
-                  <tr v-for="row in requestRecords" :key="row.id" class="hover:bg-gray-50 dark:hover:bg-dark-700/60">
-                    <td class="whitespace-nowrap px-5 py-4 text-sm font-medium text-gray-900 dark:text-white">{{ row.sequence }}</td>
-                    <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{{ row.group_name || '-' }}</td>
-                    <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">
-                      <div>{{ row.user_email || '-' }}</div>
-                      <div v-if="row.user_id" class="text-xs text-gray-400">UID {{ row.user_id }}</div>
-                    </td>
-                    <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">
-                      <div>{{ row.api_key_name || '-' }}</div>
-                      <div v-if="row.api_key_id" class="text-xs text-gray-400">ID {{ row.api_key_id }}</div>
-                    </td>
-                    <td class="w-[360px] max-w-md px-5 py-4 text-sm text-gray-700 dark:text-gray-300">
-                      <div class="truncate" :title="requestRecordSummaryText(row)">{{ requestRecordSummaryText(row) }}</div>
-                    </td>
-                    <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">{{ row.model || '-' }}</td>
-                    <td class="whitespace-nowrap px-5 py-4">
-                      <button
-                        type="button"
-                        data-test="request-record-extract"
-                        class="inline-flex items-center gap-1.5 rounded-md border border-primary-200 bg-primary-50 px-2.5 py-1.5 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-primary-900/60 dark:bg-primary-900/20 dark:text-primary-300 dark:hover:bg-primary-900/30"
-                        :disabled="!canExtractRequestRecordKeywords(row)"
-                        @click="openKeywordExtraction(row)"
-                      >
-                        <Icon name="sparkles" size="xs" />
-                        {{ t('admin.riskControl.extractKeywords') }}
-                      </button>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
-          </div>
-
-          <Pagination
-            v-if="requestRecordPagination.total > 0"
-            :page="requestRecordPagination.page"
-            :total="requestRecordPagination.total"
-            :page-size="requestRecordPagination.page_size"
-            @update:page="onRequestRecordPageChange"
-            @update:pageSize="onRequestRecordPageSizeChange"
-          />
-        </div>
-
-        <div class="card">
-          <div class="flex flex-col gap-4 border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
                 <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.records') }}</h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.recordsHint') }}</p>
               </div>
@@ -895,13 +810,6 @@
               </div>
               <Toggle v-model="configForm.record_non_hits" />
             </div>
-            <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.requestRecordsEnabled') }}</p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.requestRecordsEnabledHint') }}</p>
-              </div>
-              <Toggle v-model="configForm.request_records_enabled" data-test="request-records-enabled" />
-            </div>
             <div class="space-y-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2">
               <div class="flex items-center justify-between gap-4">
                 <div>
@@ -1093,21 +1001,6 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <div>
-                <label class="input-label">{{ t('admin.riskControl.keywordBanDurationMinutes') }}</label>
-                <input
-                  v-model.number="configForm.keyword_ban_duration_minutes"
-                  data-test="keyword-ban-duration"
-                  type="number"
-                  min="0"
-                  max="10080"
-                  class="input"
-                />
-                <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.keywordBanDurationHint') }}</p>
-              </div>
-            </div>
-
             <div>
               <div class="mb-2 flex items-center justify-between">
                 <label class="input-label mb-0">{{ t('admin.riskControl.blockedKeywords') }}</label>
@@ -1209,114 +1102,6 @@
           </div>
         </template>
       </BaseDialog>
-
-      <BaseDialog
-        :show="keywordExtractionOpen"
-        :title="t('admin.riskControl.keywordExtractionTitle')"
-        width="wide"
-        @close="closeKeywordExtraction"
-      >
-        <div v-if="keywordExtractionRow" class="space-y-5">
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.group') }}</p>
-              <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{{ keywordExtractionRow.group_name || '-' }}</p>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.account') }}</p>
-              <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{{ keywordExtractionRow.user_email || '-' }}</p>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.apiKey') }}</p>
-              <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{{ keywordExtractionRow.api_key_name || '-' }}</p>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.model') }}</p>
-              <p class="mt-1 truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ keywordExtractionRow.model || '-' }}</p>
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <label class="input-label">{{ t('admin.riskControl.keywordExtractionModel') }}</label>
-            <input v-model.trim="keywordExtractionModel" type="text" class="input font-mono text-sm" :placeholder="configForm.model || 'gpt-4o'" />
-            <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.keywordExtractionModelHint') }}</p>
-          </div>
-
-          <div class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.keywordExtractionSource') }}</p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatDateTime(keywordExtractionRow.created_at) }}</p>
-              </div>
-              <button
-                type="button"
-                data-test="keyword-extract-submit"
-                class="btn btn-secondary inline-flex items-center gap-2"
-                :disabled="keywordExtracting"
-                @click="extractKeywordsForCurrentRow"
-              >
-                <Icon name="sparkles" size="sm" :class="keywordExtracting ? 'animate-pulse' : ''" />
-                {{ keywordExtracting ? t('admin.riskControl.extractingKeywords') : t('admin.riskControl.extractKeywords') }}
-              </button>
-            </div>
-            <pre class="mt-4 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-950 p-4 text-sm leading-6 text-gray-100 shadow-inner dark:bg-black/50">{{ keywordExtractionRow.input_excerpt || '-' }}</pre>
-          </div>
-
-          <div class="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900/30">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.keywordExtractionCandidates') }}</p>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ keywordExtractionResultMeta }}</p>
-              </div>
-              <button
-                v-if="keywordCandidates.length > 0"
-                type="button"
-                class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-800 dark:hover:text-white"
-                @click="clearKeywordCandidates"
-              >
-                <Icon name="x" size="xs" />
-                {{ t('admin.riskControl.clearExtractedKeywords') }}
-              </button>
-            </div>
-
-            <div v-if="keywordCandidates.length === 0" class="flex min-h-24 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-400">
-              {{ t('admin.riskControl.keywordExtractionEmpty') }}
-            </div>
-            <div v-else class="flex flex-wrap gap-2">
-              <button
-                v-for="keyword in keywordCandidates"
-                :key="keyword"
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors"
-                :class="isKeywordCandidateSelected(keyword)
-                  ? 'border-primary-300 bg-primary-50 text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-200'
-                  : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700'"
-                @click="toggleKeywordCandidate(keyword)"
-              >
-                <Icon :name="isKeywordCandidateSelected(keyword) ? 'checkCircle' : 'plus'" size="xs" />
-                {{ keyword }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <template #footer>
-          <div class="flex flex-col gap-2 sm:flex-row sm:justify-end">
-            <button type="button" class="btn btn-secondary" @click="closeKeywordExtraction">{{ t('common.cancel') }}</button>
-            <button
-              type="button"
-              data-test="keyword-confirm-add"
-              class="btn btn-primary inline-flex items-center justify-center gap-2"
-              :disabled="keywordConfirming || selectedKeywordCandidates.length === 0"
-              @click="confirmAddExtractedKeywords"
-            >
-              <Icon v-if="keywordConfirming" name="refresh" size="sm" class="animate-spin" />
-              <Icon v-else name="check" size="sm" />
-              {{ keywordConfirming ? t('common.saving') : t('admin.riskControl.confirmAddKeywords') }}
-            </button>
-          </div>
-        </template>
-      </BaseDialog>
     </div>
   </AppLayout>
 </template>
@@ -1339,7 +1124,6 @@ import type {
   ContentModerationLog,
   ContentModerationModelFilter,
   ContentModerationModelFilterType,
-  ContentModerationRequestRecord,
   ContentModerationRuntimeStatus,
   ContentModerationTestAuditResult,
   KeywordBlockingMode,
@@ -1404,12 +1188,9 @@ const appStore = useAppStore()
 const loading = ref(true)
 const saving = ref(false)
 const logsLoading = ref(false)
-const requestRecordsLoading = ref(false)
 const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
 const hashActionLoading = ref(false)
-const keywordExtracting = ref(false)
-const keywordConfirming = ref(false)
 const unbanningUserID = ref<number | null>(null)
 const settingsOpen = ref(false)
 const activeSettingsTab = ref<SettingsTab>('basic')
@@ -1417,7 +1198,6 @@ const groupSearch = ref('')
 const flaggedHashInput = ref('')
 const groups = ref<AdminGroup[]>([])
 const logs = ref<ContentModerationLog[]>([])
-const requestRecords = ref<ContentModerationRequestRecord[]>([])
 const status = ref<ContentModerationRuntimeStatus | null>(null)
 const testedApiKeyStatuses = ref<ContentModerationAPIKeyStatus[]>([])
 const pendingDeleteApiKeyHashes = ref<string[]>([])
@@ -1426,13 +1206,6 @@ const moderationTestPrompt = ref('')
 const moderationTestImages = ref<string[]>([])
 const moderationTestResult = ref<ContentModerationTestAuditResult | null>(null)
 const inputDetailRow = ref<ContentModerationLog | null>(null)
-const keywordExtractionOpen = ref(false)
-const keywordExtractionRow = ref<ContentModerationRequestRecord | null>(null)
-const keywordExtractionModel = ref('')
-const keywordExtractionResultModel = ref('')
-const keywordCandidates = ref<string[]>([])
-const selectedKeywordCandidateSet = ref<Set<string>>(new Set())
-const hiddenImageRequestText = '[image request hidden]'
 let statusTimer: number | null = null
 
 const configForm = reactive({
@@ -1454,7 +1227,6 @@ const configForm = reactive({
   all_groups: true,
   group_ids: [] as number[],
   record_non_hits: false,
-  request_records_enabled: false,
   worker_count: 4,
   queue_size: 32768,
   block_status: 403,
@@ -1470,7 +1242,6 @@ const configForm = reactive({
   thresholds: { ...riskThresholdDefaults } as Record<string, number>,
   blocked_keywords_text: '',
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
-  keyword_ban_duration_minutes: 10,
   model_filter_type: 'all' as ContentModerationModelFilterType,
   model_filter_models: [] as string[],
 })
@@ -1482,24 +1253,10 @@ const pagination = reactive({
   pages: 1,
 })
 
-const requestRecordPagination = reactive({
-  page: 1,
-  page_size: 10,
-  total: 0,
-  pages: 1,
-})
-
 const filters = reactive({
   result: '',
   group_id: 0,
   endpoint: '',
-  search: '',
-  from: '',
-  to: '',
-})
-
-const requestRecordFilters = reactive({
-  group_id: 0,
   search: '',
   from: '',
   to: '',
@@ -1668,19 +1425,6 @@ const inputApiKeyCount = computed(() => parseApiKeys(configForm.api_keys_text).l
 const blockedKeywordList = computed(() => parseBlockedKeywords(configForm.blocked_keywords_text))
 
 const blockedKeywordCount = computed(() => blockedKeywordList.value.length)
-
-const selectedKeywordCandidates = computed(() => (
-  keywordCandidates.value.filter((keyword) => selectedKeywordCandidateSet.value.has(keyword.toLowerCase()))
-))
-
-const keywordExtractionResultMeta = computed(() => {
-  if (keywordCandidates.value.length === 0) return t('admin.riskControl.keywordExtractionCandidateHint')
-  const model = keywordExtractionResultModel.value || keywordExtractionModel.value || configForm.model || '-'
-  return t('admin.riskControl.keywordExtractionCandidateMeta', {
-    count: keywordCandidates.value.length,
-    model,
-  })
-})
 
 const pendingDeletedApiKeyCount = computed(() => pendingDeleteApiKeyHashes.value.length)
 
@@ -1960,7 +1704,6 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.all_groups = config.all_groups
   configForm.group_ids = Array.isArray(config.group_ids) ? [...config.group_ids] : []
   configForm.record_non_hits = config.record_non_hits
-  configForm.request_records_enabled = config.request_records_enabled ?? false
   configForm.worker_count = config.worker_count || 4
   configForm.queue_size = config.queue_size || 32768
   configForm.block_status = config.block_status || 403
@@ -1976,7 +1719,6 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.thresholds = riskThresholdsFromConfig(config.thresholds)
   configForm.blocked_keywords_text = Array.isArray(config.blocked_keywords) ? config.blocked_keywords.join('\n') : ''
   configForm.keyword_blocking_mode = normalizeKeywordBlockingMode(config.keyword_blocking_mode)
-  configForm.keyword_ban_duration_minutes = clampKeywordBanDuration(config.keyword_ban_duration_minutes)
   const modelFilter = normalizeModelFilter(config.model_filter)
   configForm.model_filter_type = modelFilter.type
   configForm.model_filter_models = modelFilter.models
@@ -1997,7 +1739,7 @@ async function loadAll() {
       configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
       prunePendingDeleteAPIKeyHashes()
     }
-    await Promise.all([loadLogs(), loadRequestRecords()])
+    await loadLogs()
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.loadFailed')))
   } finally {
@@ -2042,7 +1784,6 @@ async function saveConfig() {
       all_groups: configForm.all_groups,
       group_ids: configForm.all_groups ? [] : [...configForm.group_ids],
       record_non_hits: configForm.record_non_hits,
-      request_records_enabled: configForm.request_records_enabled,
       clear_api_key: configForm.clear_api_key,
       worker_count: Number(configForm.worker_count) || 4,
       queue_size: Number(configForm.queue_size) || 32768,
@@ -2059,7 +1800,6 @@ async function saveConfig() {
       thresholds: buildRiskThresholdPayload(),
       blocked_keywords: blockedKeywordList.value,
       keyword_blocking_mode: configForm.keyword_blocking_mode,
-      keyword_ban_duration_minutes: clampKeywordBanDuration(configForm.keyword_ban_duration_minutes),
       model_filter: modelFilterPayload,
     }
     const keys = parseApiKeys(configForm.api_keys_text)
@@ -2080,7 +1820,7 @@ async function saveConfig() {
     applyConfig(updated)
     settingsOpen.value = false
     appStore.showSuccess(t('admin.riskControl.saved'))
-    await Promise.all([loadStatus(true), loadLogs(), loadRequestRecords()])
+    await Promise.all([loadStatus(true), loadLogs()])
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.saveFailed')))
   } finally {
@@ -2114,30 +1854,6 @@ async function loadLogs() {
   }
 }
 
-async function loadRequestRecords() {
-  requestRecordsLoading.value = true
-  try {
-    const params = {
-      page: requestRecordPagination.page,
-      page_size: requestRecordPagination.page_size,
-      group_id: requestRecordFilters.group_id || undefined,
-      search: requestRecordFilters.search || undefined,
-      from: normalizeDateTimeLocal(requestRecordFilters.from),
-      to: normalizeDateTimeLocal(requestRecordFilters.to),
-    }
-    const result = await adminAPI.riskControl.listRequestRecords(params)
-    requestRecords.value = result.items
-    requestRecordPagination.total = result.total
-    requestRecordPagination.page = result.page
-    requestRecordPagination.page_size = result.page_size
-    requestRecordPagination.pages = result.pages
-  } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.requestRecordsFailed')))
-  } finally {
-    requestRecordsLoading.value = false
-  }
-}
-
 function canUnbanRow(row: ContentModerationLog): boolean {
   return Boolean(row.auto_banned && row.user_id && row.user_status === 'disabled')
 }
@@ -2152,106 +1868,6 @@ function openInputDetail(row: ContentModerationLog) {
 
 function closeInputDetail() {
   inputDetailRow.value = null
-}
-
-function requestRecordSummaryText(row: ContentModerationRequestRecord): string {
-  if (row.input_excerpt === hiddenImageRequestText) {
-    return t('admin.riskControl.hiddenImageRequest')
-  }
-  return row.input_excerpt || '-'
-}
-
-function canExtractRequestRecordKeywords(row: ContentModerationRequestRecord): boolean {
-  return Boolean(row.input_excerpt && row.input_excerpt !== hiddenImageRequestText)
-}
-
-function openKeywordExtraction(row: ContentModerationRequestRecord) {
-  if (!canExtractRequestRecordKeywords(row)) return
-  keywordExtractionRow.value = row
-  keywordExtractionModel.value = ''
-  keywordExtractionResultModel.value = ''
-  keywordCandidates.value = []
-  selectedKeywordCandidateSet.value = new Set()
-  keywordExtractionOpen.value = true
-}
-
-function closeKeywordExtraction() {
-  if (keywordExtracting.value || keywordConfirming.value) return
-  keywordExtractionOpen.value = false
-  keywordExtractionRow.value = null
-  keywordExtractionResultModel.value = ''
-  keywordCandidates.value = []
-  selectedKeywordCandidateSet.value = new Set()
-}
-
-async function extractKeywordsForCurrentRow() {
-  if (!keywordExtractionRow.value || keywordExtracting.value) return
-  keywordExtracting.value = true
-  try {
-    const payload = {
-      text: keywordExtractionRow.value.input_excerpt,
-    } as { text: string; model?: string }
-    const model = keywordExtractionModel.value.trim()
-    if (model) {
-      payload.model = model
-    }
-    const result = await adminAPI.riskControl.extractKeywords(payload)
-    keywordExtractionResultModel.value = result.model
-    keywordCandidates.value = normalizeKeywordCandidates(result.keywords)
-    selectedKeywordCandidateSet.value = new Set(keywordCandidates.value.map((item) => item.toLowerCase()))
-    if (keywordCandidates.value.length === 0) {
-      appStore.showError(t('admin.riskControl.keywordExtractionEmpty'))
-    }
-  } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.keywordExtractionFailed')))
-  } finally {
-    keywordExtracting.value = false
-  }
-}
-
-function clearKeywordCandidates() {
-  keywordCandidates.value = []
-  keywordExtractionResultModel.value = ''
-  selectedKeywordCandidateSet.value = new Set()
-}
-
-function isKeywordCandidateSelected(keyword: string): boolean {
-  return selectedKeywordCandidateSet.value.has(keyword.toLowerCase())
-}
-
-function toggleKeywordCandidate(keyword: string) {
-  const next = new Set(selectedKeywordCandidateSet.value)
-  const key = keyword.toLowerCase()
-  if (next.has(key)) {
-    next.delete(key)
-  } else {
-    next.add(key)
-  }
-  selectedKeywordCandidateSet.value = next
-}
-
-async function confirmAddExtractedKeywords() {
-  const selected = selectedKeywordCandidates.value
-  if (selected.length === 0 || keywordConfirming.value) return
-  keywordConfirming.value = true
-  try {
-    const existing = blockedKeywordList.value
-    const merged = mergeBlockedKeywords(existing, selected)
-    if (merged.length === existing.length) {
-      appStore.showError(t('admin.riskControl.keywordExtractionAllExists'))
-      return
-    }
-    const updated = await adminAPI.riskControl.updateConfig({ blocked_keywords: merged })
-    applyConfig(updated)
-    keywordExtractionOpen.value = false
-    keywordExtractionRow.value = null
-    appStore.showSuccess(t('admin.riskControl.keywordExtractionAdded', { count: merged.length - existing.length }))
-    await loadStatus(true)
-  } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.keywordExtractionAddFailed')))
-  } finally {
-    keywordConfirming.value = false
-  }
 }
 
 async function unbanUser(row: ContentModerationLog) {
@@ -2312,11 +1928,6 @@ function reloadLogsFromFirstPage() {
   void loadLogs()
 }
 
-function reloadRequestRecordsFromFirstPage() {
-  requestRecordPagination.page = 1
-  void loadRequestRecords()
-}
-
 function onPageChange(page: number) {
   pagination.page = page
   void loadLogs()
@@ -2326,17 +1937,6 @@ function onPageSizeChange(pageSize: number) {
   pagination.page = 1
   pagination.page_size = pageSize
   void loadLogs()
-}
-
-function onRequestRecordPageChange(page: number) {
-  requestRecordPagination.page = page
-  void loadRequestRecords()
-}
-
-function onRequestRecordPageSizeChange(pageSize: number) {
-  requestRecordPagination.page = 1
-  requestRecordPagination.page_size = pageSize
-  void loadRequestRecords()
 }
 
 function toggleClearApiKey() {
@@ -2710,41 +2310,6 @@ function parseBlockedKeywords(value: string): string[] {
     out.push(kw)
   }
   return out
-}
-
-function normalizeKeywordCandidates(items: unknown): string[] {
-  if (!Array.isArray(items)) return []
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const item of items) {
-    const keyword = String(item ?? '').trim()
-    if (!keyword) continue
-    const key = keyword.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(keyword)
-  }
-  return out
-}
-
-function mergeBlockedKeywords(existing: string[], candidates: string[]): string[] {
-  const out = [...existing]
-  const seen = new Set(existing.map((item) => item.toLowerCase()))
-  for (const candidate of candidates) {
-    const keyword = candidate.trim()
-    if (!keyword) continue
-    const key = keyword.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(keyword)
-  }
-  return out
-}
-
-function clampKeywordBanDuration(value: unknown): number {
-  const minutes = Number(value ?? 10)
-  if (!Number.isFinite(minutes)) return 10
-  return Math.min(Math.max(Math.floor(minutes), 0), 10080)
 }
 
 function violationCountText(row: ContentModerationLog): string {

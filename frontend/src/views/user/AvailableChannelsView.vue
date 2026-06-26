@@ -51,7 +51,7 @@
       </template>
 
       <template #table>
-        <div class="h-full overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+        <div class="h-full overflow-hidden bg-white dark:bg-dark-800">
           <div v-if="loading" class="flex h-full items-center justify-center py-16">
             <Icon name="refresh" size="lg" class="animate-spin text-gray-400" />
           </div>
@@ -63,15 +63,34 @@
             </div>
           </div>
 
-          <div v-else class="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <aside class="border-b border-gray-200 bg-gray-50/70 dark:border-dark-700 dark:bg-dark-900/40 lg:border-b-0 lg:border-r">
-              <div class="border-b border-gray-200 px-4 py-3 dark:border-dark-700">
-                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
+          <div
+            v-else
+            class="grid h-full min-h-0 grid-cols-1 transition-[grid-template-columns] duration-200"
+            :class="channelPanelCollapsed ? 'lg:grid-cols-[72px_minmax(0,1fr)]' : 'lg:grid-cols-[280px_minmax(0,1fr)]'"
+          >
+            <aside class="min-h-0 border-b border-gray-200 bg-gray-50/70 dark:border-dark-700 dark:bg-dark-900/40 lg:border-b-0 lg:border-r">
+              <div class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+                <h2
+                  class="min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-white"
+                  :class="channelPanelCollapsed ? 'lg:sr-only' : ''"
+                >
                   {{ t('availableChannels.title') }}
                 </h2>
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:border-primary-200 hover:text-primary-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-400 dark:hover:border-primary-800 dark:hover:text-primary-300"
+                  :title="channelPanelCollapsed ? t('availableChannels.expandChannels', '展开渠道列表') : t('availableChannels.collapseChannels', '收起渠道列表')"
+                  :aria-expanded="!channelPanelCollapsed"
+                  @click="channelPanelCollapsed = !channelPanelCollapsed"
+                >
+                  <Icon :name="channelPanelCollapsed ? 'chevronRight' : 'chevronLeft'" size="sm" />
+                </button>
               </div>
 
-              <div class="max-h-full overflow-y-auto p-3">
+              <div
+                class="max-h-full overflow-y-auto p-3"
+                :class="channelPanelCollapsed ? 'lg:hidden' : ''"
+              >
                 <button
                   v-for="channel in filteredChannels"
                   :key="channel.name"
@@ -94,6 +113,25 @@
                   </div>
                 </button>
               </div>
+
+              <div v-if="channelPanelCollapsed" class="hidden max-h-full flex-col items-center gap-2 overflow-y-auto py-3 lg:flex">
+                <button
+                  v-for="channel in filteredChannels"
+                  :key="channel.name"
+                  type="button"
+                  class="relative inline-flex h-11 w-11 items-center justify-center rounded-lg border text-sm font-semibold transition"
+                  :class="selectedChannelName === channel.name
+                    ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm dark:border-primary-700 dark:bg-primary-900/20 dark:text-primary-300'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-primary-200 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-primary-800 dark:hover:bg-dark-700'"
+                  :title="channel.name"
+                  @click="selectedChannelName = channel.name"
+                >
+                  <span class="max-w-7 truncate">{{ getChannelInitial(channel.name) }}</span>
+                  <span class="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gray-100 px-1 text-[10px] font-medium text-gray-600 ring-2 ring-white dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-900">
+                    {{ getChannelModelCount(channel) }}
+                  </span>
+                </button>
+              </div>
             </aside>
 
             <section class="flex min-h-0 flex-col">
@@ -103,62 +141,75 @@
                 </h2>
               </div>
 
-              <div class="min-h-0 flex-1 overflow-auto">
-                <table class="w-full min-w-[880px] border-collapse text-sm">
-                  <thead class="sticky top-0 z-10 bg-gray-50/95 text-xs font-medium uppercase tracking-wide text-gray-500 backdrop-blur dark:bg-dark-800/95 dark:text-gray-400">
-                    <tr>
-                      <th class="px-5 py-3 text-left">模型名称</th>
-                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.billingMode') }}</th>
-                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.inputPrice') }}</th>
-                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.outputPrice') }}</th>
-                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.cacheWritePrice') }}</th>
-                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.cacheReadPrice') }}</th>
-                      <th class="px-5 py-3 text-left">{{ t('availableChannels.pricing.perRequestPrice') }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="model in selectedChannelModels"
-                      :key="`${model.platform}-${model.name}`"
-                      class="border-t border-gray-100 dark:border-dark-700"
-                    >
-                      <td class="px-5 py-4 align-top">
-                        <div class="font-medium text-gray-900 dark:text-white">{{ model.name }}</div>
-                      </td>
-                      <td class="px-5 py-4 align-top">
+              <div class="min-h-0 flex-1 overflow-auto bg-gray-50/40 p-4 dark:bg-dark-900/20 sm:p-5">
+                <div v-if="selectedChannelModels.length > 0" class="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                  <article
+                    v-for="model in selectedChannelModels"
+                    :key="`${model.platform}-${model.name}`"
+                    class="group flex min-h-[190px] flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-primary-200 hover:shadow-md dark:border-dark-700 dark:bg-dark-800/95 dark:hover:border-primary-800"
+                  >
+                    <div class="flex items-start gap-3">
+                      <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900">
+                        <ModelIcon :model="model.name" size="28px" />
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <h3 class="break-words text-base font-semibold leading-tight text-gray-900 dark:text-white">
+                          {{ model.name }}
+                        </h3>
+                        <p v-if="model.platform" class="mt-1 truncate text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                          {{ model.platform }}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        class="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 opacity-100 transition hover:border-primary-200 hover:text-primary-600 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-400 dark:hover:border-primary-800 dark:hover:text-primary-300 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                        :title="t('common.copy', '复制')"
+                        @click="copyModelName(model.name)"
+                      >
+                        <Icon name="copy" size="sm" />
+                      </button>
+                    </div>
+
+                    <div class="mt-4 space-y-1.5 text-sm">
+                      <template v-if="getModelPricingItems(model).length > 0">
+                        <div
+                          v-for="item in getModelPricingItems(model)"
+                          :key="item.key"
+                          class="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-gray-600 dark:text-gray-300"
+                        >
+                          <span class="text-gray-500 dark:text-gray-400">{{ item.label }}</span>
+                          <span class="font-medium text-gray-800 dark:text-gray-100">{{ item.value }}</span>
+                          <span v-if="item.unit" class="text-gray-500 dark:text-gray-400">{{ item.unit }}</span>
+                        </div>
+                      </template>
+                      <p v-else class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ t('availableChannels.noPricing', '暂无定价') }}
+                      </p>
+                    </div>
+
+                    <div class="mt-auto flex flex-wrap items-center gap-2 pt-4">
                         <span
                           class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium"
                           :class="getBillingModeBadgeClass(model.pricing?.billing_mode)"
                         >
                           {{ getBillingModeText(model.pricing?.billing_mode) }}
                         </span>
-                      </td>
-                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'input_price') }}</td>
-                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'output_price') }}</td>
-                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'cache_write_price') }}</td>
-                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">{{ getModelPricingValue(model, 'cache_read_price') }}</td>
-                      <td class="px-5 py-4 align-top text-gray-700 dark:text-gray-300">
-                        <div v-if="getPerRequestPricingItems(model).length > 0" class="space-y-1">
-                          <div
-                            v-for="item in getPerRequestPricingItems(model)"
-                            :key="item.key"
-                            class="whitespace-nowrap"
-                          >
-                            <span v-if="item.label" class="text-gray-500 dark:text-gray-400">{{ item.label }}: </span>
-                            <span>{{ item.value }}</span>
-                            <span class="ml-1 text-gray-400 dark:text-gray-500">{{ t('availableChannels.pricing.unitPerRequest') }}</span>
-                          </div>
-                        </div>
-                        <span v-else>-</span>
-                      </td>
-                    </tr>
-                    <tr v-if="selectedChannelModels.length === 0">
-                      <td colspan="7" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-                        {{ t('availableChannels.noModels') }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                        <span
+                          v-if="model.platform"
+                          class="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium uppercase text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+                        >
+                          {{ model.platform }}
+                        </span>
+                    </div>
+                  </article>
+                </div>
+
+                <div v-else class="flex h-full min-h-[260px] items-center justify-center px-6 py-12 text-center">
+                  <div>
+                    <Icon name="inbox" size="xl" class="mx-auto mb-3 h-12 w-12 text-gray-400" />
+                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('availableChannels.noModels') }}</p>
+                  </div>
+                </div>
               </div>
             </section>
           </div>
@@ -174,6 +225,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ModelIcon from '@/components/common/ModelIcon.vue'
 import userChannelsAPI, { type UserAvailableChannel, type UserSupportedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -188,6 +240,7 @@ const channels = ref<UserAvailableChannel[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
 const selectedChannelName = ref('')
+const channelPanelCollapsed = ref(false)
 const quickStartGuideUrl = 'https://www.kdocs.cn/l/cmuLD3zCWFWq'
 
 const filteredChannels = computed(() => {
@@ -250,6 +303,10 @@ function getChannelModelCount(channel: UserAvailableChannel): number {
   return channel.platforms.reduce((count, section) => count + section.supported_models.length, 0)
 }
 
+function getChannelInitial(name: string): string {
+  return name.trim().slice(0, 1).toUpperCase() || '#'
+}
+
 function getBillingModeText(mode: string | null | undefined): string {
   return getBillingModeLabel(mode, t)
 }
@@ -269,6 +326,47 @@ interface PricingDisplayItem {
   key: string
   label: string
   value: string
+  unit?: string
+}
+
+function getModelPricingItems(model: UserSupportedModel): PricingDisplayItem[] {
+  const pricing = model.pricing
+  if (!pricing) return []
+
+  if (pricing.billing_mode === BILLING_MODE_TOKEN) {
+    return [
+      {
+        key: 'input',
+        label: t('availableChannels.pricing.inputPrice'),
+        value: getModelPricingValue(model, 'input_price'),
+        unit: t('availableChannels.pricing.unitPerMillion'),
+      },
+      {
+        key: 'output',
+        label: t('availableChannels.pricing.outputPrice'),
+        value: getModelPricingValue(model, 'output_price'),
+        unit: t('availableChannels.pricing.unitPerMillion'),
+      },
+      {
+        key: 'cache-write',
+        label: t('availableChannels.pricing.cacheWritePrice'),
+        value: getModelPricingValue(model, 'cache_write_price'),
+        unit: t('availableChannels.pricing.unitPerMillion'),
+      },
+      {
+        key: 'cache-read',
+        label: t('availableChannels.pricing.cacheReadPrice'),
+        value: getModelPricingValue(model, 'cache_read_price'),
+        unit: t('availableChannels.pricing.unitPerMillion'),
+      },
+    ].filter((item) => item.value !== '-')
+  }
+
+  return getPerRequestPricingItems(model).map((item) => ({
+    ...item,
+    label: item.label || getRequestPricingLabel(pricing.billing_mode),
+    unit: t('availableChannels.pricing.unitPerRequest'),
+  }))
 }
 
 function getPerRequestPricingItems(model: UserSupportedModel): PricingDisplayItem[] {
@@ -305,9 +403,24 @@ function getPerRequestPricingItems(model: UserSupportedModel): PricingDisplayIte
   return items
 }
 
+function getRequestPricingLabel(mode: string | null | undefined): string {
+  if (mode === BILLING_MODE_IMAGE) return t('availableChannels.pricing.imageOutputPrice')
+  return t('availableChannels.pricing.perRequestPrice')
+}
+
 function formatIntervalRange(min: number, max: number | null): string {
   if (max == null) return `${min}+`
   return `${min}-${max}`
+}
+
+async function copyModelName(name: string) {
+  try {
+    if (!navigator.clipboard) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(name)
+    appStore.showSuccess(t('common.copiedToClipboard', '已复制到剪贴板'))
+  } catch {
+    appStore.showError(t('common.copyFailed', '复制失败'))
+  }
 }
 
 onMounted(loadChannels)

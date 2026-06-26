@@ -45,13 +45,23 @@
           </div>
 
           <a
-            class="auth-codex-link"
+            class="auth-action-link"
             :href="codexDownloadUrl"
             target="_blank"
             rel="noopener noreferrer"
           >
             <span>{{ t('auth.loginHero.codexDownload') }}</span>
             <Icon name="externalLink" size="sm" :stroke-width="2" aria-hidden="true" />
+          </a>
+
+          <a
+            class="auth-action-link"
+            :href="usageDocsUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span>{{ t('auth.loginHero.usageDocs') }}</span>
+            <Icon name="book" size="sm" :stroke-width="2" aria-hidden="true" />
           </a>
         </div>
       </section>
@@ -149,6 +159,7 @@ const isDark = ref(false)
 const qqGroupNumber = '1009439039'
 const qqQrCode = '/qq-group-1009439039.png'
 const codexDownloadUrl = 'https://codex.download.icodett.xyz/'
+const usageDocsUrl = 'https://www.kdocs.cn/l/cmuLD3zCWFWq'
 
 let themeObserver: MutationObserver | null = null
 
@@ -411,7 +422,7 @@ onUnmounted(() => {
 
 .auth-actions {
   display: flex;
-  width: min(100%, 372px);
+  width: min(100%, 416px);
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
@@ -419,7 +430,7 @@ onUnmounted(() => {
 
 .auth-qq {
   position: relative;
-  width: min(100%, 216px);
+  width: min(100%, 164px);
   margin-left: 0;
   opacity: 0.78;
   outline: none;
@@ -437,13 +448,20 @@ onUnmounted(() => {
   height: 40px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 8px;
+  padding: 0 10px;
   border: 1px solid var(--auth-panel-border);
   border-radius: 8px;
   color: var(--auth-soft);
   background: color-mix(in srgb, var(--auth-panel), transparent 36%);
   font-size: 0.75rem;
+}
+
+.auth-qq__bar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .auth-qq__icon {
@@ -499,7 +517,7 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.auth-codex-link {
+.auth-action-link {
   display: inline-flex;
   height: 40px;
   align-items: center;
@@ -514,6 +532,7 @@ onUnmounted(() => {
   line-height: 1;
   text-decoration: none;
   opacity: 0.78;
+  white-space: nowrap;
   transition:
     opacity 0.18s ease,
     transform 0.18s ease,
@@ -521,13 +540,13 @@ onUnmounted(() => {
     color 0.18s ease;
 }
 
-.auth-codex-link:hover {
+.auth-action-link:hover {
   color: var(--auth-primary);
   opacity: 1;
   transform: translateY(-1px);
 }
 
-.auth-codex-link:focus-visible {
+.auth-action-link:focus-visible {
   outline: 2px solid var(--auth-primary);
   outline-offset: 3px;
 }
@@ -709,7 +728,7 @@ onUnmounted(() => {
   }
 
   .auth-qq {
-    width: min(100%, 216px);
+    width: min(100%, 164px);
   }
 
   .auth-qq__bar {

@@ -29,10 +29,6 @@ func (r *cyberOrderingTestRepo) CreateLog(ctx context.Context, log *ContentModer
 	return nil
 }
 
-func (r *cyberOrderingTestRepo) CreateRequestRecord(ctx context.Context, log *ContentModerationLog) error {
-	return nil
-}
-
 func (r *cyberOrderingTestRepo) UpdateLogEmailSent(ctx context.Context, id int64, sent bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -42,14 +38,6 @@ func (r *cyberOrderingTestRepo) UpdateLogEmailSent(ctx context.Context, id int64
 
 func (r *cyberOrderingTestRepo) ListLogs(ctx context.Context, filter ContentModerationLogFilter) ([]ContentModerationLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
-}
-
-func (r *cyberOrderingTestRepo) ListRequestRecords(ctx context.Context, filter ContentModerationRequestRecordFilter) ([]ContentModerationRequestRecord, *pagination.PaginationResult, error) {
-	return nil, nil, nil
-}
-
-func (r *cyberOrderingTestRepo) HasRecentKeywordBlockByUserSince(ctx context.Context, userID int64, since time.Time) (bool, error) {
-	return false, nil
 }
 
 func (r *cyberOrderingTestRepo) CountFlaggedByUserSince(ctx context.Context, userID int64, since time.Time, excludeCyberPolicy bool) (int, error) {

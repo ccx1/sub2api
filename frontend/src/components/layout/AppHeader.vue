@@ -1,28 +1,28 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b">
-    <div class="flex h-16 items-center justify-between px-4 md:px-6">
+  <header class="app-header glass sticky top-0 z-30 border-b">
+    <div class="app-header__inner flex h-16 items-center justify-between px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex items-center gap-4">
         <button
           @click="toggleMobileSidebar"
-          class="btn-ghost btn-icon lg:hidden"
+          class="btn btn-ghost btn-icon lg:hidden"
           aria-label="Toggle Menu"
         >
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden lg:block">
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+        <div class="app-header__title hidden lg:block">
+          <h1 class="text-lg font-semibold">
             {{ pageTitle }}
           </h1>
-          <p v-if="pageDescription" class="text-xs text-gray-500 dark:text-dark-400">
+          <p v-if="pageDescription" class="text-xs">
             {{ pageDescription }}
           </p>
         </div>
       </div>
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex items-center gap-3">
+      <div class="app-header__actions flex items-center gap-3">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -55,10 +55,10 @@
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="hidden items-center gap-2 rounded-full border border-primary-200/70 bg-primary-50/80 px-3 py-1.5 dark:border-primary-800/60 dark:bg-primary-900/20 sm:flex"
+          class="app-balance-pill hidden items-center gap-2 rounded-full px-3 py-1.5 sm:flex"
         >
           <svg
-            class="h-4 w-4 text-primary-700 dark:text-primary-300"
+            class="h-4 w-4"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -70,7 +70,7 @@
               d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"
             />
           </svg>
-          <span class="text-sm font-semibold text-primary-800 dark:text-primary-200">
+          <span class="text-sm font-semibold">
             ${{ user.balance?.toFixed(2) || '0.00' }}
           </span>
         </div>
@@ -79,10 +79,10 @@
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
             @click="toggleDropdown"
-            class="flex items-center gap-2 rounded-xl border border-transparent p-1.5 transition-colors hover:border-gray-200 hover:bg-white/80 dark:hover:border-dark-700 dark:hover:bg-dark-800/80"
+            class="app-user-button flex items-center gap-2 rounded-xl border p-1.5 transition-colors"
             aria-label="User Menu"
           >
-            <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 text-sm font-medium text-white shadow-sm">
+            <div class="app-user-avatar flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl text-sm font-medium shadow-sm">
               <img
                 v-if="avatarUrl"
                 :src="avatarUrl"
@@ -92,10 +92,10 @@
               <span v-else>{{ userInitials }}</span>
             </div>
             <div class="hidden text-left md:block">
-              <div class="text-sm font-medium text-gray-900 dark:text-white">
+              <div class="text-sm font-medium">
                 {{ displayName }}
               </div>
-              <div class="text-xs capitalize text-gray-500 dark:text-dark-400">
+              <div class="text-xs capitalize">
                 {{ user.role }}
               </div>
             </div>
@@ -320,6 +320,68 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.app-header {
+  border-bottom-color: rgba(var(--border-rgb), 0.68);
+  background:
+    linear-gradient(180deg, rgba(var(--surface-rgb), 0.8), rgba(var(--surface-elevated-rgb), 0.62));
+  box-shadow: 0 14px 40px rgba(var(--text-rgb), 0.06);
+}
+
+.app-header__inner {
+  min-width: 0;
+}
+
+.app-header__title h1 {
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.app-header__title p,
+.app-user-button .text-xs {
+  color: var(--text-soft);
+}
+
+.app-header__actions {
+  min-width: 0;
+}
+
+.app-balance-pill {
+  border: 1px solid rgba(var(--primary-rgb), 0.32);
+  background:
+    linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--primary-strong-rgb), 0.08)),
+    rgba(var(--surface-rgb), 0.6);
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.06);
+  backdrop-filter: blur(14px);
+}
+
+.app-balance-pill svg,
+.app-balance-pill span {
+  color: var(--primary);
+}
+
+.app-user-button {
+  border-color: transparent;
+  color: var(--text);
+}
+
+.app-user-button:hover {
+  border-color: rgba(var(--border-rgb), 0.74);
+  background: rgba(var(--surface-rgb), 0.62);
+}
+
+.app-user-avatar {
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+}
+
+:global(.dark) .app-user-avatar {
+  background: linear-gradient(135deg, rgba(18, 116, 140, 0.94), rgba(21, 132, 111, 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 22px rgba(0, 0, 0, 0.24);
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

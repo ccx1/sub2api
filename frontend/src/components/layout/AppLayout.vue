@@ -1,19 +1,19 @@
 <template>
-  <div class="app-backdrop min-h-screen">
+  <div class="app-backdrop app-shell min-h-screen">
 
     <!-- Sidebar -->
     <AppSidebar />
 
     <!-- Main Content Area -->
     <div
-      class="relative min-h-screen transition-all duration-300"
+      class="app-content relative min-h-screen transition-all duration-300"
       :class="[sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
     >
       <!-- Header -->
       <AppHeader />
 
       <!-- Main Content -->
-      <main class="relative p-4 md:p-6 lg:p-8">
+      <main class="app-main relative p-4 md:p-6 lg:p-8">
         <slot />
       </main>
     </div>

@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { nextTick, ref } from 'vue'
 
 import DateRangePicker from '../DateRangePicker.vue'
 
@@ -33,21 +33,40 @@ const formatLocalDate = (date: Date): string => {
   return `${year}-${month}-${day}`
 }
 
+const mountedWrappers: VueWrapper[] = []
+
+const mountPicker = (props: { startDate: string; endDate: string }) => {
+  const wrapper = mount(DateRangePicker, {
+    props,
+    global: {
+      stubs: {
+        Icon: true
+      }
+    }
+  })
+  mountedWrappers.push(wrapper)
+  return wrapper
+}
+
+const findBodyButton = (selector: string, text: string): HTMLButtonElement | undefined => {
+  return Array.from(document.body.querySelectorAll<HTMLButtonElement>(selector)).find((node) =>
+    node.textContent?.includes(text)
+  )
+}
+
+afterEach(() => {
+  mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  document.body.innerHTML = ''
+})
+
 describe('DateRangePicker', () => {
   it('uses last 24 hours as the default recognized preset', () => {
     const now = new Date()
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
-    const wrapper = mount(DateRangePicker, {
-      props: {
-        startDate: formatLocalDate(yesterday),
-        endDate: formatLocalDate(now)
-      },
-      global: {
-        stubs: {
-          Icon: true
-        }
-      }
+    const wrapper = mountPicker({
+      startDate: formatLocalDate(yesterday),
+      endDate: formatLocalDate(now)
     })
 
     expect(wrapper.text()).toContain('Last 24 Hours')
@@ -57,26 +76,20 @@ describe('DateRangePicker', () => {
     const now = new Date()
     const today = formatLocalDate(now)
 
-    const wrapper = mount(DateRangePicker, {
-      props: {
-        startDate: today,
-        endDate: today
-      },
-      global: {
-        stubs: {
-          Icon: true
-        }
-      }
+    const wrapper = mountPicker({
+      startDate: today,
+      endDate: today
     })
 
     await wrapper.find('.date-picker-trigger').trigger('click')
-    const presetButton = wrapper.findAll('.date-picker-preset').find((node) =>
-      node.text().includes('Last 24 Hours')
-    )
+    const presetButton = findBodyButton('.date-picker-preset', 'Last 24 Hours')
     expect(presetButton).toBeDefined()
 
-    await presetButton!.trigger('click')
-    await wrapper.find('.date-picker-apply').trigger('click')
+    presetButton!.click()
+    await nextTick()
+
+    findBodyButton('.date-picker-apply', 'Apply')!.click()
+    await nextTick()
 
     const nowAfterClick = new Date()
     const yesterdayAfterClick = new Date(nowAfterClick.getTime() - 24 * 60 * 60 * 1000)

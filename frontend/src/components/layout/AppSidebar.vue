@@ -896,6 +896,12 @@ onMounted(() => {
 .sidebar-logo {
   flex: 0 0 2.25rem;
   min-width: 2.25rem;
+  border-color: rgba(255, 255, 255, 0.88) !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow:
+    0 12px 26px rgba(var(--text-rgb), 0.08),
+    0 0 0 1px rgba(var(--border-rgb), 0.3);
 }
 
 .sidebar-header-collapsed {
