@@ -10,6 +10,28 @@ export default {
     login: '登录',
     getStarted: '立即开始',
     goToDashboard: '进入控制台',
+    redesign: {
+      primaryNav: '首页导航',
+      lightsOn: '开灯',
+      lightsOff: '关灯',
+      commandCenter: 'Command Center',
+      panelTitle: '您的AI中枢平台',
+      statusTitle: '运行状态',
+      terminalComment: '会话保持 / 智能切换 / 实时计费',
+      featureSectionTitle: '把复杂 API 管理压缩成三件事',
+      featureSectionSubtitle: '接入、稳定、计费全部在同一套控制面里完成。',
+      providerDescription: '一个 API，多种选择；模型入口低调呈现，重点留给中枢能力。',
+      chips: {
+        stableHub: '稳定 API 中枢',
+        smartRoute: '智能路由',
+        usageBilling: '按量计费'
+      },
+      status: {
+        routeUptime: 'Route uptime',
+        avgLatency: 'Avg latency',
+        edgeWatch: 'Edge watch'
+      }
+    },
     // 新增：面向用户的价值主张
     heroSubtitle: '一个密钥，畅用多个 AI 模型',
     heroDescription: '无需管理多个订阅账号，一站式接入 Claude、GPT、Gemini 等主流 AI 服务',
@@ -426,6 +448,30 @@ export default {
   // Auth
   auth: {
     welcomeBack: '欢迎回来',
+    loginPanelTitle: '登录账户',
+    loginPanelSubtitle: '使用邮箱和密码继续访问控制台',
+    loginHero: {
+      night: {
+        title: '为热爱赋能\n为创造而生',
+        description: '你的努力会被你想要的人看见',
+        toggleLabel: '开灯'
+      },
+      day: {
+        title: '为热爱赋能\n为创造而生',
+        description: '你的光芒会照亮每一个人。',
+        toggleLabel: '关灯'
+      },
+      metrics: {
+        uptime: 'Route uptime',
+        latency: 'Avg latency',
+        watch: 'Edge watch'
+      },
+      qqGroup: 'QQ群 {number}',
+      qqHover: '悬停显示',
+      qqScan: '扫码加群',
+      qqQrAlt: 'QQ群二维码',
+      codexDownload: 'Codex 下载'
+    },
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',
     signingIn: '登录中...',

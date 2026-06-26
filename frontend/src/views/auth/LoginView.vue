@@ -1,13 +1,13 @@
 <template>
-  <AuthLayout>
-    <div class="space-y-6">
+  <AuthLayout variant="showcase" :form-label="t('auth.loginPanelTitle')">
+    <div class="login-panel space-y-6">
       <!-- Title -->
-      <div class="text-center">
+      <div>
         <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
-          {{ t('auth.welcomeBack') }}
+          {{ t('auth.loginPanelTitle') }}
         </h2>
         <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
-          {{ t('auth.signInToAccount') }}
+          {{ t('auth.loginPanelSubtitle') }}
         </p>
       </div>
       <!-- Login Form -->
@@ -131,7 +131,7 @@
           @open="showAgreementModal = true"
         />
 
-        <div v-if="showOAuthLogin" class="space-y-3 pt-1">
+        <div v-if="showOAuthLogin" class="login-oauth space-y-3 pt-1">
           <div class="flex items-center gap-3">
             <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
             <span class="text-xs text-gray-500 dark:text-dark-400">

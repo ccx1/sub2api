@@ -10,6 +10,28 @@ export default {
     login: 'Login',
     getStarted: 'Get Started',
     goToDashboard: 'Go to Dashboard',
+    redesign: {
+      primaryNav: 'Home navigation',
+      lightsOn: 'Lights on',
+      lightsOff: 'Lights off',
+      commandCenter: 'Command Center',
+      panelTitle: 'Your AI hub platform',
+      statusTitle: 'Runtime status',
+      terminalComment: 'Session persistence / smart switching / real-time billing',
+      featureSectionTitle: 'Compress complex API management into three jobs',
+      featureSectionSubtitle: 'Access, reliability, and billing all run from the same control surface.',
+      providerDescription: 'One API, multiple choices. Model entry stays understated so the hub capability remains the focus.',
+      chips: {
+        stableHub: 'Stable API hub',
+        smartRoute: 'Smart routing',
+        usageBilling: 'Usage billing'
+      },
+      status: {
+        routeUptime: 'Route uptime',
+        avgLatency: 'Avg latency',
+        edgeWatch: 'Edge watch'
+      }
+    },
     // User-focused value proposition
     heroSubtitle: 'One Key, All AI Models',
     heroDescription: 'No need to manage multiple subscriptions. Access Claude, GPT, Gemini and more with a single API key',
@@ -426,6 +448,30 @@ export default {
   // Auth
   auth: {
     welcomeBack: 'Welcome Back',
+    loginPanelTitle: 'Sign in',
+    loginPanelSubtitle: 'Use your email and password to continue to the console',
+    loginHero: {
+      night: {
+        title: '为热爱赋能\n为创造而生',
+        description: '你的努力会被你想要的人看见',
+        toggleLabel: 'Lights on'
+      },
+      day: {
+        title: '为热爱赋能\n为创造而生',
+        description: '你的光芒会照亮每一个人。',
+        toggleLabel: 'Lights off'
+      },
+      metrics: {
+        uptime: 'Route uptime',
+        latency: 'Avg latency',
+        watch: 'Edge watch'
+      },
+      qqGroup: 'QQ Group {number}',
+      qqHover: 'Hover to scan',
+      qqScan: 'Scan to join',
+      qqQrAlt: 'QQ group QR code',
+      codexDownload: 'Codex Download'
+    },
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',
     signingIn: 'Signing in...',

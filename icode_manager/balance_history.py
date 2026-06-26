@@ -1,5 +1,6 @@
 import json
 import math
+import datetime as dt
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -7,7 +8,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from affiliate_admin import connect_db, load_database_config
-from common import AppError
+from common import AppError, parse_time
 from store import Store
 from sub2api_auth import Sub2APIAuth
 
@@ -22,16 +23,26 @@ class RechargeCalculator:
         self.base_url = str(self.config.get("base_url", "")).rstrip("/")
 
     def effective_recharge(self, user_id: int) -> Dict[str, Any]:
-        if user_id <= 0:
-            return {
-                "total_recharged": 0.0,
-                "local_deduction": 0.0,
-                "effective_recharge": 0.0,
-                "matched_codes": [],
-            }
-        if self.config.get("verify_mode") == "database":
-            return self.effective_recharge_from_database(user_id)
+        return self.recharge_context(user_id, [])["overall"]
 
+    def recharge_context(self, user_id: int, days_values: List[int]) -> Dict[str, Any]:
+        days = sorted({int(value) for value in days_values if int(value) > 0})
+        empty = empty_recharge_result()
+        if user_id <= 0:
+            return {"overall": empty, "by_days": {day: empty_recharge_result() for day in days}}
+        if self.config.get("verify_mode") == "database":
+            return {
+                "overall": self.effective_recharge_from_database(user_id),
+                "by_days": self.effective_recharge_windows_from_database(user_id, days),
+            }
+
+        items, total_recharged = self.fetch_recharge_items(user_id)
+        return {
+            "overall": self.effective_recharge_from_items(items, total_recharged),
+            "by_days": self.effective_recharge_windows_from_items(items, days),
+        }
+
+    def fetch_recharge_items(self, user_id: int) -> Tuple[List[Dict[str, Any]], Optional[float]]:
         histories = [
             self.fetch_history(user_id, "balance"),
             self.fetch_history(user_id, "admin_balance"),
@@ -42,7 +53,13 @@ class RechargeCalculator:
             items.extend(history["items"])
             if total_recharged is None and history["total_recharged"] is not None:
                 total_recharged = history["total_recharged"]
+        return items, total_recharged
 
+    def effective_recharge_from_items(
+        self,
+        items: List[Dict[str, Any]],
+        total_recharged: Optional[float],
+    ) -> Dict[str, Any]:
         if total_recharged is None:
             total_recharged = sum_positive_recharge_items(items)
 
@@ -54,6 +71,28 @@ class RechargeCalculator:
             "effective_recharge": effective,
             "matched_codes": matched_codes,
         }
+
+    def effective_recharge_windows_from_items(
+        self,
+        items: List[Dict[str, Any]],
+        days_values: List[int],
+    ) -> Dict[int, Dict[str, Any]]:
+        now = dt.datetime.now(dt.timezone.utc)
+        local_codes = self.store.all_code_strings()
+        result: Dict[int, Dict[str, Any]] = {}
+        for day in days_values:
+            since = now - dt.timedelta(days=day)
+            scoped_items = [item for item in items if item_is_since(item, since)]
+            total_recharged = sum_positive_recharge_items(scoped_items)
+            deduction, matched_codes = local_code_deduction(scoped_items, local_codes)
+            effective = max(0.0, float(total_recharged) - deduction)
+            result[day] = {
+                "total_recharged": float(total_recharged),
+                "local_deduction": deduction,
+                "effective_recharge": effective,
+                "matched_codes": matched_codes,
+            }
+        return result
 
     def effective_recharge_from_database(self, user_id: int) -> Dict[str, Any]:
         with connect_db(self.db_config) as conn:
@@ -81,6 +120,58 @@ class RechargeCalculator:
             "effective_recharge": effective,
             "matched_codes": matched_codes,
         }
+
+    def effective_recharge_windows_from_database(self, user_id: int, days_values: List[int]) -> Dict[int, Dict[str, Any]]:
+        result: Dict[int, Dict[str, Any]] = {}
+        if user_id <= 0:
+            return {day: empty_recharge_result() for day in days_values}
+        local_codes = self.store.all_code_strings()
+        with connect_db(self.db_config) as conn:
+            for day in days_values:
+                rows = conn.execute(
+                    """
+                    SELECT code, type, value, used_at
+                    FROM redeem_codes
+                    WHERE used_by = %s
+                      AND type IN ('balance', 'admin_balance')
+                      AND used_at >= NOW() - (%s::int * INTERVAL '1 day')
+                    ORDER BY used_at DESC NULLS LAST, id DESC
+                    """,
+                    (user_id, day),
+                ).fetchall()
+                items = [dict(row) for row in rows]
+                total_recharged = sum_positive_recharge_items(items)
+                deduction, matched_codes = local_code_deduction(items, local_codes)
+                result[day] = {
+                    "total_recharged": float(total_recharged),
+                    "local_deduction": deduction,
+                    "effective_recharge": max(0.0, float(total_recharged) - deduction),
+                    "matched_codes": matched_codes,
+                }
+        return result
+
+    def usage_status(self, user_id: int, days_values: List[int]) -> Dict[int, bool]:
+        days = sorted({int(value) for value in days_values if int(value) > 0})
+        if user_id <= 0 or not days:
+            return {day: False for day in days}
+        with connect_db(self.db_config) as conn:
+            status: Dict[int, bool] = {}
+            for day in days:
+                row = conn.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM usage_logs
+                        WHERE user_id = %s
+                          -- usage_logs 没有单独 used_at 字段，created_at 就是使用记录落库时间。
+                          AND created_at >= NOW() - (%s::int * INTERVAL '1 day')
+                        LIMIT 1
+                    ) AS has_usage
+                    """,
+                    (user_id, day),
+                ).fetchone()
+                status[day] = bool(row.get("has_usage") if row else False)
+        return status
 
     def fetch_history(self, user_id: int, code_type: str) -> Dict[str, Any]:
         if not self.base_url:
@@ -193,6 +284,67 @@ def is_recharge_type(value: Any) -> bool:
     if value is None:
         return True
     return str(value) in {"balance", "admin_balance"}
+
+
+def empty_recharge_result() -> Dict[str, Any]:
+    return {
+        "total_recharged": 0.0,
+        "local_deduction": 0.0,
+        "effective_recharge": 0.0,
+        "matched_codes": [],
+    }
+
+
+def item_is_since(item: Dict[str, Any], since: dt.datetime) -> bool:
+    item_time = parse_item_time(item)
+    if item_time is None:
+        return False
+    return item_time >= since
+
+
+def parse_item_time(item: Dict[str, Any]) -> Optional[dt.datetime]:
+    for key in (
+        "used_at",
+        "usedAt",
+        "created_at",
+        "createdAt",
+        "updated_at",
+        "updatedAt",
+        "timestamp",
+        "time",
+        "date",
+    ):
+        value = item.get(key)
+        parsed = parse_datetime_value(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def parse_datetime_value(value: Any) -> Optional[dt.datetime]:
+    if value in ("", None):
+        return None
+    if isinstance(value, dt.datetime):
+        parsed = value
+    elif isinstance(value, (int, float)):
+        seconds = float(value)
+        if seconds > 10_000_000_000:
+            seconds = seconds / 1000.0
+        parsed = dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = parse_time(text.replace(" ", "T"))
+        except ValueError:
+            try:
+                parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
 
 
 def parse_float(value: Any, default: float) -> float:

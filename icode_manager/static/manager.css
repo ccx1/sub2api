@@ -279,7 +279,7 @@ select {
 
 .tier-editor {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   align-items: end;
 }
@@ -510,6 +510,12 @@ th {
 }
 
 td {
+  overflow-wrap: anywhere;
+}
+
+td code {
+  font-family: Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 

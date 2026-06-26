@@ -29,6 +29,7 @@
       <div class="manager-app" id="managerApp" hidden>
         <nav class="tabs" aria-label="功能管理">
           <button class="tab active" data-tab="redpack" type="button">红包管理</button>
+          <button class="tab" data-tab="claims" type="button">领取查询</button>
           <button class="tab" data-tab="affiliate" type="button">返利管理</button>
           <button class="tab" data-tab="listing" type="button">商品上架</button>
           <button class="tab" data-tab="import" type="button">导入设置</button>
@@ -79,6 +80,10 @@
                 <label class="field">
                   门槛金额
                   <input id="tierThreshold" type="number" min="0" step="0.01" placeholder="例如 100" />
+                </label>
+                <label class="field">
+                  使用记录天数
+                  <input id="tierUsageDays" type="number" min="0" step="1" placeholder="0 表示不限制" />
                 </label>
                 <div class="field full">
                   <div class="field-title">动画组合</div>
@@ -137,6 +142,40 @@
         <section class="panel">
           <h2>已有活动</h2>
           <div class="activity-list" id="activityList"></div>
+        </section>
+      </section>
+
+      <section class="tab-page" id="claimsTab">
+        <section class="panel">
+          <h2>历史领取查询</h2>
+          <div class="manager-grid">
+            <label class="field">
+              用户邮箱
+              <input id="claimSearchEmail" autocomplete="off" placeholder="user@example.com" />
+            </label>
+          </div>
+          <div class="manager-actions">
+            <button class="primary" id="searchClaimsButton" type="button">查询领取记录</button>
+          </div>
+          <div class="message" id="claimSearchMessage"></div>
+        </section>
+
+        <section class="panel">
+          <h2>领取记录</h2>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>领取时间</th>
+                  <th>活动</th>
+                  <th>类型</th>
+                  <th>档次</th>
+                  <th>兑换码</th>
+                </tr>
+              </thead>
+              <tbody id="claimSearchRows"><tr><td colspan="5">请输入邮箱查询</td></tr></tbody>
+            </table>
+          </div>
         </section>
       </section>
 
@@ -435,6 +474,7 @@
         tierKey: document.getElementById("tierKey"),
         tierName: document.getElementById("tierName"),
         tierThreshold: document.getElementById("tierThreshold"),
+        tierUsageDays: document.getElementById("tierUsageDays"),
         startsAt: document.getElementById("startsAt"),
         endsAt: document.getElementById("endsAt"),
         status: document.getElementById("status"),
@@ -465,6 +505,8 @@
       const listingResult = document.getElementById("listingResult");
       const importSettingsMessage = document.getElementById("importSettingsMessage");
       const importMessage = document.getElementById("importMessage");
+      const claimSearchMessage = document.getElementById("claimSearchMessage");
+      const claimSearchRows = document.getElementById("claimSearchRows");
       const importState = { files: [], outputText: "{}", outputPayload: null };
       let tiers = [];
       let affiliateCanExecute = false;
@@ -521,6 +563,11 @@
         importMessage.className = "message" + (type ? ` ${type}` : "");
       }
 
+      function setClaimSearchMessage(text, type = "") {
+        claimSearchMessage.textContent = text;
+        claimSearchMessage.className = "message" + (type ? ` ${type}` : "");
+      }
+
       function setLoginMessage(text, type = "") {
         loginMessage.textContent = text;
         loginMessage.className = "message" + (type ? ` ${type}` : "");
@@ -540,10 +587,40 @@
       function switchTab(name) {
         document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
         document.querySelectorAll(".tab-page").forEach((page) => page.classList.remove("active"));
-        const pageId = { redpack: "redpackTab", affiliate: "affiliateTab", listing: "listingTab", import: "importTab" }[name] || "redpackTab";
+        const pageId = { redpack: "redpackTab", claims: "claimsTab", affiliate: "affiliateTab", listing: "listingTab", import: "importTab" }[name] || "redpackTab";
         document.getElementById(pageId).classList.add("active");
         if (name === "listing" && !listingProducts.length) loadListingStatus().catch((e) => setListingMessage(e.message, "error"));
         if (name === "import" && !importSettingsLoaded) loadImportSettings().catch((e) => setImportSettingsMessage(e.message, "error"));
+      }
+
+      async function searchClaims() {
+        const email = document.getElementById("claimSearchEmail").value.trim().toLowerCase();
+        if (!email) throw new Error("请输入要查询的邮箱。");
+        setClaimSearchMessage("正在查询...", "");
+        const data = await api(`/api/manager/claims?email=${encodeURIComponent(email)}`);
+        const claims = Array.isArray(data.claims) ? data.claims : [];
+        renderClaimSearchRows(claims);
+        setClaimSearchMessage(`查询完成，共 ${claims.length} 条记录。`, "ok");
+      }
+
+      function renderClaimSearchRows(items) {
+        if (!items.length) {
+          claimSearchRows.innerHTML = '<tr><td colspan="5">暂无领取记录</td></tr>';
+          return;
+        }
+        claimSearchRows.innerHTML = items.map((item) => {
+          const date = item.claimed_at ? new Date(item.claimed_at) : null;
+          const time = date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : (item.claimed_at || "");
+          const type = item.packet_type === "tier" ? "档次红包" : "普通红包";
+          const tier = item.tier ? `${item.tier.name || ""} ${item.tier.tier_key ? `(${item.tier.tier_key})` : ""}`.trim() : "无";
+          return `<tr>
+            <td>${escapeHtml(time)}</td>
+            <td>${escapeHtml(item.activity_name || item.activity_id || "")}<div class="meta">${escapeHtml(item.activity_id || "")}</div></td>
+            <td>${escapeHtml(type)}</td>
+            <td>${escapeHtml(tier)}</td>
+            <td><code>${escapeHtml(item.code || "")}</code></td>
+          </tr>`;
+        }).join("");
       }
 
       function currentId() {
@@ -614,6 +691,7 @@
           tier_key: tier.tier_key || "",
           name: tier.name || "",
           threshold_amount: Number(tier.threshold_amount || 0),
+          usage_days: Number(tier.usage_days || 0),
           animations: Array.isArray(tier.animations) ? tier.animations : [],
           sort_order: Number(tier.sort_order ?? index),
           remaining_count: Number(tier.remaining_count || 0),
@@ -644,12 +722,15 @@
         const tierKey = fields.tierKey.value.trim();
         const name = fields.tierName.value.trim();
         const threshold = Number(fields.tierThreshold.value || 0);
+        const usageDays = Number(fields.tierUsageDays.value || 0);
         if (!tierKey || !name) throw new Error("请填写档次标识和 VIP 名称。");
         if (!Number.isFinite(threshold) || threshold < 0) throw new Error("门槛金额必须是不小于 0 的数字。");
+        if (!Number.isInteger(usageDays) || usageDays < 0) throw new Error("使用记录天数必须是 0 或正整数。");
         const next = normalizeTier({
           tier_key: tierKey,
           name,
           threshold_amount: threshold,
+          usage_days: usageDays,
           animations: selectedAnimations(),
           sort_order: tiers.length,
         });
@@ -665,6 +746,7 @@
         fields.tierKey.value = "";
         fields.tierName.value = "";
         fields.tierThreshold.value = "";
+        fields.tierUsageDays.value = "";
         setSelectedAnimations([]);
         renderTiers();
       }
@@ -675,6 +757,7 @@
         fields.tierKey.value = tier.tier_key;
         fields.tierName.value = tier.name;
         fields.tierThreshold.value = tier.threshold_amount;
+        fields.tierUsageDays.value = tier.usage_days || "";
         setSelectedAnimations(tier.animations);
       }
 
@@ -692,11 +775,12 @@
         for (const tier of tiers) {
           const node = document.createElement("div");
           node.className = "tier-item";
+          node.dataset.tierKey = tier.tier_key;
           node.innerHTML = `
             <div class="tier-item-head">
               <div>
                 <strong>${escapeHtml(tier.name)} (${escapeHtml(tier.tier_key)})</strong>
-                <div class="meta">门槛：${escapeHtml(tier.threshold_amount)} · 动画：${escapeHtml(tier.animations.join("、") || "无")} · 剩余：${escapeHtml(tier.remaining_count || 0)} · 已领：${escapeHtml(tier.claimed_count || 0)}</div>
+                <div class="meta">门槛：${escapeHtml(tier.threshold_amount)} · 使用记录：${escapeHtml(formatUsageDays(tier.usage_days))} · 动画：${escapeHtml(tier.animations.join("、") || "无")} · 剩余：${escapeHtml(tier.remaining_count || 0)} · 已领：${escapeHtml(tier.claimed_count || 0)}</div>
               </div>
               <div class="tier-actions">
                 <button class="secondary edit-tier" type="button">编辑</button>
@@ -721,6 +805,11 @@
         }
       }
 
+      function formatUsageDays(value) {
+        const days = Number(value || 0);
+        return days > 0 ? `近 ${days} 天内有记录` : "不限";
+      }
+
       function showLink(url, outputDir) {
         linkBox.style.display = "block";
         linkBox.textContent = `用户链接：${url}  生成目录：${outputDir}`;
@@ -739,12 +828,35 @@
       }
 
       async function saveAndPublish() {
+        const tierCodeImports = fields.packetType.value === "tier" ? collectTierCodeImports() : [];
         await saveActivity();
-        if (fields.packetType.value === "ordinary" && fields.codes.value.trim()) await importCodes({ silent: true });
+        let tierImportedCount = 0;
+        if (fields.packetType.value === "ordinary" && fields.codes.value.trim()) {
+          await importCodes({ silent: true });
+        }
+        if (fields.packetType.value === "tier" && tierCodeImports.length) {
+          const result = await importTierCodeBatch(tierCodeImports);
+          tierImportedCount = result.imported_count;
+          await saveActivity();
+        }
         const published = await publishActivity();
-        setMessage("活动已保存，静态页已生成。", "ok");
+        const emptyTierPool = fields.packetType.value === "tier" && !tierCodeImports.length && tiers.every((tier) => Number(tier.remaining_count || 0) <= 0);
+        if (emptyTierPool) {
+          setMessage("活动已保存，静态页已生成；当前所有档次码池为空，用户页会显示已领完。", "error");
+        } else if (tierImportedCount > 0) {
+          setMessage(`活动已保存，已导入档次兑换码 ${tierImportedCount} 条，静态页已生成。`, "ok");
+        } else {
+          setMessage("活动已保存，静态页已生成。", "ok");
+        }
         await loadActivities();
         return published;
+      }
+
+      function collectTierCodeImports() {
+        return [...tierList.querySelectorAll(".tier-item")].map((node) => ({
+          tier_key: node.dataset.tierKey || "",
+          codes: node.querySelector(".tier-codes")?.value || "",
+        })).filter((item) => item.tier_key && item.codes.trim());
       }
 
       async function importCodes(options = {}) {
@@ -774,6 +886,20 @@
         await loadActivities();
         setMessage(`已导入 ${data.imported_count} 条到档次 ${tierKey}。`, "ok");
         return data;
+      }
+
+      async function importTierCodeBatch(items) {
+        let imported = 0;
+        let input = 0;
+        for (const item of items) {
+          const data = await api(`/api/manager/activities/${encodeURIComponent(currentId())}/codes`, {
+            method: "POST",
+            body: JSON.stringify({ codes: item.codes, tier_key: item.tier_key }),
+          });
+          imported += Number(data.imported_count || 0);
+          input += Number(data.input_count || 0);
+        }
+        return { imported_count: imported, input_count: input };
       }
 
       async function closeActivity() {
@@ -1331,6 +1457,10 @@
       document.getElementById("importButton").addEventListener("click", () => importCodes().catch((e) => setMessage(e.message, "error")));
       document.getElementById("closeButton").addEventListener("click", () => closeActivity().catch((e) => setMessage(e.message, "error")));
       document.getElementById("loadButton").addEventListener("click", () => loadActivities().catch((e) => setMessage(e.message, "error")));
+      document.getElementById("searchClaimsButton").addEventListener("click", () => searchClaims().catch((e) => setClaimSearchMessage(e.message, "error")));
+      document.getElementById("claimSearchEmail").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") searchClaims().catch((e) => setClaimSearchMessage(e.message, "error"));
+      });
       document.getElementById("addTierButton").addEventListener("click", () => {
         try {
           addOrUpdateTier();

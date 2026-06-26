@@ -1,6 +1,8 @@
 import json
 import sys
 import urllib.parse
+from datetime import date, datetime, time
+from decimal import Decimal
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -92,11 +94,25 @@ class ClaimHandler(BaseHTTPRequestHandler):
         user = self.ensure_user_exists(email)
         activity = self.store.activity_summary(slug, include_private=True)
         if activity.get("packet_type") == "tier":
-            recharge = self.recharge_calculator.effective_recharge(int(user.get("id") or 0))
-            claim, already_claimed = self.store.claim_tier_code(slug, email, recharge["effective_recharge"])
+            user_id = int(user.get("id") or 0)
+            usage_days = tier_usage_days_values(activity.get("tiers"))
+            recharge_context = self.recharge_calculator.recharge_context(user_id, usage_days)
+            recharge = recharge_context["overall"]
+            usage_status = self.recharge_calculator.usage_status(user_id, usage_days) if usage_days else {}
+            claim, already_claimed = self.store.claim_tier_code(
+                slug,
+                email,
+                recharge["effective_recharge"],
+                usage_status=usage_status,
+                recharge_by_usage_days={
+                    day: data["effective_recharge"]
+                    for day, data in recharge_context.get("by_days", {}).items()
+                },
+            )
             claim["recharge"] = {
                 "effective_recharge": recharge["effective_recharge"],
                 "local_deduction": recharge["local_deduction"],
+                "by_usage_days": recharge_context.get("by_days", {}),
             }
         else:
             claim, already_claimed = self.store.claim_code(slug, email)
@@ -108,6 +124,15 @@ class ClaimHandler(BaseHTTPRequestHandler):
         self.ensure_user_exists(email)
         self.json_response({"ok": True, "claims": self.store.list_claims(slug, email)})
 
+    def handle_manager_claim_search(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        raw_email = str(params.get("email", [""])[0] or "").strip()
+        if not raw_email:
+            raise AppError(HTTPStatus.BAD_REQUEST, "请输入要查询的邮箱")
+        email = normalize_email(raw_email)
+        self.json_response({"ok": True, "email": email, "claims": self.store.search_claims(email)})
+
     def serve_manager_api(self, method: str, parts: List[str]) -> bool:
         self.ensure_manager_access(require_token=True)
         if len(parts) >= 3 and parts[2] == "affiliate":
@@ -116,6 +141,9 @@ class ClaimHandler(BaseHTTPRequestHandler):
             return self.serve_listing_api(method, parts)
         if len(parts) >= 3 and parts[2] == "import-settings":
             return self.serve_import_settings_api(method, parts)
+        if len(parts) == 3 and parts[2] == "claims" and method == "GET":
+            self.handle_manager_claim_search()
+            return True
         if len(parts) == 3 and parts[2] == "activities" and method == "GET":
             self.json_response({"ok": True, "activities": self.store.list_activities(include_private=True)})
             return True
@@ -305,7 +333,7 @@ class ClaimHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def json_response(self, payload: Dict[str, Any], status: int = HTTPStatus.OK) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False, default=json_default).encode("utf-8")
         self.send_response(status)
         self.add_cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -322,6 +350,16 @@ class ClaimHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token")
+
+
+def json_default(value: Any) -> Any:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
 
 
 def static_content_type(suffix: str) -> str:
@@ -419,14 +457,37 @@ def normalize_tiers(value: Any) -> List[Dict[str, Any]]:
             raise AppError(HTTPStatus.BAD_REQUEST, "红包档次门槛金额不正确")
         if threshold_amount < 0:
             raise AppError(HTTPStatus.BAD_REQUEST, "红包档次门槛金额不能小于 0")
+        try:
+            usage_days = int(item.get("usage_days") or 0)
+        except (TypeError, ValueError):
+            raise AppError(HTTPStatus.BAD_REQUEST, "红包档次使用记录天数不正确")
+        if usage_days < 0:
+            raise AppError(HTTPStatus.BAD_REQUEST, "红包档次使用记录天数不能小于 0")
         animations = item.get("animations") if isinstance(item.get("animations"), list) else []
         out.append(
             {
                 "tier_key": tier_key,
                 "name": clean_required(item.get("name"), "红包档次名称不能为空"),
                 "threshold_amount": threshold_amount,
+                "usage_days": usage_days,
                 "animations": [str(x).strip() for x in animations if str(x).strip()],
                 "sort_order": int(item.get("sort_order") if item.get("sort_order") is not None else index),
             }
         )
     return out
+
+
+def tier_usage_days_values(tiers: Any) -> List[int]:
+    if not isinstance(tiers, list):
+        return []
+    values = []
+    for tier in tiers:
+        if not isinstance(tier, dict):
+            continue
+        try:
+            days = int(tier.get("usage_days") or 0)
+        except (TypeError, ValueError):
+            continue
+        if days > 0:
+            values.append(days)
+    return sorted(set(values))

@@ -64,6 +64,7 @@ class Store:
                     tier_key TEXT NOT NULL,
                     name TEXT NOT NULL,
                     threshold_amount REAL NOT NULL DEFAULT 0,
+                    usage_days INTEGER NOT NULL DEFAULT 0,
                     animations TEXT NOT NULL DEFAULT '[]',
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     is_active INTEGER NOT NULL DEFAULT 1,
@@ -116,6 +117,8 @@ class Store:
             tier_columns = {row["name"] for row in conn.execute("PRAGMA table_info(activity_tiers)").fetchall()}
             if "is_active" not in tier_columns:
                 conn.execute("ALTER TABLE activity_tiers ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+            if "usage_days" not in tier_columns:
+                conn.execute("ALTER TABLE activity_tiers ADD COLUMN usage_days INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_codes_activity_tier_status ON codes(activity_id, tier_id, status, id)"
             )
@@ -171,26 +174,27 @@ class Store:
                 seen_keys.add(tier_key)
                 name = str(tier.get("name") or tier_key).strip()
                 threshold_amount = float(tier.get("threshold_amount") or 0)
+                usage_days = max(0, int(tier.get("usage_days") or 0))
                 animations = json.dumps(clean_animation_list(tier.get("animations")), ensure_ascii=False)
                 sort_order = int(tier.get("sort_order") if tier.get("sort_order") is not None else index)
                 cur = conn.execute(
                     """
                     UPDATE activity_tiers
-                    SET name=?, threshold_amount=?, animations=?, sort_order=?, is_active=1, updated_at=?
+                    SET name=?, threshold_amount=?, usage_days=?, animations=?, sort_order=?, is_active=1, updated_at=?
                     WHERE activity_id=? AND tier_key=?
                     """,
-                    (name, threshold_amount, animations, sort_order, now, activity["id"], tier_key),
+                    (name, threshold_amount, usage_days, animations, sort_order, now, activity["id"], tier_key),
                 )
                 if cur.rowcount == 0:
                     conn.execute(
                         """
                         INSERT INTO activity_tiers(
-                            activity_id, tier_key, name, threshold_amount, animations,
+                            activity_id, tier_key, name, threshold_amount, usage_days, animations,
                             sort_order, is_active, created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (activity["id"], tier_key, name, threshold_amount, animations, sort_order, 1, now, now),
+                        (activity["id"], tier_key, name, threshold_amount, usage_days, animations, sort_order, 1, now, now),
                     )
 
             existing = conn.execute(
@@ -325,14 +329,28 @@ class Store:
                     conn.execute("ROLLBACK")
                 raise
 
-    def claim_tier_code(self, slug: str, email: str, effective_recharge: float) -> Tuple[Dict[str, Any], bool]:
+    def claim_tier_code(
+        self,
+        slug: str,
+        email: str,
+        effective_recharge: float,
+        usage_status: Optional[Dict[int, bool]] = None,
+        recharge_by_usage_days: Optional[Dict[int, float]] = None,
+    ) -> Tuple[Dict[str, Any], bool]:
         email_hash = hash_email(email)
         now = utc_now()
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 claim, already_claimed = self._claim_tier_code_locked(
-                    conn, slug, email, email_hash, now, effective_recharge
+                    conn,
+                    slug,
+                    email,
+                    email_hash,
+                    now,
+                    effective_recharge,
+                    usage_status or {},
+                    recharge_by_usage_days or {},
                 )
                 conn.execute("COMMIT")
                 return claim, already_claimed
@@ -389,6 +407,8 @@ class Store:
         email_hash: str,
         now: str,
         effective_recharge: float,
+        usage_status: Dict[int, bool],
+        recharge_by_usage_days: Dict[int, float],
     ) -> Tuple[Dict[str, Any], bool]:
         activity = self.get_activity(slug, conn)
         if activity["packet_type"] != "tier":
@@ -405,7 +425,7 @@ class Store:
         tiers = list_tiers(conn, activity["id"], include_private=True)
         eligible = [
             tier for tier in tiers
-            if float(tier.get("threshold_amount") or 0) <= max(0.0, effective_recharge)
+            if tier_requirements_met(tier, effective_recharge, usage_status, recharge_by_usage_days)
         ]
         eligible.sort(
             key=lambda tier: (
@@ -415,7 +435,7 @@ class Store:
             reverse=True,
         )
         if not eligible:
-            raise AppError(HTTPStatus.FORBIDDEN, "暂未匹配到可领取档次，请确认充值记录后再试")
+            raise AppError(HTTPStatus.FORBIDDEN, "暂未匹配到可领取档次，请确认充值金额和使用记录后再试")
 
         selected = eligible[0]
         if count_remaining(conn, activity["id"], int(selected["id"])) <= 0:
@@ -458,6 +478,33 @@ class Store:
                 (activity["id"], email_hash),
             ).fetchall()
             return [claim_from_row(row, activity) for row in rows]
+
+    def search_claims(self, email: str, limit: int = 200) -> List[Dict[str, Any]]:
+        email_hash = hash_email(email)
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.slug AS activity_id,
+                       a.name AS activity_name,
+                       a.packet_type,
+                       a.status AS activity_status,
+                       c.code,
+                       cl.email,
+                       cl.claimed_at,
+                       cl.tier_id,
+                       t.tier_key,
+                       t.name AS tier_name
+                FROM claims cl
+                JOIN activities a ON a.id = cl.activity_id
+                JOIN codes c ON c.id = cl.code_id
+                LEFT JOIN activity_tiers t ON t.id = cl.tier_id
+                WHERE cl.email_hash=?
+                ORDER BY cl.claimed_at DESC, cl.id DESC
+                LIMIT ?
+                """,
+                (email_hash, max(1, min(int(limit), 500))),
+            ).fetchall()
+            return [claim_history_row(row) for row in rows]
 
     def all_code_strings(self) -> set:
         with self.connect() as conn:
@@ -556,7 +603,24 @@ def tier_to_dict(conn: sqlite3.Connection, row: sqlite3.Row, include_private: bo
     }
     if include_private:
         tier["threshold_amount"] = float(row["threshold_amount"] or 0)
+        tier["usage_days"] = int(row["usage_days"] or 0)
     return tier
+
+
+def tier_requirements_met(
+    tier: Dict[str, Any],
+    effective_recharge: float,
+    usage_status: Dict[int, bool],
+    recharge_by_usage_days: Dict[int, float],
+) -> bool:
+    usage_days = int(tier.get("usage_days") or 0)
+    threshold = float(tier.get("threshold_amount") or 0)
+    if usage_days <= 0:
+        return threshold <= max(0.0, effective_recharge)
+    recent_recharge = max(0.0, float(recharge_by_usage_days.get(usage_days) or 0))
+    if threshold > recent_recharge:
+        return False
+    return bool(usage_status.get(usage_days))
 
 
 def claim_from_row(row: sqlite3.Row, activity: sqlite3.Row) -> Dict[str, Any]:
@@ -569,6 +633,23 @@ def claim_from_row(row: sqlite3.Row, activity: sqlite3.Row) -> Dict[str, Any]:
             "animations": decode_animations(row["tier_animations"]),
         }
     return claim_payload(row["code"], row["claimed_at"], activity, tier)
+
+
+def claim_history_row(row: sqlite3.Row) -> Dict[str, Any]:
+    return {
+        "activity_id": row["activity_id"],
+        "activity_name": row["activity_name"],
+        "packet_type": row["packet_type"],
+        "activity_status": row["activity_status"],
+        "code": row["code"],
+        "email": row["email"],
+        "claimed_at": row["claimed_at"],
+        "tier": {
+            "id": row["tier_id"],
+            "tier_key": row["tier_key"] or "",
+            "name": row["tier_name"] or "",
+        } if row["tier_id"] else None,
+    }
 
 
 def claim_payload(

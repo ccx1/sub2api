@@ -1,5 +1,5 @@
 <template>
-  <AuthLayout>
+  <AuthLayout variant="showcase" :form-label="t('auth.createAccount')">
     <div class="space-y-6">
       <!-- Title -->
       <div class="text-center">
