@@ -128,6 +128,8 @@ scripts/*
 !scripts/build-linux-backend.sh
 !scripts/sub2api-service.sh
 !scripts/cleanup-sub2api-logs.sh
+!backend/scripts/
+!backend/scripts/resolve-version.sh
 .code-review-state
 #openspec/
 code-reviews/
