@@ -72,35 +72,20 @@
         <template #after-reset>
           <div class="relative" ref="columnDropdownRef">
             <button
-              @click="showColumnDropdown = !showColumnDropdown"
+              ref="columnDropdownButtonRef"
+              type="button"
+              @click.stop="toggleColumnDropdown"
               class="btn btn-secondary px-2 md:px-3"
               :title="t('admin.users.columnSettings')"
+              aria-haspopup="menu"
+              :aria-expanded="showColumnDropdown"
+              data-test="usage-column-settings-button"
             >
               <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
               </svg>
               <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
             </button>
-            <div
-              v-if="showColumnDropdown"
-              class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-            >
-              <button
-                v-for="col in toggleableColumns"
-                :key="col.key"
-                @click="toggleColumn(col.key)"
-                class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <span>{{ col.label }}</span>
-                <Icon
-                  v-if="isColumnVisible(col.key)"
-                  name="check"
-                  size="sm"
-                  class="text-primary-500"
-                  :stroke-width="2"
-                />
-              </button>
-            </div>
           </div>
         </template>
       </UsageFilters>
@@ -151,10 +136,39 @@
     :hide-actions="true"
     @close="showBalanceHistoryModal = false; balanceHistoryUser = null"
   />
+  <Teleport to="body">
+    <div
+      v-if="showColumnDropdown"
+      ref="columnDropdownMenuRef"
+      class="fixed z-[100000020] w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+      :style="columnDropdownStyle"
+      role="menu"
+      data-test="usage-column-settings-menu"
+      @click.stop
+    >
+      <button
+        v-for="col in toggleableColumns"
+        :key="col.key"
+        @click="toggleColumn(col.key)"
+        class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+        role="menuitemcheckbox"
+        :aria-checked="isColumnVisible(col.key)"
+      >
+        <span>{{ col.label }}</span>
+        <Icon
+          v-if="isColumnVisible(col.key)"
+          name="check"
+          size="sm"
+          class="text-primary-500"
+          :stroke-width="2"
+        />
+      </button>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
@@ -692,12 +706,83 @@ const switchToErrorsTab = () => { activeTab.value = 'errors'; if (errRows.value.
 
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)
+const columnDropdownButtonRef = ref<HTMLButtonElement | null>(null)
+const columnDropdownMenuRef = ref<HTMLElement | null>(null)
+const columnDropdownStyle = ref<Record<string, string>>({
+  position: 'fixed',
+  top: '0px',
+  left: '0px',
+  zIndex: '100000020',
+  maxHeight: 'min(20rem, calc(100vh - 16px))',
+  maxWidth: 'calc(100vw - 16px)'
+})
+
+const COLUMN_DROPDOWN_WIDTH = 192
+const COLUMN_DROPDOWN_MARGIN = 8
+
+const updateColumnDropdownPosition = () => {
+  const button = columnDropdownButtonRef.value
+  if (!button) return
+
+  const rect = button.getBoundingClientRect()
+  const menu = columnDropdownMenuRef.value
+  const width = menu?.offsetWidth || COLUMN_DROPDOWN_WIDTH
+  const height = Math.min(
+    menu?.offsetHeight || 320,
+    window.innerHeight - COLUMN_DROPDOWN_MARGIN * 2
+  )
+
+  const maxLeft = window.innerWidth - COLUMN_DROPDOWN_MARGIN - width
+  const left = Math.max(
+    COLUMN_DROPDOWN_MARGIN,
+    Math.min(rect.right - width, maxLeft)
+  )
+
+  let top = rect.bottom + 6
+  if (top + height > window.innerHeight - COLUMN_DROPDOWN_MARGIN) {
+    const topWhenFlipped = rect.top - height - 6
+    top = topWhenFlipped >= COLUMN_DROPDOWN_MARGIN
+      ? topWhenFlipped
+      : Math.max(COLUMN_DROPDOWN_MARGIN, window.innerHeight - COLUMN_DROPDOWN_MARGIN - height)
+  }
+
+  columnDropdownStyle.value = {
+    position: 'fixed',
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
+    zIndex: '100000020',
+    maxHeight: `min(20rem, calc(100vh - ${COLUMN_DROPDOWN_MARGIN * 2}px))`,
+    maxWidth: `calc(100vw - ${COLUMN_DROPDOWN_MARGIN * 2}px)`
+  }
+}
+
+const toggleColumnDropdown = async () => {
+  showColumnDropdown.value = !showColumnDropdown.value
+  if (!showColumnDropdown.value) return
+  updateColumnDropdownPosition()
+  await nextTick()
+  updateColumnDropdownPosition()
+}
 
 const handleColumnClickOutside = (event: MouseEvent) => {
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as HTMLElement)) {
+  const target = event.target as Node | null
+  if (!target) return
+  const clickedTrigger = columnDropdownRef.value?.contains(target)
+  const clickedMenu = columnDropdownMenuRef.value?.contains(target)
+  if (!clickedTrigger && !clickedMenu) {
     showColumnDropdown.value = false
   }
 }
+
+watch(showColumnDropdown, (isOpen) => {
+  if (isOpen) {
+    window.addEventListener('scroll', updateColumnDropdownPosition, true)
+    window.addEventListener('resize', updateColumnDropdownPosition)
+  } else {
+    window.removeEventListener('scroll', updateColumnDropdownPosition, true)
+    window.removeEventListener('resize', updateColumnDropdownPosition)
+  }
+})
 
 onMounted(() => {
   applyRouteQueryFilters()
@@ -710,7 +795,13 @@ onMounted(() => {
   loadSavedColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => {
+  abortController?.abort()
+  exportAbortController?.abort()
+  document.removeEventListener('click', handleColumnClickOutside)
+  window.removeEventListener('scroll', updateColumnDropdownPosition, true)
+  window.removeEventListener('resize', updateColumnDropdownPosition)
+})
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

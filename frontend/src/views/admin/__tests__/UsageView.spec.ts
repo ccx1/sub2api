@@ -121,6 +121,10 @@ const AccountUsageTrendStub = {
   template: '<div data-test="account-chart" />',
 }
 
+afterEach(() => {
+  document.body.innerHTML = ''
+})
+
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -252,6 +256,97 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
     expect(getAccountUsageTrend).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('admin UsageView column settings dropdown', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    list.mockReset()
+    getStats.mockReset()
+    getSnapshotV2.mockReset()
+    getModelStats.mockReset()
+    getAccountUsageTrend.mockReset()
+
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockResolvedValue({
+      total_requests: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      total_actual_cost: 0,
+      average_duration_ms: 0,
+    })
+    getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockResolvedValue({ models: [] })
+    getAccountUsageTrend.mockResolvedValue({ trend: [] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders column settings as a fixed body portal and keeps menu clicks inside', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          AccountUsageTrend: AccountUsageTrendStub,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="usage-column-settings-button"]')
+    vi.spyOn(button.element, 'getBoundingClientRect').mockReturnValue({
+      left: 500,
+      right: 620,
+      top: 100,
+      bottom: 132,
+      width: 120,
+      height: 32,
+      x: 500,
+      y: 100,
+      toJSON: () => {},
+    } as DOMRect)
+
+    await button.trigger('click')
+    await flushPromises()
+
+    const menu = document.body.querySelector('[data-test="usage-column-settings-menu"]') as HTMLElement | null
+    expect(menu).not.toBeNull()
+    expect(menu?.style.position).toBe('fixed')
+    expect(menu?.style.zIndex).toBe('100000020')
+    expect(menu?.style.left).toBe('428px')
+    expect(menu?.style.top).toBe('138px')
+
+    menu?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="usage-column-settings-menu"]')).not.toBeNull()
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="usage-column-settings-menu"]')).toBeNull()
+
+    wrapper.unmount()
   })
 })
 
