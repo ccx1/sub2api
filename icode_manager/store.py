@@ -11,6 +11,14 @@ from common import AppError, hash_email, parse_time, utc_now
 
 DEFAULT_MESSAGE_TEMPLATE = "欢迎您，尊贵的{vip等级}用户，下面是您本次的兑换码。"
 ANY_TIER = object()
+THRESHOLD_BASIS_TOTAL_RECHARGE = "total_recharge"
+THRESHOLD_BASIS_RECENT_RECHARGE = "recent_recharge"
+THRESHOLD_BASIS_CURRENT_BALANCE = "current_balance"
+THRESHOLD_BASIS_VALUES = {
+    THRESHOLD_BASIS_TOTAL_RECHARGE,
+    THRESHOLD_BASIS_RECENT_RECHARGE,
+    THRESHOLD_BASIS_CURRENT_BALANCE,
+}
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -64,6 +72,7 @@ class Store:
                     tier_key TEXT NOT NULL,
                     name TEXT NOT NULL,
                     threshold_amount REAL NOT NULL DEFAULT 0,
+                    threshold_basis TEXT NOT NULL DEFAULT 'total_recharge',
                     usage_days INTEGER NOT NULL DEFAULT 0,
                     animations TEXT NOT NULL DEFAULT '[]',
                     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -115,6 +124,10 @@ class Store:
             if "tier_id" not in claim_columns:
                 conn.execute("ALTER TABLE claims ADD COLUMN tier_id INTEGER")
             tier_columns = {row["name"] for row in conn.execute("PRAGMA table_info(activity_tiers)").fetchall()}
+            if "threshold_basis" not in tier_columns:
+                conn.execute(
+                    "ALTER TABLE activity_tiers ADD COLUMN threshold_basis TEXT NOT NULL DEFAULT 'total_recharge'"
+                )
             if "is_active" not in tier_columns:
                 conn.execute("ALTER TABLE activity_tiers ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
             if "usage_days" not in tier_columns:
@@ -174,27 +187,51 @@ class Store:
                 seen_keys.add(tier_key)
                 name = str(tier.get("name") or tier_key).strip()
                 threshold_amount = float(tier.get("threshold_amount") or 0)
+                threshold_basis = normalize_threshold_basis(tier.get("threshold_basis"))
                 usage_days = max(0, int(tier.get("usage_days") or 0))
                 animations = json.dumps(clean_animation_list(tier.get("animations")), ensure_ascii=False)
                 sort_order = int(tier.get("sort_order") if tier.get("sort_order") is not None else index)
                 cur = conn.execute(
                     """
                     UPDATE activity_tiers
-                    SET name=?, threshold_amount=?, usage_days=?, animations=?, sort_order=?, is_active=1, updated_at=?
+                    SET name=?, threshold_amount=?, threshold_basis=?, usage_days=?, animations=?,
+                        sort_order=?, is_active=1, updated_at=?
                     WHERE activity_id=? AND tier_key=?
                     """,
-                    (name, threshold_amount, usage_days, animations, sort_order, now, activity["id"], tier_key),
+                    (
+                        name,
+                        threshold_amount,
+                        threshold_basis,
+                        usage_days,
+                        animations,
+                        sort_order,
+                        now,
+                        activity["id"],
+                        tier_key,
+                    ),
                 )
                 if cur.rowcount == 0:
                     conn.execute(
                         """
                         INSERT INTO activity_tiers(
-                            activity_id, tier_key, name, threshold_amount, usage_days, animations,
+                            activity_id, tier_key, name, threshold_amount, threshold_basis, usage_days, animations,
                             sort_order, is_active, created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (activity["id"], tier_key, name, threshold_amount, usage_days, animations, sort_order, 1, now, now),
+                        (
+                            activity["id"],
+                            tier_key,
+                            name,
+                            threshold_amount,
+                            threshold_basis,
+                            usage_days,
+                            animations,
+                            sort_order,
+                            1,
+                            now,
+                            now,
+                        ),
                     )
 
             existing = conn.execute(
@@ -334,6 +371,7 @@ class Store:
         slug: str,
         email: str,
         effective_recharge: float,
+        current_balance: float = 0.0,
         usage_status: Optional[Dict[int, bool]] = None,
         recharge_by_usage_days: Optional[Dict[int, float]] = None,
     ) -> Tuple[Dict[str, Any], bool]:
@@ -349,6 +387,7 @@ class Store:
                     email_hash,
                     now,
                     effective_recharge,
+                    current_balance,
                     usage_status or {},
                     recharge_by_usage_days or {},
                 )
@@ -407,6 +446,7 @@ class Store:
         email_hash: str,
         now: str,
         effective_recharge: float,
+        current_balance: float,
         usage_status: Dict[int, bool],
         recharge_by_usage_days: Dict[int, float],
     ) -> Tuple[Dict[str, Any], bool]:
@@ -425,7 +465,7 @@ class Store:
         tiers = list_tiers(conn, activity["id"], include_private=True)
         eligible = [
             tier for tier in tiers
-            if tier_requirements_met(tier, effective_recharge, usage_status, recharge_by_usage_days)
+            if tier_requirements_met(tier, effective_recharge, current_balance, usage_status, recharge_by_usage_days)
         ]
         eligible.sort(
             key=lambda tier: (
@@ -437,7 +477,9 @@ class Store:
         if not eligible:
             raise AppError(HTTPStatus.FORBIDDEN, "暂未匹配到可领取档次，请确认充值金额和使用记录后再试")
 
-        selected = eligible[0]
+        selected = first_available_tier(conn, activity["id"], eligible)
+        if not selected:
+            raise AppError(HTTPStatus.CONFLICT, "eligible tier codes are exhausted")
         if count_remaining(conn, activity["id"], int(selected["id"])) <= 0:
             raise AppError(HTTPStatus.CONFLICT, "当前可领取档次兑换码已领完")
 
@@ -566,6 +608,17 @@ def find_available_code(conn: sqlite3.Connection, activity_id: int, tier_id: Any
     return conn.execute(sql, params).fetchone()
 
 
+def first_available_tier(
+    conn: sqlite3.Connection,
+    activity_id: int,
+    tiers: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    for tier in tiers:
+        if count_remaining(conn, activity_id, int(tier["id"])) > 0:
+            return tier
+    return None
+
+
 def get_tier_by_key(conn: sqlite3.Connection, activity_id: int, tier_key: str) -> Optional[sqlite3.Row]:
     return conn.execute(
         """
@@ -603,23 +656,40 @@ def tier_to_dict(conn: sqlite3.Connection, row: sqlite3.Row, include_private: bo
     }
     if include_private:
         tier["threshold_amount"] = float(row["threshold_amount"] or 0)
+        tier["threshold_basis"] = normalize_threshold_basis(row["threshold_basis"])
         tier["usage_days"] = int(row["usage_days"] or 0)
     return tier
+
+
+def normalize_threshold_basis(value: Any) -> str:
+    basis = str(value or "").strip()
+    if basis in THRESHOLD_BASIS_VALUES:
+        return basis
+    return THRESHOLD_BASIS_TOTAL_RECHARGE
 
 
 def tier_requirements_met(
     tier: Dict[str, Any],
     effective_recharge: float,
+    current_balance: float,
     usage_status: Dict[int, bool],
     recharge_by_usage_days: Dict[int, float],
 ) -> bool:
     usage_days = int(tier.get("usage_days") or 0)
     threshold = float(tier.get("threshold_amount") or 0)
-    if usage_days <= 0:
-        return threshold <= max(0.0, effective_recharge)
-    recent_recharge = max(0.0, float(recharge_by_usage_days.get(usage_days) or 0))
-    if threshold > recent_recharge:
+    basis = normalize_threshold_basis(tier.get("threshold_basis"))
+    if basis == THRESHOLD_BASIS_CURRENT_BALANCE:
+        basis_amount = current_balance
+    elif basis == THRESHOLD_BASIS_RECENT_RECHARGE:
+        if usage_days <= 0:
+            return False
+        basis_amount = float(recharge_by_usage_days.get(usage_days) or 0)
+    else:
+        basis_amount = effective_recharge
+    if threshold > max(0.0, float(basis_amount or 0)):
         return False
+    if usage_days <= 0:
+        return True
     return bool(usage_status.get(usage_days))
 
 

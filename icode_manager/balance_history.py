@@ -25,6 +25,18 @@ class RechargeCalculator:
     def effective_recharge(self, user_id: int) -> Dict[str, Any]:
         return self.recharge_context(user_id, [])["overall"]
 
+    def current_balance(self, user_id: int, user: Optional[Dict[str, Any]] = None) -> float:
+        if user and "balance" in user:
+            return max(0.0, parse_float(user.get("balance"), 0.0))
+        if user_id <= 0 or self.config.get("verify_mode") != "database":
+            return 0.0
+        with connect_db(self.db_config) as conn:
+            row = conn.execute(
+                "SELECT balance FROM users WHERE id = %s",
+                (user_id,),
+            ).fetchone()
+        return max(0.0, parse_float(row.get("balance") if row else None, 0.0))
+
     def recharge_context(self, user_id: int, days_values: List[int]) -> Dict[str, Any]:
         days = sorted({int(value) for value in days_values if int(value) > 0})
         empty = empty_recharge_result()

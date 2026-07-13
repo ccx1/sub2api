@@ -38,14 +38,6 @@
           <span>{{ t('nav.docs') }}</span>
         </a>
 
-        <router-link
-          to="/guide"
-          class="btn btn-ghost btn-sm hidden sm:inline-flex"
-        >
-          <Icon name="document" size="sm" />
-          <span>{{ t('userGuide.title') }}</span>
-        </router-link>
-
         <!-- Language Switcher -->
         <LocaleSwitcher />
 

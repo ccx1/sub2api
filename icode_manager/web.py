@@ -16,6 +16,8 @@ from product_listing import ProductListingScheduler, ProductListingService
 from publisher import publish_activity
 from store import DEFAULT_MESSAGE_TEMPLATE
 from store import Store
+from store import THRESHOLD_BASIS_TOTAL_RECHARGE
+from store import THRESHOLD_BASIS_VALUES
 from verifier import UserVerifier
 
 
@@ -98,11 +100,13 @@ class ClaimHandler(BaseHTTPRequestHandler):
             usage_days = tier_usage_days_values(activity.get("tiers"))
             recharge_context = self.recharge_calculator.recharge_context(user_id, usage_days)
             recharge = recharge_context["overall"]
+            current_balance = self.recharge_calculator.current_balance(user_id, user)
             usage_status = self.recharge_calculator.usage_status(user_id, usage_days) if usage_days else {}
             claim, already_claimed = self.store.claim_tier_code(
                 slug,
                 email,
                 recharge["effective_recharge"],
+                current_balance=current_balance,
                 usage_status=usage_status,
                 recharge_by_usage_days={
                     day: data["effective_recharge"]
@@ -111,6 +115,7 @@ class ClaimHandler(BaseHTTPRequestHandler):
             )
             claim["recharge"] = {
                 "effective_recharge": recharge["effective_recharge"],
+                "current_balance": current_balance,
                 "local_deduction": recharge["local_deduction"],
                 "by_usage_days": recharge_context.get("by_days", {}),
             }
@@ -463,12 +468,18 @@ def normalize_tiers(value: Any) -> List[Dict[str, Any]]:
             raise AppError(HTTPStatus.BAD_REQUEST, "红包档次使用记录天数不正确")
         if usage_days < 0:
             raise AppError(HTTPStatus.BAD_REQUEST, "红包档次使用记录天数不能小于 0")
+        threshold_basis = str(item.get("threshold_basis") or THRESHOLD_BASIS_TOTAL_RECHARGE).strip()
+        if threshold_basis not in THRESHOLD_BASIS_VALUES:
+            raise AppError(HTTPStatus.BAD_REQUEST, "invalid tier threshold basis")
+        if threshold_basis == "recent_recharge" and usage_days <= 0:
+            raise AppError(HTTPStatus.BAD_REQUEST, "recent recharge threshold requires usage_days greater than 0")
         animations = item.get("animations") if isinstance(item.get("animations"), list) else []
         out.append(
             {
                 "tier_key": tier_key,
                 "name": clean_required(item.get("name"), "红包档次名称不能为空"),
                 "threshold_amount": threshold_amount,
+                "threshold_basis": threshold_basis,
                 "usage_days": usage_days,
                 "animations": [str(x).strip() for x in animations if str(x).strip()],
                 "sort_order": int(item.get("sort_order") if item.get("sort_order") is not None else index),

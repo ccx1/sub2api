@@ -82,6 +82,14 @@
                   <input id="tierThreshold" type="number" min="0" step="0.01" placeholder="例如 100" />
                 </label>
                 <label class="field">
+                  门槛依据
+                  <select id="tierThresholdBasis">
+                    <option value="total_recharge">历史总充值</option>
+                    <option value="recent_recharge">最近充值</option>
+                    <option value="current_balance">当前余额</option>
+                  </select>
+                </label>
+                <label class="field">
                   使用记录天数
                   <input id="tierUsageDays" type="number" min="0" step="1" placeholder="0 表示不限制" />
                 </label>
@@ -474,6 +482,7 @@
         tierKey: document.getElementById("tierKey"),
         tierName: document.getElementById("tierName"),
         tierThreshold: document.getElementById("tierThreshold"),
+        tierThresholdBasis: document.getElementById("tierThresholdBasis"),
         tierUsageDays: document.getElementById("tierUsageDays"),
         startsAt: document.getElementById("startsAt"),
         endsAt: document.getElementById("endsAt"),
@@ -686,11 +695,24 @@
         syncPacketType();
       }
 
+      function normalizeThresholdBasis(value) {
+        return ["total_recharge", "recent_recharge", "current_balance"].includes(value) ? value : "total_recharge";
+      }
+
+      function thresholdBasisLabel(value) {
+        return {
+          total_recharge: "历史总充值",
+          recent_recharge: "最近充值",
+          current_balance: "当前余额",
+        }[normalizeThresholdBasis(value)];
+      }
+
       function normalizeTier(tier, index = 0) {
         return {
           tier_key: tier.tier_key || "",
           name: tier.name || "",
           threshold_amount: Number(tier.threshold_amount || 0),
+          threshold_basis: normalizeThresholdBasis(tier.threshold_basis),
           usage_days: Number(tier.usage_days || 0),
           animations: Array.isArray(tier.animations) ? tier.animations : [],
           sort_order: Number(tier.sort_order ?? index),
@@ -722,14 +744,17 @@
         const tierKey = fields.tierKey.value.trim();
         const name = fields.tierName.value.trim();
         const threshold = Number(fields.tierThreshold.value || 0);
+        const thresholdBasis = normalizeThresholdBasis(fields.tierThresholdBasis.value);
         const usageDays = Number(fields.tierUsageDays.value || 0);
         if (!tierKey || !name) throw new Error("请填写档次标识和 VIP 名称。");
         if (!Number.isFinite(threshold) || threshold < 0) throw new Error("门槛金额必须是不小于 0 的数字。");
         if (!Number.isInteger(usageDays) || usageDays < 0) throw new Error("使用记录天数必须是 0 或正整数。");
+        if (thresholdBasis === "recent_recharge" && usageDays <= 0) throw new Error("最近充值需要填写大于 0 的使用记录天数。");
         const next = normalizeTier({
           tier_key: tierKey,
           name,
           threshold_amount: threshold,
+          threshold_basis: thresholdBasis,
           usage_days: usageDays,
           animations: selectedAnimations(),
           sort_order: tiers.length,
@@ -746,6 +771,7 @@
         fields.tierKey.value = "";
         fields.tierName.value = "";
         fields.tierThreshold.value = "";
+        fields.tierThresholdBasis.value = "total_recharge";
         fields.tierUsageDays.value = "";
         setSelectedAnimations([]);
         renderTiers();
@@ -757,6 +783,7 @@
         fields.tierKey.value = tier.tier_key;
         fields.tierName.value = tier.name;
         fields.tierThreshold.value = tier.threshold_amount;
+        fields.tierThresholdBasis.value = normalizeThresholdBasis(tier.threshold_basis);
         fields.tierUsageDays.value = tier.usage_days || "";
         setSelectedAnimations(tier.animations);
       }
@@ -780,7 +807,7 @@
             <div class="tier-item-head">
               <div>
                 <strong>${escapeHtml(tier.name)} (${escapeHtml(tier.tier_key)})</strong>
-                <div class="meta">门槛：${escapeHtml(tier.threshold_amount)} · 使用记录：${escapeHtml(formatUsageDays(tier.usage_days))} · 动画：${escapeHtml(tier.animations.join("、") || "无")} · 剩余：${escapeHtml(tier.remaining_count || 0)} · 已领：${escapeHtml(tier.claimed_count || 0)}</div>
+                <div class="meta">门槛：${escapeHtml(tier.threshold_amount)} · 依据：${escapeHtml(thresholdBasisLabel(tier.threshold_basis))} · 使用记录：${escapeHtml(formatUsageDays(tier.usage_days))} · 动画：${escapeHtml(tier.animations.join("、") || "无")} · 剩余：${escapeHtml(tier.remaining_count || 0)} · 已领：${escapeHtml(tier.claimed_count || 0)}</div>
               </div>
               <div class="tier-actions">
                 <button class="secondary edit-tier" type="button">编辑</button>

@@ -73,6 +73,7 @@ class UserVerifier:
                        COALESCE(username, '') AS username,
                        status,
                        deleted_at,
+                       balance,
                        total_recharged
                 FROM users
                 WHERE lower(email) = lower(%s)

@@ -20,7 +20,17 @@
           <span>/</span>
           <span>{{ t('usage.out') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}</span>
           <span>/</span>
-          <span class="group relative inline-flex cursor-help items-center gap-0.5" tabindex="0">
+          <span
+            ref="cacheBreakdownTriggerRef"
+            class="inline-flex cursor-help items-center gap-0.5"
+            tabindex="0"
+            data-test="usage-cache-breakdown-trigger"
+            :aria-describedby="isCacheBreakdownTooltipVisible ? 'usage-cache-breakdown-tooltip' : undefined"
+            @mouseenter="showCacheBreakdownTooltip"
+            @mouseleave="hideCacheBreakdownTooltip"
+            @focus="showCacheBreakdownTooltip"
+            @blur="hideCacheBreakdownTooltip"
+          >
             <span>{{ cacheLabel() }}: {{ formatTokens(stats?.total_cache_tokens || 0) }}</span>
             <svg
               class="h-3.5 w-3.5 text-gray-400"
@@ -35,25 +45,6 @@
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <span
-              class="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-56 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-3 text-left text-xs text-gray-700 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100 dark:border-dark-600 dark:bg-dark-800 dark:text-dark-200"
-            >
-              <span class="mb-2 block font-medium text-gray-900 dark:text-white">
-                {{ cacheDetailLabel() }}
-              </span>
-              <span class="flex items-center justify-between gap-3">
-                <span>{{ t('usage.cacheCreationTokensLabel') }}</span>
-                <span class="tabular-nums">
-                  {{ formatTokens(stats?.total_cache_creation_tokens || 0) }}
-                </span>
-              </span>
-              <span class="mt-1 flex items-center justify-between gap-3">
-                <span>{{ t('usage.cacheReadTokensLabel') }}</span>
-                <span class="tabular-nums">
-                  {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
-                </span>
-              </span>
-            </span>
           </span>
         </p>
       </div>
@@ -86,10 +77,36 @@
       <div><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
     </div>
   </div>
+  <Teleport to="body">
+    <span
+      v-if="isCacheBreakdownTooltipVisible"
+      id="usage-cache-breakdown-tooltip"
+      class="pointer-events-none fixed rounded-lg border border-gray-200 bg-white p-3 text-left text-xs text-gray-700 shadow-lg dark:border-dark-600 dark:bg-dark-800 dark:text-dark-200"
+      :style="cacheBreakdownTooltipStyle"
+      role="tooltip"
+      data-test="usage-cache-breakdown-tooltip"
+    >
+      <span class="mb-2 block font-medium text-gray-900 dark:text-white">
+        {{ cacheDetailLabel() }}
+      </span>
+      <span class="flex items-center justify-between gap-3">
+        <span>{{ t('usage.cacheCreationTokensLabel') }}</span>
+        <span class="tabular-nums">
+          {{ formatTokens(stats?.total_cache_creation_tokens || 0) }}
+        </span>
+      </span>
+      <span class="mt-1 flex items-center justify-between gap-3">
+        <span>{{ t('usage.cacheReadTokensLabel') }}</span>
+        <span class="tabular-nums">
+          {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
+        </span>
+      </span>
+    </span>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
@@ -125,4 +142,48 @@ const formatTokens = (value: number) => {
 
 const cacheLabel = () => t('usage.cacheTotal')
 const cacheDetailLabel = () => t('usage.cacheBreakdown')
+
+const tooltipWidth = 224
+const tooltipGap = 8
+const tooltipViewportMargin = 12
+
+const cacheBreakdownTriggerRef = ref<HTMLElement | null>(null)
+const isCacheBreakdownTooltipVisible = ref(false)
+const cacheBreakdownTooltipStyle = ref<CSSProperties>({})
+
+const updateCacheBreakdownTooltipPosition = () => {
+  const trigger = cacheBreakdownTriggerRef.value
+  if (!trigger || typeof window === 'undefined') return false
+
+  const rect = trigger.getBoundingClientRect()
+  const width = Math.min(tooltipWidth, Math.max(0, window.innerWidth - tooltipViewportMargin * 2))
+  const rawLeft = rect.left + rect.width / 2 - width / 2
+  const maxLeft = Math.max(tooltipViewportMargin, window.innerWidth - width - tooltipViewportMargin)
+  const left = Math.min(Math.max(rawLeft, tooltipViewportMargin), maxLeft)
+
+  cacheBreakdownTooltipStyle.value = {
+    position: 'fixed',
+    zIndex: '100000020',
+    top: `${rect.bottom + tooltipGap}px`,
+    left: `${left}px`,
+    width: `${width}px`,
+  }
+  return true
+}
+
+const showCacheBreakdownTooltip = () => {
+  if (!updateCacheBreakdownTooltipPosition()) return
+  isCacheBreakdownTooltipVisible.value = true
+  window.addEventListener('scroll', updateCacheBreakdownTooltipPosition, true)
+  window.addEventListener('resize', updateCacheBreakdownTooltipPosition)
+}
+
+const hideCacheBreakdownTooltip = () => {
+  isCacheBreakdownTooltipVisible.value = false
+  if (typeof window === 'undefined') return
+  window.removeEventListener('scroll', updateCacheBreakdownTooltipPosition, true)
+  window.removeEventListener('resize', updateCacheBreakdownTooltipPosition)
+}
+
+onBeforeUnmount(hideCacheBreakdownTooltip)
 </script>
