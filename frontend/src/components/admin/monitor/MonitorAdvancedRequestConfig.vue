@@ -110,6 +110,8 @@ import { useI18n } from 'vue-i18n'
 import type { APIMode, BodyOverrideMode, Provider } from '@/api/admin/channelMonitor'
 import {
   API_MODE_RESPONSES,
+  DEFAULT_GROK_MODEL,
+  PROVIDER_GROK,
   PROVIDER_OPENAI,
 } from '@/constants/channelMonitor'
 
@@ -254,6 +256,17 @@ function buildDefaultBody(mode: BodyOverrideMode = props.bodyOverrideMode): Reco
     }
     return {
       model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Reply with exactly: ok' }],
+      max_tokens: 20,
+      stream: false,
+    }
+  }
+  if (props.provider === PROVIDER_GROK) {
+    if (mode === 'merge') {
+      return { max_tokens: 20 }
+    }
+    return {
+      model: DEFAULT_GROK_MODEL,
       messages: [{ role: 'user', content: 'Reply with exactly: ok' }],
       max_tokens: 20,
       stream: false,
