@@ -404,6 +404,14 @@
     background: rgba(var(--surface-subtle-rgb), 0.9);
   }
 
+  .dark .input[type='date'],
+  .dark .input[type='time'],
+  .dark .input[type='datetime-local'],
+  .dark .input[type='month'],
+  .dark .input[type='week'] {
+    color-scheme: dark;
+  }
+
   .input-error {
     border-color: rgba(192, 76, 58, 0.92);
   }
