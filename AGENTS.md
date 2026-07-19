@@ -19,6 +19,7 @@
 4. 对新增或本地保留的功能，必须确认 `frontend/src/api`、页面组件、后端 route、handler、service、repository/DB 查询链路完整。
 5. 合并完成前必须跑定向验证；没有验证证据时，不要声称“合并完成”“可部署”。
 6. 每次合并完上游新代码后，必须先执行前端生产构建，再用最新前端产物构建后端 Linux amd64 可执行二进制；最终回复必须给出二进制路径、版本、提交号、大小和 SHA256。
+7. 每次拉取 / 合并上游新代码并产出构建物后，必须提交源码合并结果并推送至远端；构建物、二进制和临时产物不得暂存、提交或推送。
 
 ## 登录 / 注册页 UI 定制门禁
 
@@ -199,6 +200,8 @@ $out = "sub2api-linux-amd64-v$version-$short"
 Get-Item -LiteralPath ".\$out" | Select-Object FullName,Length,LastWriteTime
 Get-FileHash -Algorithm SHA256 -LiteralPath ".\$out"
 ```
+
+构建物产出后，固定收尾顺序为：`git status --short` 确认仅源码改动进入提交范围、构建物保持未跟踪或已忽略 → 暂存并提交源码改动 → push 当前分支。不得把 `sub2api-linux-amd64-*`、前端构建输出、临时目录或其它产出物加入提交。
 
 如果工作区存在未提交改动，`go version -m` 可能显示 `vcs.modified=true`；最终回复必须说明该状态是否来自合并前已有改动、构建生成物，或本次任务修改。
 
