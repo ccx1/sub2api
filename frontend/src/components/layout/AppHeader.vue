@@ -6,7 +6,7 @@
         <button
           @click="toggleMobileSidebar"
           class="btn btn-ghost btn-icon lg:hidden"
-          aria-label="Toggle Menu"
+          :aria-label="t('common.toggleMenu')"
         >
           <Icon name="menu" size="md" />
         </button>
@@ -96,7 +96,7 @@
           <button
             @click="toggleDropdown"
             class="app-user-button flex items-center gap-2 rounded-xl border p-1.5 transition-colors"
-            aria-label="User Menu"
+            :aria-label="t('common.userMenu')"
           >
             <div class="app-user-avatar flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl text-sm font-medium shadow-sm">
               <img

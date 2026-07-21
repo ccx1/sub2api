@@ -24,7 +24,7 @@
       <header class="home-topbar">
         <router-link to="/home" class="home-brand" :aria-label="siteName">
           <span class="home-brand__logo">
-            <img :src="siteLogo || '/logo.png'" :alt="siteName" />
+            <img :src="siteLogo || '/logo.svg'" :alt="siteName" />
           </span>
           <span class="home-brand__text">
             <span class="home-brand__name">{{ siteName }}</span>

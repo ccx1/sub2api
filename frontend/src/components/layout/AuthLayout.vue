@@ -9,7 +9,7 @@
         <div>
           <div class="auth-brand">
             <div class="auth-brand__mark">
-              <img :src="siteLogo || '/logo.png'" alt="Logo" />
+              <img :src="siteLogo || '/logo.svg'" alt="Logo" />
             </div>
             <div class="auth-brand__copy">
               <div class="auth-brand__name">{{ siteName }}</div>
@@ -107,7 +107,7 @@
         <div
           class="mb-4 inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-gray-200/80 bg-white/85 shadow-card dark:border-dark-700 dark:bg-dark-800/85"
         >
-          <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
+          <img :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
         </div>
         <div class="mb-3 flex items-center justify-center gap-2">
           <span class="section-chip">Workspace Console</span>
