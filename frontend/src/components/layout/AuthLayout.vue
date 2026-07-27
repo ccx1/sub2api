@@ -716,7 +716,20 @@ onUnmounted(() => {
   }
 
   .auth-showcase__frame {
-    width: min(100% - 24px, 440px);
+    width: 100%;
+    max-width: 100%;
+    padding: 18px 16px;
+  }
+
+  .auth-showcase__form,
+  .auth-card {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .auth-card__content {
+    min-width: 0;
   }
 
   .auth-metrics {
@@ -739,7 +752,7 @@ onUnmounted(() => {
   }
 
   .auth-card {
-    padding: 22px;
+    padding: 22px 18px;
   }
 }
 </style>
