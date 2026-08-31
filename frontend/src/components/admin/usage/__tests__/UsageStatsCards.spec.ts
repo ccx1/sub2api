@@ -100,4 +100,21 @@ describe('UsageStatsCards', () => {
 
     expect(document.body.querySelector('[data-test="usage-cache-breakdown-tooltip"]')).toBeNull()
   })
+
+  it('keeps the cache tooltip out of the layout while it is hidden', () => {
+    const wrapper = mount(UsageStatsCards, {
+      props: {
+        stats,
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    const tooltip = document.body.querySelector('[data-test="usage-cache-breakdown-tooltip"]')
+
+    expect(tooltip).toBeNull()
+  })
 })
