@@ -564,6 +564,8 @@ export default {
     description: 'Channels you can access, along with their supported models and pricing',
     searchPlaceholder: 'Search channels or models...',
     empty: 'No available channels',
+    expandChannels: 'Expand channel list',
+    collapseChannels: 'Collapse channel list',
     noModels: 'No models configured',
     noPricing: 'Pricing not configured',
     exclusive: 'Exclusive',

@@ -569,6 +569,8 @@ export default {
     description: '查看您可访问的渠道与其支持的模型、定价',
     searchPlaceholder: '搜索渠道或模型...',
     empty: '暂无可用渠道',
+    expandChannels: '展开渠道列表',
+    collapseChannels: '收起渠道列表',
     noModels: '未配置模型',
     noPricing: '未配置定价',
     exclusive: '专属',
