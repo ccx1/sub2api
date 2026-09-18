@@ -1,10 +1,10 @@
 window.PAY_PAGE_CONFIG = {
   pageEyebrow: '欢迎购买 iCode 兑换码',
   pageTitle: '充值/订阅',
-  pageSubtitle: '按使用场景选择对应套餐，点击卡片后会跳转到对端充值页面。充值满10元之后联系站长加会员群。v群二维码在使用说明的金山文档中',
-  pageHint: '这个页面可以直接单独打开，也可以嵌入 iframe 使用；新增板块只需要修改 sections 配置。',
-  footerText: '默认会优先尝试跳转顶层窗口，避免充值页继续停留在 iframe 内。',
-  heroBadges: ['官方入口', '多档套餐', '支付后兑换'],
+  pageSubtitle: '先选充值金额，再选择可用的支付渠道。每个渠道都是独立线路，某条线路异常时可切换其他线路。',
+  pageHint: '同一金额只配置一张卡，在 channels 中添加多个支付线路即可。',
+  footerText: '支付完成后请按对端页面提示获取兑换码；如未到账，请保留订单信息联系客服。',
+  heroBadges: ['金额清晰', '多线路可选', '移动端友好'],
   openMode: 'top',
   sections: [
     {
@@ -33,11 +33,22 @@ window.PAY_PAGE_CONFIG = {
         },
         {
           name: '10 元储值卡',
-          desc: '也就那样吧',
-          tag: '捐赠',
-          price: '',
-          meta: '',
-          url: 'https://pay.ldxp.cn/item/71m1x9',
+          desc: '按需选择任一支付线路完成购买。',
+          tag: '常用',
+          price: '¥10',
+          meta: '可配置多条支付线路',
+          channels: [
+            {
+              name: '支付线路 A',
+              note: '推荐 · 稳定线路',
+              url: 'https://pay.ldxp.cn/item/71m1x9',
+            },
+            {
+              name: '支付线路 B',
+              note: '备用 · 请替换为第二渠道地址',
+              url: '',
+            },
+          ],
         },
         {
           name: '30 元储值卡',
