@@ -36,6 +36,7 @@
         <div
           v-if="showPopover"
           ref="popoverRef"
+          data-testid="account-groups-popover"
           class="fixed z-50 min-w-48 max-w-96 rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-dark-600 dark:bg-dark-800"
           :style="popoverStyle"
         >
@@ -67,18 +68,12 @@
       </Transition>
     </Teleport>
 
-    <!-- 点击外部关闭 popover -->
-    <div
-      v-if="showPopover"
-      class="fixed inset-0 z-40"
-      @click="showPopover = false"
-    />
   </div>
   <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import type { Group } from '@/types'
@@ -148,11 +143,28 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 }
 
+const handleDocumentPointerDown = (event: PointerEvent) => {
+  if (!showPopover.value) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (moreButtonRef.value?.contains(target) || popoverRef.value?.contains(target)) return
+  showPopover.value = false
+}
+
+watch(showPopover, (visible) => {
+  if (visible) {
+    document.addEventListener('pointerdown', handleDocumentPointerDown, true)
+  } else {
+    document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
+  }
+})
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
 })
 </script>

@@ -141,12 +141,20 @@ describe('AccountActionMenu viewport positioning', () => {
     expect(getLeft()).toBe(224)
   })
 
-  it('still closes on Escape and backdrop clicks', async () => {
+  it('closes on Escape and outside clicks without a click-blocking backdrop', async () => {
     const wrapper = await mountMenu()
+    const outsideButton = document.createElement('button')
+    const outsideClick = vi.fn()
+    outsideButton.addEventListener('click', outsideClick)
+    document.body.appendChild(outsideButton)
+
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    const backdrop = getMenu().previousElementSibling as HTMLElement
-    backdrop.click()
+    outsideButton.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    outsideButton.click()
 
     expect(wrapper.emitted('close')).toHaveLength(2)
+    expect(outsideClick).toHaveBeenCalledOnce()
+    expect(document.body.querySelector('.fixed.inset-0.z-\\[9998\\]')).toBeNull()
+    outsideButton.remove()
   })
 })
