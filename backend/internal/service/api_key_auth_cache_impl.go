@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 24 // v24: group model_allowlist field (renamed from models_list_config, enforcing semantics)
+const apiKeyAuthSnapshotVersion = 25 // v25: 分组安全策略开关、处置模式与邮件设置
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -410,6 +410,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			LongContextPricingEnabled:       apiKey.Group.LongContextPricingEnabled,
 			ModelPricing:                    apiKey.Group.ModelPricing,
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
+			SecurityPolicyEnabled:           apiKey.Group.SecurityPolicyEnabled,
+			SecurityPolicyMode:              apiKey.Group.SecurityPolicyMode,
+			SecurityPolicyEmailEnabled:      apiKey.Group.SecurityPolicyEmailEnabled,
 			FallbackGroupID:                 apiKey.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: apiKey.Group.FallbackGroupIDOnInvalidRequest,
 			ModelRouting:                    apiKey.Group.ModelRouting,
@@ -512,6 +515,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			LongContextPricingEnabled:       snapshot.Group.LongContextPricingEnabled,
 			ModelPricing:                    snapshot.Group.ModelPricing,
 			ClaudeCodeOnly:                  snapshot.Group.ClaudeCodeOnly,
+			SecurityPolicyEnabled:           snapshot.Group.SecurityPolicyEnabled,
+			SecurityPolicyMode:              snapshot.Group.SecurityPolicyMode,
+			SecurityPolicyEmailEnabled:      snapshot.Group.SecurityPolicyEmailEnabled,
 			FallbackGroupID:                 snapshot.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: snapshot.Group.FallbackGroupIDOnInvalidRequest,
 			ModelRouting:                    snapshot.Group.ModelRouting,

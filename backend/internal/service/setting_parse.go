@@ -247,6 +247,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
 		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
+		SettingKeyOpenAICodexTicketHarvestProxyMode:                  s.defaultCodexTicketHarvestProxyMode(""),
+		SettingKeyProxyPoolMaxAccounts:                               "0",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -898,6 +900,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
 	}
 	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
+	result.OpenAICodexTicketHarvestProxyMode = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyMode])
+	if result.OpenAICodexTicketHarvestProxyMode == "" {
+		result.OpenAICodexTicketHarvestProxyMode = s.defaultCodexTicketHarvestProxyMode(result.OpenAICodexTicketHarvestProxyURL)
+	}
+	result.ProxyPoolMaxAccounts, _ = parseProxyPoolMaxAccounts(settings[SettingKeyProxyPoolMaxAccounts])
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

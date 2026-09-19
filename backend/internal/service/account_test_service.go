@@ -354,6 +354,15 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 		return nil
 	}
+	if err := ResolveRandomProxyFromSource(ctx, account, s.accountRepo); err != nil {
+		if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, account, s.accountRepo, err); disableErr != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Random proxy unavailable: %v; disable account: %v", err, disableErr))
+		}
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	if err := ValidateAccountProtectionConfiguration(account); err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
 
 	// Route to platform-specific test method
 	if account.IsCNProvider() {

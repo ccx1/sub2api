@@ -38,11 +38,14 @@ type AdminHandlers struct {
 	ChannelMonitor         *admin.ChannelMonitorHandler
 	ChannelMonitorTemplate *admin.ChannelMonitorRequestTemplateHandler
 	ContentModeration      *admin.ContentModerationHandler
+	SecurityPolicy         *admin.SecurityPolicyHandler
 	PromptAudit            *securityaudit.PromptAdminHandler
 	Payment                *admin.PaymentHandler
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
+	SpendGuard             *admin.SpendGuardHandler
+	AntiDegrade            *admin.AntiDegradeHandler
 }
 
 // Handlers contains all HTTP handlers

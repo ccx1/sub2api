@@ -688,6 +688,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
+	protectionFirstMessage := append([]byte(nil), firstClientMessage...)
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -791,6 +792,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	if err := checkAccountRequestIntegrity(c, account, protectionFirstMessage, firstClientMessage); err != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+	}
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter 命中时 service_tier 已经从 firstClientMessage 中删除，
@@ -865,6 +869,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if dialer == nil {
 		return errors.New("openai ws passthrough dialer is nil")
 	}
+	tlsProfile, err := resolveMode1TLSProfile(account)
+	if err != nil {
+		return err
+	}
+	if s.cfg != nil && !s.cfg.Gateway.TLSFingerprint.Enabled {
+		tlsProfile = nil
+	}
 
 	agentTaskRecoveryTried := false
 	var upstreamConn openAIWSClientConn
@@ -876,7 +887,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
-		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
+		if tlsProfile != nil {
+			tlsDialer, ok := dialer.(openAIWSClientTLSDialer)
+			if !ok {
+				cancelDial()
+				return errors.New("websocket dialer does not support the configured TLS protection")
+			}
+			upstreamConn, statusCode, handshakeHeaders, err = tlsDialer.DialWithTLS(dialCtx, wsURL, headers, proxyURL, tlsProfile)
+		} else {
+			upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
+		}
 		cancelDial()
 		if err == nil {
 			break
@@ -921,6 +941,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
+	upstreamFrameConn = &randomProxyObservedWSFrameConn{FrameConn: upstreamFrameConn, account: account, source: s.accountRepo}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
@@ -981,6 +1002,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return payload, nil, nil
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			originalProtectionFrame := append([]byte(nil), payload...)
 			isResponseCreate := eventType == "response.create"
 			responseCreateAt := time.Time{}
 			acceptedTurn := false
@@ -1096,6 +1118,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				payload = s.ReplaceModelInBody(payload, model)
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			if policyErr == nil && blocked == nil && (isResponseCreate || eventType == "session.update") {
+				if err := checkAccountRequestIntegrity(c, account, originalProtectionFrame, out); err != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+				}
+			}
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
 			// filter 处理后的 payload，与首帧 policy-after-extract 语义

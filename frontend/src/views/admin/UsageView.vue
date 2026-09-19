@@ -66,6 +66,9 @@
         <AccountUsageTrend
           :trend-data="accountTrendData"
           :loading="chartsLoading"
+          :start-date="startDate"
+          :end-date="endDate"
+          :granularity="granularity"
         />
       </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->

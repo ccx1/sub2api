@@ -547,10 +547,18 @@ export default {
         codexTicketEnabledDesc:
           "When off, the gateway neither harvests nor injects x-codex-turn-state and forwards traffic as usual. When on, it harvests tickets in the background and overwrites that header on production requests.",
         codexTicketHarvestProxy: "292 harvest proxy",
+        codexTicketHarvestProxyFixed: "Fixed proxy URL",
+        codexTicketHarvestProxyPool: "Balanced proxy pool",
+        codexTicketHarvestProxyPoolDesc:
+          "Random-proxy accounts keep their selected scope and rotation interval; other accounts use the entire pool. Reuse an available proxy for each account. New selections prefer fewer associated accounts, then better quality at equal load. Failed proxies are excluded; degraded proxies are backups when normal proxies have no capacity. Skip harvesting when no capacity is available; never fall back to a direct connection.",
         codexTicketHarvestProxyDesc:
           "Used only for minting 292 tickets when the ticket feature is enabled. Changes apply to subsequent probes without a restart. Production traffic still uses each account's residential proxy. Paste a full HTTP or SOCKS5h proxy URL including username and password. The proxy provider must handle IP rotation. Leave blank when saving to keep the stored value.",
         codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
         codexTicketHarvestProxyConfigured: "Configured (password hidden). Paste a full new proxy URL to replace it.",
+        proxyPoolMaxAccounts: "Accounts per proxy in the pool",
+        proxyPoolMaxAccountsDesc:
+          "Shared by ticket harvesting from the pool and account random proxies. 0 means no hard limit while keeping allocation balanced; 1–10000 caps accounts per proxy. Counts fixed assignments and dynamic associations from the last 10 minutes, counting each account only once per proxy. A full proxy receives no new accounts. Existing fixed assignments are not changed.",
+        proxyPoolMaxAccountsRangeError: "Accounts per proxy must be an integer from 0 to 10000.",
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
           "Only affects OpenAI OAuth accounts with 'Codex official clients only' enabled (global). Beyond User-Agent/Originator, harden the decision with a version range, an engine-fingerprint gate, and black/whitelists.",

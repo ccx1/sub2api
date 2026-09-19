@@ -23,6 +23,23 @@ func TestUpdateAccountPreservesCodexTicketOnEdit(t *testing.T) {
 	require.NoError(t, svc.UpdateAccountExtra(context.Background(), 41, map[string]any{key: map[string]any{"state": "spoofed"}}))
 	require.Equal(t, ticket, repo.accounts[41].Extra[key])
 }
+
+func TestUpdateAccountPreservesExplicitlyDisabledCodexTicketOnEdit(t *testing.T) {
+	account := ticketTestAccount(42)
+	account.Extra = map[string]any{
+		OpenAICodexTicketEnabledExtraKey: false,
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{42: account}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	updated, err := svc.UpdateAccount(context.Background(), 42, &UpdateAccountInput{
+		Extra: map[string]any{"custom": true},
+	})
+	require.NoError(t, err)
+	require.Equal(t, false, updated.Extra[OpenAICodexTicketEnabledExtraKey])
+	require.Equal(t, true, updated.Extra["custom"])
+}
+
 func TestCreateAccountDropsUserSuppliedCodexTickets(t *testing.T) {
 	account, err := buildAccountForCreate(&CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, map[string]any{"codex_turn_ticket:custom": map[string]any{"state": "spoofed"}, "custom": true})
 	require.NoError(t, err)

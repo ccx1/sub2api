@@ -687,9 +687,28 @@
           <ProxySelector
             v-model="proxyId"
             :proxies="proxies"
+            :disabled="randomProxyEnabled"
             aria-labelledby="bulk-edit-proxy-label"
           />
+          <RandomProxySettings
+            v-model:enabled="randomProxyEnabled"
+            v-model:scope="randomProxyPoolScope"
+            v-model:ids="randomProxyPoolIds"
+            v-model:policy="randomProxyEmptyPoolPolicy"
+            v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
+            :proxies="proxies"
+            :disabled="!enableProxy"
+            @update:enabled="handleRandomProxyChange"
+          />
         </div>
+      </div>
+
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="mb-3 flex cursor-pointer items-center justify-between gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+          <span>{{ t('admin.accounts.dailyCooldown.bulkApply') }}</span>
+          <input id="bulk-edit-daily-cooldown-enabled" v-model="enableDailyCooldown" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        </label>
+        <DailyCooldownSettings v-model="dailyCooldown" :disabled="!enableDailyCooldown" :class="!enableDailyCooldown && 'opacity-50'" />
       </div>
 
       <!-- Concurrency & Priority -->
@@ -1490,6 +1509,10 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
+import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1644,6 +1667,7 @@ interface ModelMapping {
   to: string
 }
 
+
 // State - field enable flags
 const enableBaseUrl = ref(false)
 const enableModelRestriction = ref(false)
@@ -1686,6 +1710,13 @@ const interceptWarmupRequests = ref(false)
 const headerOverrideEnabled = ref(false)
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
 const proxyId = ref<number | null>(null)
+const randomProxyEnabled = ref(false)
+const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
+const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
+const randomProxyPoolIds = ref<number[]>([])
+const randomProxyMaxReuseMinutes = ref(0)
+const enableDailyCooldown = ref(false)
+const dailyCooldown = ref(normalizeDailyCooldown())
 const concurrency = ref(1)
 const loadFactor = ref<number | null>(null)
 const priority = ref(1)
@@ -1693,6 +1724,12 @@ const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
+
+const handleRandomProxyChange = (enabled: boolean) => {
+  if (enabled) {
+    proxyId.value = null
+  }
+}
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -1938,8 +1975,16 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   if (enableProxy.value) {
-    // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    updates.proxy_id = proxyId.value === null ? 0 : proxyId.value
+    // 后端期望 proxy_id: 0 表示清除代理，而不是 null。随机代理同样清空固定代理列。
+    updates.proxy_id = randomProxyEnabled.value || proxyId.value === null ? 0 : proxyId.value
+    const extra = ensureExtra()
+    if (randomProxyEnabled.value) {
+      Object.assign(extra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value }))
+    }
+  }
+
+  if (enableDailyCooldown.value) {
+    updates.extra = withDailyCooldownExtra(ensureExtra(), dailyCooldown.value)
   }
 
   if (enableConcurrency.value) {
@@ -2195,12 +2240,22 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  const cooldownError = enableDailyCooldown.value && dailyCooldownValidationError(dailyCooldown.value)
+  if (cooldownError || (enableProxy.value && randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
+    appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
+    return
+  }
+  if (enableProxy.value && randomProxyEnabled.value && randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
+    appStore.showError(t('admin.accounts.randomProxyPoolRequired'))
+    return
+  }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
   }
 
   const hasAnyFieldEnabled =
+    enableDailyCooldown.value ||
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
@@ -2379,6 +2434,13 @@ watch(
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
+      randomProxyEnabled.value = false
+      randomProxyEmptyPoolPolicy.value = 'reject'
+      randomProxyPoolScope.value = 'all'
+      randomProxyPoolIds.value = []
+      randomProxyMaxReuseMinutes.value = 0
+      enableDailyCooldown.value = false
+      dailyCooldown.value = normalizeDailyCooldown()
 
       // Reset all values
       baseUrl.value = ''

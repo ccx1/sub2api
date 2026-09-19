@@ -201,6 +201,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
+	// 协议桥接完成后的 Responses 请求作为语义基线，防止后续兼容转换丢失内容。
+	stageMode1Request(c, account, responsesBody)
 
 	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
 		var reqBody map[string]any

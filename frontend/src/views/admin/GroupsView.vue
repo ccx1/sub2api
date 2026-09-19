@@ -422,6 +422,17 @@
               </button>
               <button
                 v-if="!authStore.isSimpleMode"
+                data-testid="group-statistics"
+                @click="handleStatistics(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-emerald-600 dark:hover:bg-dark-700 dark:hover:text-emerald-400"
+              >
+                <Icon name="chartBar" size="sm" />
+                <span class="text-xs">{{
+                  t("admin.groups.statistics.action")
+                }}</span>
+              </button>
+              <button
+                v-if="!authStore.isSimpleMode"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
@@ -703,6 +714,54 @@
                   : t("admin.groups.public")
               }}
             </span>
+          </div>
+        </div>
+
+        <!-- 安全策略：敏感话题拦截 + 违规断会话（默认关闭） -->
+        <div class="mt-4 border-t border-gray-200 dark:border-dark-400 pt-4">
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              @click="createForm.security_policy_enabled = !createForm.security_policy_enabled"
+              :class="[
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                createForm.security_policy_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  createForm.security_policy_enabled ? 'translate-x-6' : 'translate-x-1',
+                ]"
+              />
+            </button>
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.securityPolicy.title") }}
+            </span>
+          </div>
+          <p class="input-hint mt-1">
+            {{ t("admin.groups.securityPolicy.hint") }}
+          </p>
+          <div v-if="createForm.security_policy_enabled" class="mt-3 space-y-3">
+            <div>
+              <label class="input-label">{{
+                t("admin.groups.securityPolicy.mode")
+              }}</label>
+              <Select
+                v-model="createForm.security_policy_mode"
+                :options="securityPolicyModeOptions"
+              />
+            </div>
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.security_policy_email_enabled"
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span>{{ t("admin.groups.securityPolicy.email") }}</span>
+            </label>
           </div>
         </div>
 
@@ -2343,6 +2402,54 @@
         <div>
           <label class="input-label">{{ t("admin.groups.form.status") }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
+        </div>
+
+        <!-- 安全策略：敏感话题拦截 + 违规断会话（默认关闭） -->
+        <div class="mt-4 border-t border-gray-200 dark:border-dark-400 pt-4">
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              @click="editForm.security_policy_enabled = !editForm.security_policy_enabled"
+              :class="[
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                editForm.security_policy_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  editForm.security_policy_enabled ? 'translate-x-6' : 'translate-x-1',
+                ]"
+              />
+            </button>
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.securityPolicy.title") }}
+            </span>
+          </div>
+          <p class="input-hint mt-1">
+            {{ t("admin.groups.securityPolicy.hint") }}
+          </p>
+          <div v-if="editForm.security_policy_enabled" class="mt-3 space-y-3">
+            <div>
+              <label class="input-label">{{
+                t("admin.groups.securityPolicy.mode")
+              }}</label>
+              <Select
+                v-model="editForm.security_policy_mode"
+                :options="securityPolicyModeOptions"
+              />
+            </div>
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.security_policy_email_enabled"
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span>{{ t("admin.groups.securityPolicy.email") }}</span>
+            </label>
+          </div>
         </div>
 
         <!-- Subscription Configuration -->
@@ -4261,6 +4368,11 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+
+    <GroupStatisticsDialog
+      :group-id="statisticsGroupId"
+      @close="statisticsGroupId = null"
+    />
   </AppLayout>
 </template>
 
@@ -4300,6 +4412,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import GroupStatisticsDialog from "@/components/admin/groups/GroupStatisticsDialog.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
@@ -4440,6 +4553,16 @@ const groupPricingToAPI = (
     }));
 
 const { t } = useI18n();
+const securityPolicyModeOptions = computed(() => [
+  {
+    value: "block_session",
+    label: t("admin.groups.securityPolicy.modeSession"),
+  },
+  {
+    value: "block_request",
+    label: t("admin.groups.securityPolicy.modeRequest"),
+  },
+]);
 const appStore = useAppStore();
 const authStore = useAuthStore();
 const onboardingStore = useOnboardingStore();
@@ -4833,6 +4956,7 @@ const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
+const statisticsGroupId = ref<number | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 type ConcreteGroupPlatform = Exclude<GroupPlatform, "composite">;
 type CompositeRouteFormState = {
@@ -4934,6 +5058,9 @@ const createForm = reactive({
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
+  security_policy_enabled: false,
+  security_policy_mode: "block_session",
+  security_policy_email_enabled: true,
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
@@ -5298,6 +5425,9 @@ const editForm = reactive({
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
+  security_policy_enabled: false,
+  security_policy_mode: "block_session",
+  security_policy_email_enabled: true,
   status: "active" as "active" | "inactive",
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
@@ -5761,6 +5891,9 @@ const closeCreateModal = () => {
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
   createForm.is_exclusive = false;
+  createForm.security_policy_enabled = false;
+  createForm.security_policy_mode = "block_session";
+  createForm.security_policy_email_enabled = true;
   createForm.subscription_type = "standard";
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
@@ -6030,6 +6163,9 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;
   editForm.is_exclusive = group.is_exclusive;
+  editForm.security_policy_enabled = group.security_policy_enabled ?? false;
+  editForm.security_policy_mode = group.security_policy_mode || "block_session";
+  editForm.security_policy_email_enabled = group.security_policy_email_enabled ?? true;
   editForm.status = group.status;
   editForm.subscription_type = group.subscription_type || "standard";
   editForm.daily_limit_usd = group.daily_limit_usd;
@@ -6399,6 +6535,10 @@ const handleRateMultipliers = (group: AdminGroup) => {
 const handleRPMOverrides = (group: AdminGroup) => {
   rpmOverridesGroup.value = group;
   showRPMOverridesModal.value = true;
+};
+
+const handleStatistics = (group: AdminGroup) => {
+  statisticsGroupId.value = group.id;
 };
 
 const handleDuplicate = async (group: AdminGroup) => {

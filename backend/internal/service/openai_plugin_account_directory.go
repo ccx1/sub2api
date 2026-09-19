@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // OpenAIGatewayService implements service.PluginAccountDirectory for the OpenAI
@@ -33,7 +35,7 @@ func (s *OpenAIGatewayService) ListPluginAccounts(ctx context.Context, platform,
 	ids := make([]int64, 0, len(accounts))
 	for i := range accounts {
 		account := accounts[i]
-		if account.Status == StatusActive && account.IsOpenAIOAuthLike() && !account.IsShadow() && account.Type == AccountTypeOAuth {
+		if account.Status == StatusActive && !account.IsInDailyCooldown(time.Now()) && account.IsOpenAIOAuthLike() && !account.IsShadow() && account.Type == AccountTypeOAuth {
 			ids = append(ids, account.ID)
 		}
 	}
@@ -54,6 +56,15 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 	}
 	if account == nil || account.Type != AccountTypeOAuth || !account.IsOpenAIOAuthLike() || account.IsShadow() {
 		return nil, nil
+	}
+	if !account.IsActive() || account.IsInDailyCooldown(time.Now()) {
+		return nil, nil
+	}
+	if err := ResolveRandomProxyFromSource(ctx, account, s.accountRepo); err != nil {
+		if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, account, s.accountRepo, err); disableErr != nil {
+			return nil, fmt.Errorf("%w; disable random proxy account: %v", err, disableErr)
+		}
+		return nil, err
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {

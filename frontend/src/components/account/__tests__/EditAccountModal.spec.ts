@@ -330,6 +330,90 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('loads and disables daily cooldown without losing unrelated extra or proxy reuse', async () => {
+    const account = buildAccount()
+    account.extra = {
+      custom_flag: 'keep', proxy_mode: 'random', random_proxy_max_reuse_minutes: 120,
+      daily_cooldown: { enabled: true, start: '22:15', end: '07:30', timezone: 'UTC' }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="daily-cooldown-start"]').element).toHaveProperty('value', '22:15')
+    expect(wrapper.get('[data-testid="daily-cooldown-timezone"]').element).toHaveProperty('value', 'UTC')
+    expect(wrapper.get('[data-testid="random-proxy-reuse-minutes"]').element).toHaveProperty('value', '120')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      custom_flag: 'keep', proxy_mode: 'random', random_proxy_max_reuse_minutes: 120,
+      daily_cooldown: { enabled: false }
+    })
+    wrapper.unmount()
+  })
+
+  it('does not introduce a cooldown on legacy accounts when editing unrelated fields', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="daily-cooldown-enabled"]').element.checked).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('daily_cooldown')
+    wrapper.unmount()
+  })
+
+  it('allows disabling cooldown after making its hidden times and timezone invalid', async () => {
+    const account = buildAccount()
+    account.extra = { custom_flag: 'keep', daily_cooldown: { enabled: true, start: '23:00', end: '08:00', timezone: 'Asia/Shanghai' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="daily-cooldown-end"]').setValue('23:00')
+    await wrapper.get('[data-testid="daily-cooldown-timezone"]').setValue('Invalid/Zone')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.daily_cooldown).toEqual({ enabled: false })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.custom_flag).toBe('keep')
+    wrapper.unmount()
+  })
+
+  it('rejects invalid proxy rotation minutes before updating an account', async () => {
+    const account = buildAccount()
+    account.extra = { proxy_mode: 'random' }
+    updateAccountMock.mockReset()
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="random-proxy-reuse-minutes"]').setValue(-1)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('preserves selected unavailable proxies while editing an account', async () => {
+    const account = buildAccount()
+    account.extra = { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [99], random_proxy_empty_pool_policy: 'direct' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="random-proxy-scope"]').element).toHaveProperty('value', 'selected')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      proxy_id: 0,
+      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [99], random_proxy_empty_pool_policy: 'direct' }
+    })
+    wrapper.unmount()
+  })
+
+  it('blocks saving an explicitly selected empty proxy pool', async () => {
+    const account = buildAccount()
+    account.extra = { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [] }
+    updateAccountMock.mockReset()
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2028-02-29T12:34:00'))

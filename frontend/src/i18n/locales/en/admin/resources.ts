@@ -159,10 +159,17 @@ export default {
       standardAdd: 'Standard Add',
       batchAdd: 'Quick Add',
       batchInput: 'Proxy List',
+      batchInputFormat: 'Colon-separated format',
+      batchFormatAuto: 'Auto-detect (skip ambiguous lines)',
+      batchFormatHostFirst: 'host:port:username:password',
+      batchFormatCredentialsFirst: 'username:password:host:port',
+      batchAmbiguousHint: "{count} ambiguous lines are excluded. Select a colon-separated format or use the {'@'} format.",
+      batchDefaultProtocol: 'Default protocol for bare entries',
+      batchDefaultProtocolHint: 'Entries without a scheme are completed with this protocol.',
       batchInputPlaceholder:
-        "Enter one proxy per line in the following formats:\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080\nhttps://user:pass{'@'}proxy.example.com:443",
+        "Enter one proxy per line in the following formats:\nproxy.example.com:8001:alice:secret\nalice:secret{'@'}proxy.example.com:8001\nalice:secret:proxy.example.com:8001\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080",
       batchInputHint:
-        "Supports http, https, socks5 protocols. Format: protocol://[user:pass{'@'}]host:port",
+        "Supports mixed input: host:port:user:pass, user:pass{'@'}host:port, user:pass:host:port, and full URLs. Entries without a scheme use the default protocol above.",
       parsedCount: '{count} valid',
       invalidCount: '{count} invalid',
       duplicateCount: '{count} duplicate',
@@ -603,6 +610,40 @@ export default {
           canceled: 'Canceled'
         }
       }
+    },
+
+    spendGuard: {
+      title: 'Spend Guard',
+      description: 'Automatically freeze API keys with abnormal token velocity or error rates for review.',
+      settings: 'Protection rules',
+      enableAuto: 'Enable auto-freeze',
+      windowMinutes: 'Window (minutes)',
+      tokensPerMinute: 'Tokens/min threshold',
+      minRequests: 'Minimum requests',
+      maxErrorRate: 'Error-rate threshold (0-1)',
+      intervalSeconds: 'Check interval (seconds)',
+      settingsHint: 'Keys below the minimum request count are never frozen. Frozen keys stay disabled until manually unfrozen.',
+      key: 'API key',
+      requests: 'Requests',
+      tokensPerMin: 'Tokens/min',
+      errRate: 'Error rate',
+      status: 'Status',
+      frozen: 'Frozen',
+      statusActive: 'Active',
+      statusDisabled: 'Disabled',
+      statusQuotaExhausted: 'Quota exhausted',
+      statusExpired: 'Expired',
+      unfreeze: 'Unfreeze',
+      unfreezeSuccess: 'API key unfrozen',
+      unfreezeFailed: 'Failed to unfreeze API key',
+      events: 'Freeze events',
+      noData: 'No API key activity in this window yet.',
+      loadFailed: 'Failed to load spend guard data',
+      saveFailed: 'Failed to save protection rules',
+      saveSuccess: 'Protection rules saved',
+      reasonTokenRate: 'Token velocity exceeded the threshold',
+      reasonErrorRate: 'Error rate exceeded the threshold',
+      reasonManual: 'Manually unfrozen'
     },
 
     // Ops Monitoring

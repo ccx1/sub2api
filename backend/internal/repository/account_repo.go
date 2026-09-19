@@ -49,6 +49,7 @@ type accountRepository struct {
 	// Used to proactively sync account snapshot to cache when status changes,
 	// ensuring sticky sessions can promptly detect unavailable accounts.
 	schedulerCache service.SchedulerCache
+	proxyPool      *ProxyPoolAllocator
 }
 
 var schedulerNeutralExtraKeyPrefixes = []string{
@@ -68,6 +69,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
+	"random_proxy_last_used":     {},
 	"codex_usage_updated_at":     {},
 	"grok_billing_snapshot":      {},
 	"session_window_utilization": {},
@@ -140,6 +142,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if err := service.ValidateDailyCooldownExtra(account.Extra); err != nil {
+		return err
+	}
+	if err := service.ValidateRandomProxyReuseExtra(account.Extra); err != nil {
+		return err
+	}
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -162,7 +170,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		builder.SetLoadFactor(*account.LoadFactor)
 	}
 
-	if account.ProxyID != nil {
+	if !account.IsRandomProxy() && account.ProxyID != nil {
 		builder.SetProxyID(*account.ProxyID)
 	}
 	if account.LastUsedAt != nil {
@@ -278,6 +286,13 @@ func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Acc
 		return nil, service.ErrAccountNotFound
 	}
 	return &accounts[0], nil
+}
+
+// SelectRandomActiveProxy chooses one active, non-expired proxy for an account
+// configured with proxy_mode=random. The choice is request-scoped and is never
+// persisted back to accounts.proxy_id.
+func (r *accountRepository) SelectRandomActiveProxy(ctx context.Context) (*service.Proxy, error) {
+	return r.selectRandomActiveProxy(ctx, nil, false)
 }
 
 func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
@@ -529,6 +544,10 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
+	if err := preserveLockedAccountProtection(ctx, client, account); err != nil {
+		return nil, err
+	}
+	extra = account.Extra
 
 	schedulable := account.Schedulable
 	if account.Status == service.StatusError {
@@ -558,7 +577,9 @@ func (r *accountRepository) updateLockedAccount(
 		builder.ClearLoadFactor()
 	}
 
-	if account.ProxyID != nil {
+	if account.IsRandomProxy() {
+		builder.ClearProxyID()
+	} else if account.ProxyID != nil {
 		builder.SetProxyID(*account.ProxyID)
 	} else {
 		builder.ClearProxyID()
@@ -2662,6 +2683,12 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := service.ValidateDailyCooldownExtra(updates); err != nil {
+		return err
+	}
+	if err := service.ValidateRandomProxyReuseExtra(updates); err != nil {
+		return err
+	}
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
 	if len(updates) == 0 {
 		return nil
@@ -2695,6 +2722,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
+	extraExpression = preserveProtectionExtraSQL(ctx, extraExpression)
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
@@ -2939,7 +2967,17 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	if err := service.ValidateDailyCooldownExtra(updates.Extra); err != nil {
+		return 0, err
+	}
+	if err := service.ValidateRandomProxyReuseExtra(updates.Extra); err != nil {
+		return 0, err
+	}
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	randomProxyModeUpdate := false
+	if mode, ok := updates.Extra[service.ProxyModeExtraKey].(string); ok && strings.EqualFold(strings.TrimSpace(mode), service.ProxyModeRandom) {
+		randomProxyModeUpdate = true
+	}
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -2965,7 +3003,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
+		setClauses = append(setClauses, "concurrency = "+protectedConcurrencySQL("$"+itoa(idx)+"::integer"))
 		args = append(args, *updates.Concurrency)
 		idx++
 	}
@@ -3044,6 +3082,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				extraExpression = "(" + extraExpression + ") - 'ollama_cloud_usage_snapshot'"
 			}
 		}
+		if updates.ProxyID != nil && !randomProxyModeUpdate {
+			extraExpression = "(" + extraExpression + ") - '" + service.ProxyModeExtraKey + "' - '" + service.RandomProxyEmptyPoolPolicyExtraKey + "'"
+		}
 		eligibleAccount := "platform IN (" + ollamaCloudUsagePlatformsSQL + ") AND type = 'apikey'"
 		groupIdentityChanged := ""
 		if len(ollamaGroupIdentityChanges) > 0 {
@@ -3069,6 +3110,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if updates.EnsureCodexFingerprintSeed {
 			extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 		}
+		extraExpression = preserveProtectionExtraSQL(ctx, extraExpression)
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}
 

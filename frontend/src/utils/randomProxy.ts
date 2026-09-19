@@ -1,0 +1,33 @@
+import type { Proxy } from '@/types'
+
+export type RandomProxyPoolScope = 'all' | 'selected'
+export type RandomProxyEmptyPoolPolicy = 'reject' | 'disable' | 'direct'
+
+export const normalizeRandomProxyPoolScope = (value: unknown): RandomProxyPoolScope =>
+  value === 'selected' ? 'selected' : 'all'
+
+export const normalizeRandomProxyEmptyPoolPolicy = (value: unknown): RandomProxyEmptyPoolPolicy =>
+  value === 'disable' || value === 'direct' ? value : 'reject'
+
+export const normalizeRandomProxyPoolIds = (value: unknown): number[] =>
+  Array.isArray(value) ? [...new Set(value.filter((id): id is number => Number.isSafeInteger(id) && id > 0))] : []
+
+export const randomProxyAddress = (proxy: Pick<Proxy, 'host' | 'port'>): string =>
+  `${proxy.host.includes(':') ? `[${proxy.host}]` : proxy.host}:${proxy.port}`
+
+export const isValidRandomProxyReuseMinutes = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 525600
+
+export const normalizeRandomProxyReuseMinutes = (value: unknown): number =>
+  isValidRandomProxyReuseMinutes(value) ? value : 0
+
+export function randomProxyExtra(scope: RandomProxyPoolScope, ids: number[], options: RandomProxyEmptyPoolPolicy | { policy: RandomProxyEmptyPoolPolicy; maxReuseMinutes: number }) {
+  const { policy, maxReuseMinutes } = typeof options === 'string' ? { policy: options, maxReuseMinutes: 0 } : options
+  return {
+    proxy_mode: 'random',
+    random_proxy_pool_scope: scope,
+    random_proxy_pool_ids: scope === 'selected' ? normalizeRandomProxyPoolIds(ids) : [],
+    random_proxy_empty_pool_policy: policy,
+    random_proxy_max_reuse_minutes: maxReuseMinutes
+  }
+}

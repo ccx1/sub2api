@@ -195,6 +195,26 @@ func TestApplyOpenAICodexTicket_DisabledNoop(t *testing.T) {
 	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
 }
 
+func TestApplyOpenAICodexTicket_AccountDisabledIsFailOpen(t *testing.T) {
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
+		Enabled:    true,
+		FailClosed: true,
+		Models:     []string{"gpt-6-astra"},
+	}, nil)
+	account := ticketTestAccount(41)
+	account.Extra = map[string]any{
+		OpenAICodexTicketEnabledExtraKey: false,
+	}
+	h := http.Header{}
+	h.Set(openAICodexTurnStateHeader, "client-state")
+
+	require.False(t, OpenAICodexTicketAccountEnabled(account))
+	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h))
+	require.Equal(t, "client-state", h.Get(openAICodexTurnStateHeader))
+	require.False(t, svc.openAICodexTicketBlocksAccount(account, "gpt-6-astra"))
+	require.Empty(t, OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now()))
+}
+
 func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 	state312 := fakeCodexTicketState(312)
 	state292 := fakeCodexTicketState(292)

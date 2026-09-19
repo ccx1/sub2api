@@ -1351,6 +1351,11 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	if resp != nil {
+		RecordRandomProxyUsage(ctx, account, s.accountRepo)
+	} else if proxyURL != "" {
+		ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+	}
 	if err != nil {
 		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Reason: GatewayFailureReason("grok_search_transport")}
 	}

@@ -1696,15 +1696,22 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account == nil || s.schedulerSnapshot == nil {
-		return account, nil
+	if account == nil {
+		return nil, nil
 	}
-	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
-	if err != nil {
+	hydrated := account
+	if s.schedulerSnapshot != nil {
+		var err error
+		hydrated, err = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if hydrated == nil {
+			return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
+		}
+	}
+	if err := ResolveRandomProxyFromSource(ctx, hydrated, s.accountRepo); err != nil {
 		return nil, err
-	}
-	if hydrated == nil {
-		return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
 	}
 	return hydrated, nil
 }
@@ -1712,6 +1719,12 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if release != nil {
+			release()
+		}
+		if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, account, s.accountRepo, err); disableErr != nil {
+			return nil, fmt.Errorf("%w; disable random proxy account: %v", err, disableErr)
+		}
 		return nil, err
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
@@ -1723,11 +1736,7 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 }
 
 func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {
-	selection, err := s.newSelectionResult(ctx, account, true, release, nil)
-	if err != nil && release != nil {
-		release()
-	}
-	return selection, err
+	return s.newSelectionResult(ctx, account, true, release, nil)
 }
 
 func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig {

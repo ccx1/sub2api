@@ -179,6 +179,9 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 
 func groupFromServiceBase(g *service.Group) Group {
 	return Group{
+		SecurityPolicyEnabled:           g.SecurityPolicyEnabled,
+		SecurityPolicyMode:              g.SecurityPolicyMode,
+		SecurityPolicyEmailEnabled:      g.SecurityPolicyEmailEnabled,
 		ID:                              g.ID,
 		Name:                            g.Name,
 		Description:                     g.Description,
@@ -242,6 +245,9 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		ollamaCloudUsage = state
 	}
 	out := &Account{
+		AntiDegradation:         a.AntiDegradationEnabled(),
+		ProtectionScope:         a.ProtectionScope(),
+		ProtectionMode:          a.ProtectionMode(),
 		ID:                      a.ID,
 		Name:                    a.Name,
 		Notes:                   a.Notes,
@@ -458,9 +464,13 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		return nil
 	}
 	return &AccountListItem{
-		ID: a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
+		AntiDegradation: a.AntiDegradation,
+		ProtectionScope: a.ProtectionScope,
+		ProtectionMode:  a.ProtectionMode,
+		ID:              a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
 		OllamaCloudUsage: a.OllamaCloudUsage, CodexTurnTickets: a.CodexTurnTickets,
+		CodexTicketGlobalEnabled: a.CodexTicketGlobalEnabled, CodexTicketEnabled: a.CodexTicketEnabled,
 		ProxyID: a.ProxyID, ProxyFallbackOriginID: a.ProxyFallbackOriginID, ProxyFallbackOriginName: a.ProxyFallbackOriginName,
 		Concurrency: a.Concurrency, LoadFactor: a.LoadFactor, Priority: a.Priority, RateMultiplier: a.RateMultiplier,
 		Status: a.Status, ErrorMessage: a.ErrorMessage, LastUsedAt: a.LastUsedAt, ExpiresAt: a.ExpiresAt,
@@ -957,4 +967,36 @@ func PromoCodeUsageFromService(u *service.PromoCodeUsage) *PromoCodeUsage {
 		UsedAt:      u.UsedAt,
 		User:        UserFromServiceShallow(u.User),
 	}
+}
+
+// SecurityPolicyKeywordFromService converts a service keyword to admin DTO.
+func SecurityPolicyKeywordFromService(w *service.SecurityPolicyKeyword) *SecurityPolicyKeyword {
+	if w == nil {
+		return nil
+	}
+	return &SecurityPolicyKeyword{
+		ID:        w.ID,
+		GroupID:   w.GroupID,
+		Keyword:   w.Keyword,
+		Category:  w.Category,
+		Enabled:   w.Enabled,
+		CreatedAt: w.CreatedAt,
+		UpdatedAt: w.UpdatedAt,
+	}
+}
+
+// SecurityPolicyKeywordsFromService converts a service keyword list to admin DTOs.
+func SecurityPolicyKeywordsFromService(words []service.SecurityPolicyKeyword) []SecurityPolicyKeyword {
+	out := make([]SecurityPolicyKeyword, 0, len(words))
+	for i := range words {
+		if dto := SecurityPolicyKeywordFromService(&words[i]); dto != nil {
+			out = append(out, *dto)
+		}
+	}
+	return out
+}
+
+// SecurityPolicyKeywordSeedFromService converts a builtin seed to admin DTO.
+func SecurityPolicyKeywordSeedFromService(seed service.SecurityPolicyKeywordSeed) SecurityPolicyKeywordSeed {
+	return SecurityPolicyKeywordSeed{Keyword: seed.Keyword, Category: seed.Category}
 }

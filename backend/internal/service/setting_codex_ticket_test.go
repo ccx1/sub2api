@@ -23,6 +23,18 @@ func (r *codexTicketSettingRepo) GetValue(ctx context.Context, key string) (stri
 	return r.codexPolicyMigrationRepoStub.GetValue(ctx, key)
 }
 
+func (r *codexTicketSettingRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value, err := r.GetValue(ctx, key)
+		if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			return nil, err
+		}
+		values[key] = value
+	}
+	return values, nil
+}
+
 func TestCodexTicketEnabledRuntimeSettingOverridesYaml(t *testing.T) {
 	repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{}}}
 	settings := NewSettingService(repo, &config.Config{})

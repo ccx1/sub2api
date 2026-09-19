@@ -2284,6 +2284,18 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				decision.StickySessionHit = true
 				decision.SelectedAccountID = selection.Account.ID
 				decision.SelectedAccountType = selection.Account.Type
+				if selection.Account.IsRandomProxy() {
+					if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
+						if selection.ReleaseFunc != nil {
+							selection.ReleaseFunc()
+							selection.ReleaseFunc = nil
+						}
+						if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, selection.Account, s.accountRepo, hydrateErr); disableErr != nil {
+							return nil, decision, fmt.Errorf("%w; disable random proxy account: %v", hydrateErr, disableErr)
+						}
+						return nil, decision, hydrateErr
+					}
+				}
 				return selection, decision, nil
 			}
 		}
@@ -2363,7 +2375,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		stickyPreviousAccountID = s.ResolveAccountIDByPreviousResponseIDForScheduler(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	}
 
-	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
 		GroupID:                 groupID,
 		Platform:                platform,
 		SessionHash:             sessionHash,
@@ -2384,6 +2396,22 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		RequireCompact:          requireCompact,
 		ExcludedIDs:             excludedIDs,
 	})
+	if err != nil || selection == nil || selection.Account == nil {
+		return selection, decision, err
+	}
+	if selection.Account.IsRandomProxy() {
+		if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+				selection.ReleaseFunc = nil
+			}
+			if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, selection.Account, s.accountRepo, hydrateErr); disableErr != nil {
+				return nil, decision, fmt.Errorf("%w; disable random proxy account: %v", hydrateErr, disableErr)
+			}
+			return nil, decision, hydrateErr
+		}
+	}
+	return selection, decision, nil
 }
 
 func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {

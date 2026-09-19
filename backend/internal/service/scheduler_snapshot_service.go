@@ -1467,6 +1467,7 @@ func (s *SchedulerSnapshotService) shouldLogOutboxLagWarning(active bool) bool {
 }
 
 func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucket SchedulerBucket, useMixed bool) ([]Account, error) {
+	// 每日冷却在选中账号时动态判断；快照保留候选，避免冷却结束后等待重新建桶。
 	if s.accountRepo == nil {
 		return nil, ErrSchedulerCacheNotReady
 	}

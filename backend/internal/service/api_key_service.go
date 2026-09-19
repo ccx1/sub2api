@@ -897,6 +897,11 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	if apiKey.Status != originalStatus {
 		fields.Status = true
 	}
+	if fields.Status && apiKey.Status == StatusAPIKeyActive {
+		if err := s.checkSpendGuardReactivation(ctx, apiKey.ID); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.apiKeyRepo.Update(ctx, apiKey, fields); err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)

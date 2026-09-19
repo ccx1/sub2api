@@ -534,6 +534,21 @@
       <div v-else class="space-y-5">
         <div>
           <label class="input-label">{{ t('admin.proxies.batchInput') }}</label>
+          <div class="mb-2 flex items-center gap-3">
+            <label class="input-label mb-0 whitespace-nowrap">{{ t('admin.proxies.batchDefaultProtocol') }}</label>
+            <div class="w-36">
+              <Select v-model="batchDefaultProtocol" :options="batchProtocolOptions" @update:model-value="parseBatchInput" />
+            </div>
+          </div>
+          <p class="input-hint mb-2">{{ t('admin.proxies.batchDefaultProtocolHint') }}</p>
+          <label class="mb-2 block">
+            <span class="input-label">{{ t('admin.proxies.batchInputFormat') }}</span>
+            <select v-model="batchInputFormat" class="input" @change="parseBatchInput">
+              <option value="auto">{{ t('admin.proxies.batchFormatAuto') }}</option>
+              <option value="host-first">{{ t('admin.proxies.batchFormatHostFirst') }}</option>
+              <option value="credentials-first">{{ t('admin.proxies.batchFormatCredentialsFirst') }}</option>
+            </select>
+          </label>
           <textarea
             v-model="batchInput"
             rows="10"
@@ -543,6 +558,9 @@
           ></textarea>
           <p class="input-hint mt-2">
             {{ t('admin.proxies.batchInputHint') }}
+          </p>
+          <p v-if="batchParseResult.ambiguous > 0" role="alert" class="mt-2 text-sm text-amber-600 dark:text-amber-400">
+            {{ t('admin.proxies.batchAmbiguousHint', { count: batchParseResult.ambiguous }) }}
           </p>
         </div>
 
@@ -969,6 +987,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import { parseProxyInputResult, type ProxyInputFormat } from '@/utils/proxyParser'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1107,7 +1126,16 @@ const qualityReport = ref<ProxyQualityCheckResult | null>(null)
 // Batch import state
 const createMode = ref<'standard' | 'batch'>('standard')
 const batchInput = ref('')
+const batchDefaultProtocol = ref<ProxyProtocol>('http')
+const batchInputFormat = ref<ProxyInputFormat>('auto')
+const batchProtocolOptions = computed(() => [
+  { value: 'http' as const, label: 'HTTP' },
+  { value: 'https' as const, label: 'HTTPS' },
+  { value: 'socks5' as const, label: 'SOCKS5' },
+  { value: 'socks5h' as const, label: 'SOCKS5H' }
+])
 const batchParseResult = reactive({
+  ambiguous: 0,
   total: 0,
   valid: 0,
   invalid: 0,
@@ -1268,6 +1296,9 @@ const closeCreateModal = () => {
   createForm.expiry_warn_days = 7
   createPasswordVisible.value = false
   batchInput.value = ''
+  batchDefaultProtocol.value = 'http'
+  batchInputFormat.value = 'auto'
+  batchParseResult.ambiguous = 0
   batchParseResult.total = 0
   batchParseResult.valid = 0
   batchParseResult.invalid = 0
@@ -1280,55 +1311,18 @@ const handleDataImported = () => {
   loadProxies()
 }
 
-// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port
-// Host may be a domain, IPv4, or bracketed IPv6 ([2001:db8::1]).
-const parseProxyUrl = (
-  line: string
-): {
-  protocol: ProxyProtocol
-  host: string
-  port: number
-  username: string
-  password: string
-} | null => {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-
-  // Regex to parse proxy URL (supports http, https, socks5, socks5h).
-  // Host alternatives: [bracketed-IPv6] | hostname/IPv4 (colon-free, so the
-  // match stops before the final :port).
-  const regex =
-    /^(https?|socks5h?):\/\/(?:([^:@\[\]]+):([^@\[\]]+)@)?(\[[0-9a-f:.]+\]|[^:\[\]]+):(\d+)$/i
-  const match = trimmed.match(regex)
-
-  if (!match) return null
-
-  const [, protocol, username, password, rawHost, port] = match
-  const portNum = parseInt(port, 10)
-
-  if (portNum < 1 || portNum > 65535) return null
-
-  // Strip brackets from IPv6 literals; the backend re-brackets via net.JoinHostPort.
-  const host = rawHost.replace(/^\[|\]$/g, '').trim()
-
-  return {
-    protocol: protocol.toLowerCase() as ProxyProtocol,
-    host,
-    port: portNum,
-    username: username?.trim() || '',
-    password: password?.trim() || ''
-  }
-}
-
 const parseBatchInput = () => {
   const lines = batchInput.value.split('\n').filter((l) => l.trim())
   const seen = new Set<string>()
   const proxies: typeof batchParseResult.proxies = []
   let invalid = 0
   let duplicate = 0
+  let ambiguous = 0
 
   for (const line of lines) {
-    const parsed = parseProxyUrl(line)
+    const result = parseProxyInputResult(line, batchDefaultProtocol.value, batchInputFormat.value)
+    const parsed = result.proxy
+    if (result.error === 'ambiguous') ambiguous++
     if (!parsed) {
       invalid++
       continue
@@ -1348,6 +1342,7 @@ const parseBatchInput = () => {
   batchParseResult.valid = proxies.length
   batchParseResult.invalid = invalid
   batchParseResult.duplicate = duplicate
+  batchParseResult.ambiguous = ambiguous
   batchParseResult.proxies = proxies
 }
 
@@ -1461,7 +1456,7 @@ const handleUpdateProxy = async () => {
       protocol: editForm.protocol,
       host: editForm.host.trim(),
       port: editForm.port,
-      username: editForm.username.trim(),
+      username: editForm.username.trim() || null,
       status: editForm.status,
       expires_at: editForm.expires_at ? Math.floor(new Date(editForm.expires_at).getTime() / 1000) : null,
       fallback_mode: editForm.fallback_mode,
@@ -1471,7 +1466,7 @@ const handleUpdateProxy = async () => {
 
     // Only include password if user actually modified the field
     if (editPasswordDirty.value) {
-      updateData.password = editForm.password.trim()
+      updateData.password = editForm.password.trim() || null
     }
 
     await adminAPI.proxies.update(editingProxy.value.id, updateData)

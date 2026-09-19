@@ -1,0 +1,49 @@
+package repository
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+)
+
+func (r *accountRepository) disableAccountWhenBalancedPoolUnavailable(ctx context.Context, id int64) error {
+	current, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil || !current.IsRandomProxy() || current.RandomProxyEmptyPoolPolicy() != service.RandomProxyEmptyPoolPolicyDisable {
+		return nil
+	}
+	selection := service.ProxyPoolSelection{AccountID: id, Restricted: current.RandomProxyPoolScope() == service.RandomProxyPoolSelected}
+	if selection.Restricted {
+		selection.IDs = current.RandomProxyPoolIDs()
+	}
+	proxy, err := r.proxyPool.Select(ctx, selection)
+	if err != nil || proxy != nil {
+		return err
+	}
+	payload, err := json.Marshal(current.Extra)
+	if err != nil {
+		return err
+	}
+	// 健康度和容量在分配器复核，写入时防止并发编辑后的新策略被旧请求禁用。
+	_, err = r.sql.ExecContext(ctx, disableBalancedProxyAccountSQL, id, service.SchedulerOutboxEventAccountChanged, string(payload))
+	if err == nil {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+	}
+	return err
+}
+
+const disableBalancedProxyAccountSQL = `WITH disabled AS (
+ UPDATE accounts a SET status='disabled', schedulable=FALSE,
+ error_message='random proxy pool has no active proxies', proxy_id=NULL, updated_at=NOW()
+ WHERE a.id=$1 AND a.deleted_at IS NULL AND a.status <> 'disabled'
+ AND a.extra->'proxy_mode' IS NOT DISTINCT FROM $3::jsonb->'proxy_mode'
+ AND a.extra->'random_proxy_empty_pool_policy' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_empty_pool_policy'
+ AND a.extra->'random_proxy_pool_scope' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_scope'
+ AND a.extra->'random_proxy_pool_ids' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_ids'
+ RETURNING a.id
+)
+INSERT INTO scheduler_outbox (event_type,account_id,payload)
+SELECT $2,id,'{}'::jsonb FROM disabled`

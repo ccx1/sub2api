@@ -259,6 +259,8 @@ type UpdateSettingsRequest struct {
 	OpenAICodexVersionAutoSyncEnabled      *bool   `json:"openai_codex_version_auto_sync_enabled"`
 	OpenAICodexTicketEnabled               *bool   `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL       string  `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketHarvestProxyMode      string  `json:"openai_codex_ticket_harvest_proxy_mode"`
+	ProxyPoolMaxAccounts                   int     `json:"proxy_pool_max_accounts"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -498,6 +500,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
+	if _, sent := sentFields[service.SettingKeyOpenAICodexTicketHarvestProxyMode]; sent && strings.TrimSpace(req.OpenAICodexTicketHarvestProxyMode) == "" {
+		response.BadRequest(c, "openai_codex_ticket_harvest_proxy_mode must be fixed or pool")
+		return
+	}
+	if raw, sent := sentFields[service.SettingKeyProxyPoolMaxAccounts]; sent && strings.TrimSpace(string(raw)) == "null" {
+		response.BadRequest(c, "proxy_pool_max_accounts must be an integer between 0 and 10000")
+		return
+	}
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
@@ -1783,6 +1793,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return next
 		}(),
+		OpenAICodexTicketHarvestProxyMode: func() string {
+			if _, sent := sentFields[service.SettingKeyOpenAICodexTicketHarvestProxyMode]; sent {
+				return strings.TrimSpace(req.OpenAICodexTicketHarvestProxyMode)
+			}
+			return previousSettings.OpenAICodexTicketHarvestProxyMode
+		}(),
+		ProxyPoolMaxAccounts: func() int {
+			if _, sent := sentFields[service.SettingKeyProxyPoolMaxAccounts]; sent {
+				return req.ProxyPoolMaxAccounts
+			}
+			return previousSettings.ProxyPoolMaxAccounts
+		}(),
 		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
 		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
 		CodexCLIOnlyBlacklist: strings.TrimSpace(req.CodexCLIOnlyBlacklist),
@@ -2328,6 +2350,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
 		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
+		OpenAICodexTicketHarvestProxyMode:                      updatedSettings.OpenAICodexTicketHarvestProxyMode,
+		ProxyPoolMaxAccounts:                                   updatedSettings.ProxyPoolMaxAccounts,
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,
 		MaxCodexVersion:                                        updatedSettings.MaxCodexVersion,
 		CodexCLIOnlyBlacklist:                                  updatedSettings.CodexCLIOnlyBlacklist,

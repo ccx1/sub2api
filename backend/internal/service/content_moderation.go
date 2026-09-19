@@ -414,6 +414,9 @@ type ContentModerationLog struct {
 	UserStatus        string             `json:"user_status"`
 	QueueDelayMS      *int               `json:"queue_delay_ms,omitempty"`
 	CreatedAt         time.Time          `json:"created_at"`
+	// Overturned 模型复核推翻了本地命中（当前仅分组安全策略使用）：
+	// 会话封禁已解除，该行不代表真实违规。
+	Overturned bool `json:"overturned"`
 }
 
 type ContentModerationLogFilter struct {

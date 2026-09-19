@@ -340,13 +340,17 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		delete(extra, OllamaCloudUsageSessionExtraKey)
 		delete(extra, OllamaCloudUsageAutoRefreshExtraKey)
 		delete(extra, OllamaCloudUsageSnapshotExtraKey)
-		account.Extra = prepareCodexFingerprintExtraForUpdate(account, extra)
+		account.Extra = prepareCodexFingerprintExtraForUpdate(account, NormalizeProxyModeExtra(extra))
 	} else {
-		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+		account.Extra = prepareCodexFingerprintExtraForUpdate(account, NormalizeProxyModeExtra(account.Extra))
 	}
 
 	if req.ProxyID != nil {
 		account.ProxyID = req.ProxyID
+	}
+	if account.IsRandomProxy() {
+		account.ProxyID = nil
+		account.Proxy = nil
 	}
 
 	if req.Concurrency != nil {

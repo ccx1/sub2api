@@ -143,6 +143,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 }
 
 // GetAccountUsageTrendWithFilters returns usage trend data grouped by account and date.
+// account_id=0 表示区间 Top N 之外的账号汇总；真实账号已在筛选条件中限定为正数。
 func (r *usageLogRepository) GetAccountUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, accountType, platform, model string, requestType *int16, stream *bool, billingType *int8, limit int) (results []AccountUsageTrendPoint, err error) {
 	if limit <= 0 {
 		limit = 10
@@ -164,22 +165,22 @@ func (r *usageLogRepository) GetAccountUsageTrendWithFilters(ctx context.Context
 			SELECT account_id
 			FROM filtered_usage
 			GROUP BY account_id
-			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
+			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC, account_id ASC
 			LIMIT $%d
 		)
 		SELECT
 			TO_CHAR(u.created_at, '%s') as date,
-			u.account_id,
-			u.account_name,
+			COALESCE(t.account_id, 0) as account_id,
+			CASE WHEN t.account_id IS NULL THEN '' ELSE u.account_name END as account_name,
 			COUNT(*) as requests,
 			COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(u.total_cost), 0) as cost,
 			COALESCE(SUM(u.actual_cost), 0) as actual_cost,
 			COALESCE(SUM(COALESCE(u.account_stats_cost, u.total_cost) * COALESCE(u.account_rate_multiplier, 1)), 0) as account_cost
 		FROM filtered_usage u
-		WHERE u.account_id IN (SELECT account_id FROM top_accounts)
-		GROUP BY date, u.account_id, u.account_name
-		ORDER BY date ASC, tokens DESC
+		LEFT JOIN top_accounts t ON t.account_id = u.account_id
+		GROUP BY date, t.account_id, CASE WHEN t.account_id IS NULL THEN '' ELSE u.account_name END
+		ORDER BY date ASC, (t.account_id IS NULL) ASC, tokens DESC, t.account_id ASC
 	`, baseWhere, topLimitArg, dateFormat)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)

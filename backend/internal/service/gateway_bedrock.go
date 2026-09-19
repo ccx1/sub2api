@@ -198,6 +198,11 @@ func (s *GatewayService) executeBedrockUpstream(
 		}
 
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
+		if resp != nil {
+			RecordRandomProxyUsage(ctx, account, s.accountRepo)
+		} else if proxyURL != "" {
+			ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()

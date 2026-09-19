@@ -4521,25 +4521,55 @@
                   />
                 </div>
                 <div>
-                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                  <label for="codex-ticket-harvest-proxy-mode" class="block text-base font-semibold text-gray-900 dark:text-white">
                     {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxy") }}
-                  </h3>
+                  </label>
+                  <select
+                    id="codex-ticket-harvest-proxy-mode"
+                    v-model="form.openai_codex_ticket_harvest_proxy_mode"
+                    class="input mt-3 w-full sm:max-w-sm"
+                  >
+                    <option value="pool">{{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyPool") }}</option>
+                    <option value="fixed">{{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyFixed") }}</option>
+                  </select>
                   <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyDesc") }}
+                    {{ t(form.openai_codex_ticket_harvest_proxy_mode === "pool"
+                      ? "admin.settings.gatewayForwarding.codexTicketHarvestProxyPoolDesc"
+                      : "admin.settings.gatewayForwarding.codexTicketHarvestProxyDesc") }}
                   </p>
                   <input
+                    v-if="form.openai_codex_ticket_harvest_proxy_mode === 'fixed'"
                     id="codex-ticket-harvest-proxy"
                     v-model="form.openai_codex_ticket_harvest_proxy_url"
                     type="text"
                     class="input mt-3 w-full font-mono text-sm"
+                    :aria-label="t('admin.settings.gatewayForwarding.codexTicketHarvestProxyFixed')"
                     :placeholder="t('admin.settings.gatewayForwarding.codexTicketHarvestProxyPlaceholder')"
                     autocomplete="off"
                   />
                   <p
-                    v-if="form.openai_codex_ticket_harvest_proxy_configured"
+                    v-if="form.openai_codex_ticket_harvest_proxy_mode === 'fixed' && form.openai_codex_ticket_harvest_proxy_configured"
                     class="mt-1.5 text-xs text-gray-500 dark:text-gray-400"
                   >
                     {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyConfigured") }}
+                  </p>
+                </div>
+                <div>
+                  <label for="proxy-pool-max-accounts" class="block text-base font-semibold text-gray-900 dark:text-white">
+                    {{ t("admin.settings.gatewayForwarding.proxyPoolMaxAccounts") }}
+                  </label>
+                  <input
+                    id="proxy-pool-max-accounts"
+                    v-model.number="form.proxy_pool_max_accounts"
+                    type="number"
+                    min="0"
+                    max="10000"
+                    step="1"
+                    class="input mt-3 w-full sm:max-w-sm"
+                    aria-describedby="proxy-pool-max-accounts-hint"
+                  />
+                  <p id="proxy-pool-max-accounts-hint" class="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.proxyPoolMaxAccountsDesc") }}
                   </p>
                 </div>
                 <div>
@@ -9870,8 +9900,10 @@ const form = reactive<SettingsForm>({
   openai_codex_client_version_synced: "",
   openai_codex_version_auto_sync_enabled: true,
   openai_codex_ticket_enabled: false,
+  openai_codex_ticket_harvest_proxy_mode: "pool",
   openai_codex_ticket_harvest_proxy_url: "",
   openai_codex_ticket_harvest_proxy_configured: false,
+  proxy_pool_max_accounts: 0,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -10872,6 +10904,15 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.openai_codex_ticket_harvest_proxy_mode =
+      settings.openai_codex_ticket_harvest_proxy_mode === "fixed" ||
+      settings.openai_codex_ticket_harvest_proxy_mode === "pool"
+        ? settings.openai_codex_ticket_harvest_proxy_mode
+        : settings.openai_codex_ticket_harvest_proxy_configured ||
+            settings.openai_codex_ticket_harvest_proxy_url?.trim()
+          ? "fixed"
+          : "pool";
+    form.proxy_pool_max_accounts = settings.proxy_pool_max_accounts ?? 0;
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11125,6 +11166,14 @@ const siteBillingModeHint = computed(() =>
 async function saveSettings() {
   saving.value = true;
   try {
+    if (
+      !Number.isInteger(form.proxy_pool_max_accounts) ||
+      form.proxy_pool_max_accounts < 0 ||
+      form.proxy_pool_max_accounts > 10000
+    ) {
+      appStore.showError(t("admin.settings.gatewayForwarding.proxyPoolMaxAccountsRangeError"));
+      return;
+    }
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -11479,8 +11528,10 @@ async function saveSettings() {
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
       openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
+      openai_codex_ticket_harvest_proxy_mode: form.openai_codex_ticket_harvest_proxy_mode,
       openai_codex_ticket_harvest_proxy_url:
         form.openai_codex_ticket_harvest_proxy_url?.trim() || "",
+      proxy_pool_max_accounts: form.proxy_pool_max_accounts,
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:

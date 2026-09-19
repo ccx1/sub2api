@@ -287,14 +287,34 @@
             <AccountCapacityCell :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-col items-start gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <DailyCooldownBadge :value="row.extra?.daily_cooldown" :now="upstreamBillingNow" />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
             <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
+          </template>
+          <template #cell-protection="{ row }">
+            <ProtectionToggle :account="row" @updated="handleAccountUpdated" />
+          </template>
+          <template #cell-codex_ticket="{ row }">
+            <button
+              v-if="isCodexTicketToggleVisible(row)"
+              @click="handleToggleCodexTicket(row)"
+              :disabled="togglingCodexTicket === row.id"
+              class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800"
+              :class="[isCodexTicketEnabled(row) ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']"
+              :title="isCodexTicketEnabled(row) ? t('admin.accounts.codexTicketEnabled') : t('admin.accounts.codexTicketDisabled')"
+            >
+              <span
+                class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="[isCodexTicketEnabled(row) ? 'translate-x-4' : 'translate-x-0']"
+              />
+            </button>
+            <span v-else class="text-sm text-gray-400 dark:text-dark-500" :title="t('admin.accounts.codexTicketUnsupported')">-</span>
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -327,7 +347,21 @@
             />
           </template>
           <template #cell-proxy="{ row }">
-            <div class="flex flex-col gap-1">
+            <div v-if="row.extra?.proxy_mode === 'random'" class="flex min-w-40 max-w-64 flex-col gap-1 text-xs">
+              <span class="font-medium text-cyan-700 dark:text-cyan-300">{{ t('admin.accounts.randomProxy') }}</span>
+              <span class="text-gray-500">{{ row.extra.random_proxy_pool_scope === 'selected' ? t('admin.accounts.randomProxyPoolSelectedCount', { count: normalizeRandomProxyPoolIds(row.extra.random_proxy_pool_ids).length }) : t('admin.accounts.randomProxyPoolAll') }}</span>
+              <template v-if="row.extra.random_proxy_last_used">
+                <span class="text-gray-500">{{ t('admin.accounts.randomProxyLastUsed') }}</span>
+                <span v-if="row.extra.random_proxy_last_used.proxy_id === null" class="text-gray-700 dark:text-gray-300">{{ t('admin.accounts.randomProxyLastDirect') }}</span>
+                <template v-else>
+                  <span class="break-words text-gray-700 dark:text-gray-300">{{ row.extra.random_proxy_last_used.proxy_name }}</span>
+                  <span class="break-all font-mono text-gray-500">{{ randomProxyAddress({ host: row.extra.random_proxy_last_used.proxy_host, port: row.extra.random_proxy_last_used.proxy_port }) }}</span>
+                </template>
+                <time class="text-gray-500" :datetime="row.extra.random_proxy_last_used.used_at">{{ formatDateTime(row.extra.random_proxy_last_used.used_at) }}</time>
+              </template>
+              <span v-else class="text-gray-400">{{ t('admin.accounts.randomProxyNoUsage') }}</span>
+            </div>
+            <div v-else class="flex flex-col gap-1">
               <div v-if="row.proxy" class="flex items-center gap-2">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
                 <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
@@ -515,10 +549,12 @@ import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import DailyCooldownBadge from '@/components/account/DailyCooldownBadge.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import ProtectionToggle from '@/components/account/ProtectionToggle.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -528,6 +564,7 @@ import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { normalizeRandomProxyPoolIds, randomProxyAddress } from '@/utils/randomProxy'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
@@ -614,6 +651,7 @@ const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
+const togglingCodexTicket = ref<number | null>(null)
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -765,6 +803,21 @@ const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) =>
   if (usageBatchByAccountId.value[String(accountID)] === usage) return
   setUsageBatchState(accountID, usage, null)
 }
+
+const codexTicketGlobalEnabled = computed(() =>
+  accounts.value.some(account => account.codex_ticket_global_enabled === true)
+)
+
+const isCodexTicketAccount = (account: Pick<AccountListItem, 'platform' | 'type' | 'parent_account_id' | 'codex_ticket_enabled'>): boolean =>
+  account.platform === 'openai'
+  && (account.type === 'oauth' || account.type === 'setup-token')
+  && !account.parent_account_id
+
+const isCodexTicketToggleVisible = (account: AccountListItem): boolean =>
+  codexTicketGlobalEnabled.value && isCodexTicketAccount(account)
+
+const isCodexTicketEnabled = (account: Pick<AccountListItem, 'codex_ticket_enabled'>): boolean =>
+  account.codex_ticket_enabled !== false
 
 const flushQueuedUsageBatch = async () => {
   usageBatchFlushTimer = null
@@ -1788,8 +1841,12 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
+    { key: 'protection', label: t('admin.accounts.columns.protection'), sortable: false },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
+  if (codexTicketGlobalEnabled.value) {
+    c.push({ key: 'codex_ticket', label: t('admin.accounts.columns.codexTicket'), sortable: false })
+  }
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
@@ -2465,6 +2522,21 @@ const handleToggleSchedulable = async (a: Account) => {
     appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
   } finally {
     togglingSchedulable.value = null
+  }
+}
+const handleToggleCodexTicket = async (a: AccountListItem) => {
+  if (!isCodexTicketToggleVisible(a)) return
+  const nextEnabled = !isCodexTicketEnabled(a)
+  togglingCodexTicket.value = a.id
+  try {
+    const updated = await adminAPI.accounts.setCodexTicketEnabled(a.id, nextEnabled)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+  } catch (error) {
+    console.error('Failed to toggle Codex ticket:', error)
+    appStore.showError(t('admin.accounts.failedToToggleCodexTicket'))
+  } finally {
+    togglingCodexTicket.value = null
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }

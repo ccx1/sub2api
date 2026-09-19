@@ -86,6 +86,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	s.InvalidateProxyPoolSettingsCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -490,6 +491,15 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
 	}
 	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL)
+	harvestProxyMode, err := s.resolveCodexTicketHarvestProxyMode(settings.OpenAICodexTicketHarvestProxyMode, settings.OpenAICodexTicketHarvestProxyURL)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY_MODE", err.Error())
+	}
+	if err := validateProxyPoolMaxAccounts(settings.ProxyPoolMaxAccounts); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_PROXY_POOL_MAX_ACCOUNTS", err.Error())
+	}
+	updates[SettingKeyOpenAICodexTicketHarvestProxyMode] = harvestProxyMode
+	updates[SettingKeyProxyPoolMaxAccounts] = strconv.Itoa(settings.ProxyPoolMaxAccounts)
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	// codex_cli_only 加固
@@ -746,6 +756,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.InvalidateOpenAICodexClientVersionCache()
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()
+	s.InvalidateProxyPoolSettingsCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,

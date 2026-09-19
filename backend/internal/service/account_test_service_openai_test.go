@@ -23,16 +23,22 @@ import (
 // --- shared test helpers ---
 
 type queuedHTTPUpstream struct {
-	responses []*http.Response
-	requests  []*http.Request
-	tlsFlags  []bool
+	responses     []*http.Response
+	requests      []*http.Request
+	tlsFlags      []bool
+	standardCalls int
 }
 
-func (u *queuedHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	return nil, fmt.Errorf("unexpected Do call")
+func (u *queuedHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.standardCalls++
+	return u.nextResponse(req, nil)
 }
 
 func (u *queuedHTTPUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.nextResponse(req, profile)
+}
+
+func (u *queuedHTTPUpstream) nextResponse(req *http.Request, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	u.requests = append(u.requests, req)
 	u.tlsFlags = append(u.tlsFlags, profile != nil)
 	if len(u.responses) == 0 {
@@ -130,6 +136,8 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
+	require.Equal(t, 1, upstream.standardCalls, "未配置 TLS 指纹服务时应使用标准出站传输")
+	require.Equal(t, []bool{false}, upstream.tlsFlags)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.requests[0].Context()))
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 42.0, repo.updatedExtra["codex_5h_used_percent"])

@@ -431,15 +431,25 @@ func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context,
 }
 
 func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account == nil || s.schedulerSnapshot == nil {
-		return account, nil
+	if account == nil {
+		return nil, nil
 	}
-	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
-	if err != nil {
+	hydrated := account
+	if s.schedulerSnapshot != nil {
+		var err error
+		hydrated, err = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if hydrated == nil {
+			return nil, fmt.Errorf("selected gemini account %d not found during hydration", account.ID)
+		}
+	}
+	if err := ResolveRandomProxyFromSource(ctx, hydrated, s.accountRepo); err != nil {
+		if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, account, s.accountRepo, err); disableErr != nil {
+			return nil, fmt.Errorf("%w; disable random proxy account: %v", err, disableErr)
+		}
 		return nil, err
-	}
-	if hydrated == nil {
-		return nil, fmt.Errorf("selected gemini account %d not found during hydration", account.ID)
 	}
 	return hydrated, nil
 }
@@ -809,6 +819,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		requestIDHeader = idHeader
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if resp != nil {
+			RecordRandomProxyUsage(ctx, account, s.accountRepo)
+		} else if proxyURL != "" {
+			ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+		}
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1361,6 +1376,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		requestIDHeader = idHeader
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if resp == nil && proxyURL != "" {
+			ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+		}
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -2928,6 +2946,9 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 	}
 
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	if resp == nil && proxyURL != "" {
+		ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+	}
 	if err != nil {
 		return nil, err
 	}

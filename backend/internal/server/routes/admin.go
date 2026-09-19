@@ -121,15 +121,30 @@ func RegisterAdminRoutes(
 
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
+		registerSecurityPolicyRoutes(admin, h)
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
+
+		// 异常消耗冻结
+		registerSpendGuardRoutes(admin, h)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerSpendGuardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	spendGuard := admin.Group("/spend-guard")
+	{
+		spendGuard.GET("", h.Admin.SpendGuard.Offenders)
+		spendGuard.GET("/settings", h.Admin.SpendGuard.GetSettings)
+		spendGuard.PUT("/settings", h.Admin.SpendGuard.UpdateSettings)
+		spendGuard.GET("/events", h.Admin.SpendGuard.Events)
+		spendGuard.POST("/keys/:id/unfreeze", h.Admin.SpendGuard.Unfreeze)
 	}
 }
 
@@ -178,6 +193,18 @@ func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		risk.POST("/users/:user_id/unban", h.Admin.ContentModeration.UnbanUser)
 		risk.DELETE("/hashes", h.Admin.ContentModeration.DeleteFlaggedHash)
 		risk.DELETE("/hashes/all", h.Admin.ContentModeration.ClearFlaggedHashes)
+	}
+}
+
+func registerSecurityPolicyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	secpol := admin.Group("/security-policy")
+	{
+		secpol.GET("/keywords/builtin", h.Admin.SecurityPolicy.ListBuiltin)
+		secpol.GET("/keywords", h.Admin.SecurityPolicy.ListKeywords)
+		secpol.POST("/keywords", h.Admin.SecurityPolicy.CreateKeyword)
+		secpol.PUT("/keywords/:id", h.Admin.SecurityPolicy.UpdateKeyword)
+		secpol.DELETE("/keywords/:id", h.Admin.SecurityPolicy.DeleteKeyword)
+		secpol.POST("/sessions/unblock", h.Admin.SecurityPolicy.UnblockSession)
 	}
 }
 
@@ -359,6 +386,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
+		accounts.GET("/anti-degrade/strategies", h.Admin.AntiDegrade.Strategies)
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
@@ -373,6 +401,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)
 		accounts.PUT("/:id", h.Admin.Account.Update)
+		accounts.PUT("/:id/codex-ticket", h.Admin.Account.SetCodexTicketEnabled)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)
 		accounts.PUT("/:id/upstream-billing-probe", h.Admin.Account.SetUpstreamBillingProbeEnabled)
@@ -392,6 +421,10 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/stats", h.Admin.Account.GetStats)
 		accounts.POST("/:id/clear-error", h.Admin.Account.ClearError)
 		accounts.POST("/:id/revert-proxy-fallback", h.Admin.Account.RevertProxyFallback)
+		accounts.GET("/:id/anti-degrade", h.Admin.AntiDegrade.Preview)
+		accounts.POST("/:id/anti-degrade/apply", h.Admin.AntiDegrade.Apply)
+		accounts.POST("/:id/anti-degrade/revert", h.Admin.AntiDegrade.Revert)
+		accounts.POST("/:id/protection", h.Admin.AntiDegrade.SetProtection)
 		accounts.GET("/:id/usage", h.Admin.Account.GetUsage)
 		accounts.GET("/:id/today-stats", h.Admin.Account.GetTodayStats)
 		accounts.POST("/usage/batch", h.Admin.Account.GetBatchUsage)

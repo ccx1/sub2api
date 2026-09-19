@@ -80,6 +80,11 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 
 	// 发送请求
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	if resp != nil {
+		RecordRandomProxyUsage(ctx, account, s.accountRepo)
+	} else if proxyURL != "" {
+		ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+	}
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
 		return nil, fmt.Errorf("upstream request failed: %w", err)

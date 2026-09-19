@@ -176,6 +176,9 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldPlatform,
 				group.FieldIsExclusive,
 				group.FieldStatus,
+				group.FieldSecurityPolicyEnabled,
+				group.FieldSecurityPolicyMode,
+				group.FieldSecurityPolicyEmailEnabled,
 				group.FieldSubscriptionType,
 				group.FieldRateMultiplier,
 				group.FieldDailyLimitUsd,
@@ -332,7 +335,7 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 
 	affected, err := builder.Save(ctx)
 	if err != nil {
-		return err
+		return translateSpendGuardUpdateError(err)
 	}
 	if affected == 0 {
 		// 更新影响行数为 0，说明记录不存在或已被软删除。
@@ -1002,6 +1005,9 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		ModelPricing:                    modelPricing,
 		DefaultValidityDays:             g.DefaultValidityDays,
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
+		SecurityPolicyEnabled:           g.SecurityPolicyEnabled,
+		SecurityPolicyMode:              g.SecurityPolicyMode,
+		SecurityPolicyEmailEnabled:      g.SecurityPolicyEmailEnabled,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
 		ModelRouting:                    g.ModelRouting,

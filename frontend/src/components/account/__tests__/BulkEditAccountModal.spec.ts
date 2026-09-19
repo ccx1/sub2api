@@ -81,6 +81,84 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('only writes daily cooldown when bulk modification is explicitly selected', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(false)
+    await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
+    await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('daily_cooldown')
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('explicitly sets daily cooldown enabled=%s without writing other extra', async enabled => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
+    if (enabled) await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { daily_cooldown: enabled ? { enabled, start: '23:00', end: '08:00', timezone: 'Asia/Shanghai' } : { enabled: false } }
+    })
+    wrapper.unmount()
+  })
+
+  it('rejects an invalid timezone in an enabled bulk cooldown', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-timezone"]').setValue('Invalid/Zone')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dailyCooldown.invalidTimezone')
+    wrapper.unmount()
+  })
+
+  it('allows disabling a bulk cooldown after entering invalid hidden values', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-end"]').setValue('23:00')
+    await wrapper.get('[data-testid="daily-cooldown-timezone"]').setValue('Invalid/Zone')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { daily_cooldown: { enabled: false } } })
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('applies a selected random proxy pool to all selected accounts', async () => {
+    const wrapper = mountModal({ proxies: [{ id: 7, name: 'Proxy 7', host: 'proxy.example.com', port: 8080, protocol: 'http' }] })
+    await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('selected')
+    await settings.get('input[value="7"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
+      proxy_id: 0,
+      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_empty_pool_policy: 'reject', random_proxy_max_reuse_minutes: 0 }
+    }))
+    wrapper.unmount()
+  })
+
+  it('blocks a bulk update with an empty selected proxy pool', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('selected')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.randomProxyPoolRequired')
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset()

@@ -3003,8 +3003,19 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :disabled="randomProxyEnabled" />
+        <RandomProxySettings
+          v-model:enabled="randomProxyEnabled"
+          v-model:scope="randomProxyPoolScope"
+          v-model:ids="randomProxyPoolIds"
+          v-model:policy="randomProxyEmptyPoolPolicy"
+          v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
+          :proxies="proxies"
+          @update:enabled="handleRandomProxyChange"
+        />
       </div>
+
+      <DailyCooldownSettings v-model="dailyCooldown" />
 
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
@@ -3930,6 +3941,10 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
+import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -4731,6 +4746,41 @@ const form = reactive({
   expires_at: null as number | null
 })
 
+
+const randomProxyEnabled = ref(false)
+const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
+const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
+const randomProxyPoolIds = ref<number[]>([])
+const randomProxyMaxReuseMinutes = ref(0)
+const dailyCooldown = ref(normalizeDailyCooldown())
+
+const handleRandomProxyChange = (enabled: boolean) => {
+  if (enabled) {
+    form.proxy_id = null
+  }
+}
+
+const withProxySelection = <T extends { proxy_id?: number | null; extra?: Record<string, unknown> }>(payload: T): T => {
+  const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
+  if (cooldownError) throw new Error(t(cooldownError))
+  if (dailyCooldown.value.enabled) payload = { ...payload, extra: withDailyCooldownExtra(payload.extra, dailyCooldown.value) }
+  if (!randomProxyEnabled.value) {
+    return payload
+  }
+  if (!isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value)) throw new Error(t('admin.accounts.randomProxyMaxReuseInvalid'))
+  if (randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
+    throw new Error(t('admin.accounts.randomProxyPoolRequired'))
+  }
+  return {
+    ...payload,
+    proxy_id: null,
+    extra: {
+      ...(payload.extra || {}),
+      ...randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value })
+    }
+  }
+}
+
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
   // Antigravity upstream 类型不需要 OAuth 流程
@@ -5240,9 +5290,10 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
-    const modelMapping = payload.credentials.model_mapping
-    const hasConcreteMappedTarget = payload.type === 'apikey' &&
+    const preparedPayload = withProxySelection(payload)
+    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(preparedPayload))
+    const modelMapping = preparedPayload.credentials.model_mapping
+    const hasConcreteMappedTarget = preparedPayload.type === 'apikey' &&
       typeof modelMapping === 'object' &&
       modelMapping !== null &&
       Object.values(modelMapping).some((target) =>
@@ -5262,8 +5313,8 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     if (
-      payload.type === 'apikey' &&
-      payload.upstream_billing_probe_enabled === true
+      preparedPayload.type === 'apikey' &&
+      preparedPayload.upstream_billing_probe_enabled === true
     ) {
       try {
         await adminAPI.accounts.probeUpstreamBilling(account.id)
@@ -5306,6 +5357,12 @@ const resetForm = () => {
   form.rate_multiplier = 1
   form.group_ids = []
   form.expires_at = null
+  randomProxyEnabled.value = false
+  randomProxyEmptyPoolPolicy.value = 'reject'
+  randomProxyPoolScope.value = 'all'
+  randomProxyPoolIds.value = []
+  randomProxyMaxReuseMinutes.value = 0
+  dailyCooldown.value = normalizeDailyCooldown()
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
   accountMode.value = 'payg'
@@ -5619,6 +5676,15 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
+  if (cooldownError || (randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
+    appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
+    return
+  }
+  if (randomProxyEnabled.value && randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
+    appStore.showError(t('admin.accounts.randomProxyPoolRequired'))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6054,7 +6120,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await adminAPI.accounts.create(withProxySelection({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6069,7 +6135,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
         successCount++
       } catch (error: any) {
         failedCount++
@@ -6123,7 +6189,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
   }
 
   try {
-    const result = await adminAPI.grok.createFromSSO({
+    const result = await adminAPI.grok.createFromSSO(withProxySelection({
       sso_tokens: ssoTokens,
       name: form.name || undefined,
       notes: form.notes || undefined,
@@ -6136,7 +6202,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       rate_multiplier: form.rate_multiplier,
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value
-    })
+    }))
 
     const successCount = result.created?.length || 0
     const failedCount = result.failed?.length || 0
@@ -6231,7 +6297,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await adminAPI.accounts.create(withProxySelection({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6246,7 +6312,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
         successCount++
       } catch (error: any) {
         failedCount++
@@ -6330,7 +6396,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await adminAPI.accounts.create(withProxySelection({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -6345,7 +6411,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         group_ids: form.group_ids,
         expires_at: form.expires_at,
         auto_pause_on_expired: autoPauseOnExpired.value
-      })
+      }))
       appStore.showSuccess(t('admin.accounts.accountCreated'))
     }
 
@@ -6438,7 +6504,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    const result = await adminAPI.accounts.importCodexSession({
+    const result = await adminAPI.accounts.importCodexSession(withProxySelection({
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6453,7 +6519,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra: withUpstreamRequestIdHeader(extra),
       update_existing: true
-    })
+    }))
 
     const successCount = result.created + result.updated
     const params = {
@@ -6516,7 +6582,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    await adminAPI.accounts.createOpenAICodexPAT({
+    await adminAPI.accounts.createOpenAICodexPAT(withProxySelection({
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6530,7 +6596,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra: withUpstreamRequestIdHeader(extra)
-    })
+    }))
 
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
@@ -6611,7 +6677,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await adminAPI.accounts.create(withProxySelection({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -6626,7 +6692,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             group_ids: form.group_ids,
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
-          })
+          }))
         }
 
         successCount++
@@ -6710,7 +6776,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
         const accountName = refreshTokens.length > 1 ? `${form.name} #${i + 1}` : form.name
 
         // Note: Antigravity doesn't have buildExtraInfo, so we pass empty extra or rely on credentials
-        const createPayload = withAntigravityConfirmFlag({
+        const createPayload = withAntigravityConfirmFlag(withProxySelection({
           name: accountName,
           notes: form.notes,
           platform: 'antigravity',
@@ -6725,7 +6791,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
         await adminAPI.accounts.create(createPayload)
         successCount++
       } catch (error: any) {
@@ -7091,7 +7157,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await adminAPI.accounts.create({
+        await adminAPI.accounts.create(withProxySelection({
           name: accountName,
           notes: form.notes,
           platform: form.platform,
@@ -7106,7 +7172,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
 
         successCount++
       } catch (error: any) {

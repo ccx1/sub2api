@@ -913,19 +913,52 @@ func (h *GroupHandler) GetStats(c *gin.Context) {
 		return
 	}
 	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
+	if err != nil || groupID <= 0 {
 		response.BadRequest(c, "Invalid group ID")
 		return
 	}
 
-	// Return mock data for now
-	response.Success(c, gin.H{
-		"total_api_keys":  0,
-		"active_api_keys": 0,
-		"total_requests":  0,
-		"total_cost":      0.0,
-	})
-	_ = groupID // TODO: implement actual stats
+	from, err := parseOptionalGroupStatsTime(c.Query("from"))
+	if err != nil {
+		response.BadRequest(c, "Invalid from time")
+		return
+	}
+	to, err := parseOptionalGroupStatsTime(c.Query("to"))
+	if err != nil {
+		response.BadRequest(c, "Invalid to time")
+		return
+	}
+
+	// 保留基础 handler 测试和精简注入场景下的旧兼容行为；正式运行时
+	// dashboardService 由 Wire 注入，走下面的真实统计查询。
+	if h.dashboardService == nil {
+		response.Success(c, &service.GroupDetailStats{
+			GroupID: groupID,
+			From:    from,
+			To:      to,
+		})
+		return
+	}
+
+	stats, err := h.dashboardService.GetGroupDetailStats(c.Request.Context(), groupID, from, to)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, stats)
+}
+
+func parseOptionalGroupStatsTime(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, err
+	}
+	parsed = parsed.UTC()
+	return &parsed, nil
 }
 
 // GetUsageSummary returns today's, yesterday's, and cumulative cost for all groups.

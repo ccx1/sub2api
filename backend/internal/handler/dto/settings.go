@@ -220,6 +220,8 @@ type SystemSettings struct {
 	OpenAICodexTicketEnabled                bool   `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
+	OpenAICodexTicketHarvestProxyMode       string `json:"openai_codex_ticket_harvest_proxy_mode"`
+	ProxyPoolMaxAccounts                    int    `json:"proxy_pool_max_accounts"`
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`

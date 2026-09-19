@@ -79,6 +79,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
+		reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"prewarm_write_fail account_id=%d conn_id=%s cause=%s",
@@ -96,6 +97,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	for {
 		message, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 		if readErr != nil {
+			reportRandomProxyWSFailure(ctx, account, s.accountRepo, readErr)
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
 			logOpenAIWSModeInfo(
@@ -360,6 +362,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx conte
 
 func (s *OpenAIGatewayService) handleOpenAIWSDialTransientFailure(ctx context.Context, account *Account, canonicalModel string, err error) {
 	var dialErr *openAIWSDialError
+	if !errors.As(err, &dialErr) || dialErr == nil || dialErr.StatusCode == 0 {
+		ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
+	}
 	if !errors.As(err, &dialErr) || dialErr == nil || !shouldCooldownOpenAITransientUpstreamError(dialErr.StatusCode, dialErr.ResponseBody) {
 		return
 	}

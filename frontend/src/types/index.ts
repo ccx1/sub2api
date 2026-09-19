@@ -655,6 +655,11 @@ export interface AdminGroup extends Group {
 
   // 分组排序
   sort_order: number
+
+  // 分组安全策略（仅管理员可见）
+  security_policy_enabled: boolean
+  security_policy_mode: string
+  security_policy_email_enabled: boolean
 }
 
 export interface ModelAllowlist {
@@ -758,6 +763,36 @@ export interface ApiKey {
   reset_7d_at: string | null
 }
 
+export interface SpendGuardSettings {
+  enabled: boolean
+  window_minutes: number
+  tokens_per_minute: number
+  min_requests: number
+  max_error_rate: number
+  interval_seconds: number
+}
+
+export interface SpendGuardOffender {
+  api_key_id: number
+  name: string
+  user_id: number
+  status: string
+  requests: number
+  tokens: number
+  tokens_per_min: number
+  errors: number
+  err_rate: number
+  frozen: boolean
+}
+
+export interface SpendGuardEvent {
+  at: string
+  api_key_id: number
+  name: string
+  action: string
+  reason: string
+}
+
 export interface CreateApiKeyRequest {
   name: string
   group_id?: number | null
@@ -831,6 +866,10 @@ export interface CreateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  // 分组安全策略（默认关闭）
+  security_policy_enabled?: boolean
+  security_policy_mode?: string
+  security_policy_email_enabled?: boolean
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   model_allowlist?: ModelAllowlist
@@ -897,6 +936,10 @@ export interface UpdateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  // 分组安全策略；nil 不修改
+  security_policy_enabled?: boolean
+  security_policy_mode?: string
+  security_policy_email_enabled?: boolean
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   model_allowlist?: ModelAllowlist
@@ -914,6 +957,23 @@ export interface UpdateGroupRequest {
   require_oauth_only?: boolean
   require_privacy_set?: boolean
   copy_accounts_from_group_ids?: number[]
+}
+
+// ==================== Security Policy Types ====================
+
+export interface SecurityPolicyKeyword {
+  id: number
+  group_id: number | null
+  keyword: string
+  category: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SecurityPolicyKeywordSeed {
+  keyword: string
+  category: string
 }
 
 // ==================== Account & Proxy Types ====================
@@ -1176,8 +1236,24 @@ export interface Account {
     blocked: boolean
     expires_at?: string
   }>
+  codex_ticket_global_enabled?: boolean
+  codex_ticket_enabled?: boolean
+  anti_degradation?: boolean
+  protection_scope?: string
+  protection_mode?: string
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
+    proxy_mode?: 'random'
+    random_proxy_pool_scope?: 'all' | 'selected'
+    random_proxy_pool_ids?: number[]
+    random_proxy_empty_pool_policy?: 'reject' | 'disable' | 'direct'
+    random_proxy_last_used?: {
+      proxy_id: number | null
+      proxy_name: string
+      proxy_host: string
+      proxy_port: number
+      used_at: string
+    }
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean

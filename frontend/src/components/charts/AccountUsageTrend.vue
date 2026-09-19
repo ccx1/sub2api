@@ -1,9 +1,14 @@
 <template>
   <div class="card p-4">
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <h3 class="min-w-0 text-sm font-semibold text-gray-900 dark:text-white">
-        {{ t('admin.dashboard.accountUsageTrend') }}
-      </h3>
+      <div class="min-w-0 flex-1 basis-full sm:basis-0">
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+          {{ t('admin.dashboard.accountUsageTrend') }}
+        </h3>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.dashboard.accountUsageTrendScope') }}
+        </p>
+      </div>
       <div class="flex shrink-0 rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-dark-600 dark:bg-dark-800">
         <button
           v-for="option in metricOptions"
@@ -67,6 +72,9 @@ const { t } = useI18n()
 const props = defineProps<{
   trendData: AccountUsageTrendPoint[]
   loading?: boolean
+  startDate?: string
+  endDate?: string
+  granularity?: 'day' | 'hour'
 }>()
 
 type AccountTrendMetric = 'tokens' | 'requests' | 'actual_cost' | 'account_cost'
@@ -100,6 +108,7 @@ const chartColors = computed(() => ({
 }))
 
 const accountLabel = (point: AccountUsageTrendPoint): string => {
+  if (point.account_id === 0) return t('admin.dashboard.otherAccounts')
   const name = point.account_name?.trim()
   return name || `#${point.account_id}`
 }
@@ -111,28 +120,65 @@ const metricValue = (point: AccountUsageTrendPoint): number => {
   return point.tokens
 }
 
+const formatBucket = (date: Date): string => {
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return props.granularity === 'hour' ? `${day} ${String(date.getHours()).padStart(2, '0')}:00` : day
+}
+
+const timelineDates = (dates: Set<string>): string[] => {
+  if (props.startDate && props.endDate && props.granularity) {
+    const cursor = new Date(`${props.startDate}T00:00:00`)
+    const selectedEnd = new Date(`${props.endDate}T23:59:59`)
+    const endTime = Math.min(selectedEnd.getTime(), Date.now())
+    while (cursor.getTime() <= endTime) {
+      dates.add(formatBucket(cursor))
+      if (props.granularity === 'hour') cursor.setHours(cursor.getHours() + 1)
+      else cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+  return Array.from(dates).sort()
+}
+
+interface AccountSeries {
+  id: number
+  label: string
+  tokens: number
+  data: Map<string, number>
+}
+
 const chartData = computed(() => {
   if (!props.trendData?.length) return null
 
   const dates = new Set<string>()
-  const accounts = new Map<number, { label: string; data: Map<string, number> }>()
+  const accounts = new Map<number, AccountSeries>()
   props.trendData.forEach((point) => {
     dates.add(point.date)
     if (!accounts.has(point.account_id)) {
-      accounts.set(point.account_id, { label: accountLabel(point), data: new Map() })
+      accounts.set(point.account_id, { id: point.account_id, label: accountLabel(point), tokens: 0, data: new Map() })
     }
-    accounts.get(point.account_id)!.data.set(point.date, metricValue(point))
+    const account = accounts.get(point.account_id)!
+    account.tokens += point.tokens
+    account.data.set(point.date, metricValue(point))
   })
 
-  const sortedDates = Array.from(dates).sort()
-  const datasets = Array.from(accounts.values()).map((account, index) => ({
-    label: account.label,
-    data: sortedDates.map((date) => account.data.get(date) || 0),
-    borderColor: colors[index % colors.length],
-    backgroundColor: `${colors[index % colors.length]}20`,
-    fill: false,
-    tension: 0.3
-  }))
+  const sortedDates = timelineDates(dates)
+  const sortedAccounts = Array.from(accounts.values()).sort((a, b) => {
+    if (a.id === 0) return 1
+    if (b.id === 0) return -1
+    return b.tokens - a.tokens || a.id - b.id
+  })
+  const datasets = sortedAccounts.map((account, index) => {
+    const color = account.id === 0 ? '#64748b' : colors[index % colors.length]
+    return {
+      label: account.label,
+      data: sortedDates.map((date) => account.data.get(date) || 0),
+      borderColor: color,
+      backgroundColor: `${color}20`,
+      borderDash: account.id === 0 ? [6, 4] : [],
+      fill: false,
+      tension: 0.3
+    }
+  })
 
   return {
     labels: sortedDates,

@@ -411,7 +411,17 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
-	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
+	if err := ValidateRandomProxyPoolExtra(accountExtra); err != nil {
+		return nil, err
+	}
+	if err := ValidateRandomProxyReuseExtra(accountExtra); err != nil {
+		return nil, err
+	}
+	if err := ValidateDailyCooldownExtra(accountExtra); err != nil {
+		return nil, err
+	}
+	accountExtra = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(accountExtra, nil))
+	delete(accountExtra, "random_proxy_last_used")
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -441,6 +451,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 			account.Extra = make(map[string]any)
 		}
 		account.Extra[UpstreamBillingProbeEnabledExtraKey] = true
+	}
+	if account.IsRandomProxy() {
+		account.ProxyID = nil
 	}
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
@@ -577,10 +590,20 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
+		if err := ValidateRandomProxyPoolExtra(input.Extra); err != nil {
+			return nil, err
+		}
+		if err := ValidateRandomProxyReuseExtra(input.Extra); err != nil {
+			return nil, err
+		}
+		if err := ValidateDailyCooldownExtra(input.Extra); err != nil {
+			return nil, err
+		}
 		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
 		if err != nil {
 			return nil, err
 		}
+		normalizedExtra = NormalizeProxyModeExtra(normalizedExtra)
 		normalizedExtra, err = normalizeGrokMediaEligibilityUpdateExtra(account, input, normalizedExtra)
 		if err != nil {
 			return nil, err
@@ -696,6 +719,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			}
 		}
 		normalizedExtra = MergeOpenAICodexTicketExtra(normalizedExtra, account.Extra)
+		normalizedExtra = preserveMode1ManagedExtra(ctx, account, normalizedExtra)
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
@@ -718,6 +742,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.Extra == nil {
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+	}
+	account.Extra = NormalizeProxyModeExtra(account.Extra)
+	BoundAccountProtectionConcurrency(account)
+	if err := ValidateAccountProtectionConfiguration(account); err != nil {
+		return nil, err
 	}
 	if requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate {
 		if requestedProbeEnabledUpdate != nil && !*requestedProbeEnabledUpdate {
@@ -758,6 +787,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	if account.IsRandomProxy() {
+		account.ProxyID = nil
+		account.Proxy = nil
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
@@ -904,7 +937,13 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
-	updates = MergeOpenAICodexTicketExtra(updates, nil)
+	if err := ValidateRandomProxyReuseExtra(updates); err != nil {
+		return err
+	}
+	if err := ValidateDailyCooldownExtra(updates); err != nil {
+		return err
+	}
+	updates = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(updates, nil))
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -931,8 +970,17 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if err := ValidateRandomProxyPoolExtra(input.Extra); err != nil {
+		return nil, err
+	}
+	if err := ValidateRandomProxyReuseExtra(input.Extra); err != nil {
+		return nil, err
+	}
+	if err := ValidateDailyCooldownExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
-	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
+	input.Extra = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(input.Extra, nil))
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
@@ -1116,6 +1164,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	if input.ProxyID != nil {
 		repoUpdates.ProxyID = input.ProxyID
+	}
+	if mode, _ := repoUpdates.Extra[ProxyModeExtraKey].(string); strings.EqualFold(strings.TrimSpace(mode), ProxyModeRandom) {
+		clearProxy := int64(0)
+		repoUpdates.ProxyID = &clearProxy
 	}
 	if input.Concurrency != nil {
 		repoUpdates.Concurrency = input.Concurrency

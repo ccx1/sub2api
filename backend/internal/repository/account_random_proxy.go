@@ -1,0 +1,80 @@
+package repository
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	entsql "entgo.io/ent/dialect/sql"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbproxy "github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+)
+
+func (r *accountRepository) SelectRandomActiveProxyFromPool(ctx context.Context, ids []int64) (*service.Proxy, error) {
+	return r.selectRandomActiveProxy(ctx, ids, true)
+}
+
+func (r *accountRepository) selectRandomActiveProxy(ctx context.Context, ids []int64, restricted bool) (*service.Proxy, error) {
+	if (restricted && len(ids) == 0) || r == nil || r.client == nil {
+		return nil, nil
+	}
+	now := time.Now()
+	query := r.client.Proxy.Query().Where(
+		dbproxy.StatusEQ(service.StatusActive), dbproxy.DeletedAtIsNil(),
+		dbproxy.Or(dbproxy.ExpiresAtIsNil(), dbproxy.ExpiresAtGT(now)),
+	)
+	if restricted {
+		query = query.Where(dbproxy.IDIn(ids...))
+	}
+	// 一次快照同时过滤和抽样，避免 COUNT 与 OFFSET 之间过期造成假空池。
+	item, err := query.Order(func(selector *entsql.Selector) {
+		selector.OrderExpr(entsql.Expr("RANDOM()"))
+	}).First(ctx)
+	if dbent.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return proxyEntityToService(item), nil
+}
+
+// 出口观察只更新自己的 JSON 键，不改配置版本，也不触发调度桶重建。
+func (r *accountRepository) RecordRandomProxyUsage(ctx context.Context, id int64, usage service.RandomProxyUsage) error {
+	payload, err := json.Marshal(usage)
+	if err != nil {
+		return err
+	}
+	_, err = r.sql.ExecContext(ctx, `UPDATE accounts
+SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), '{random_proxy_last_used}', $2::jsonb)
+WHERE id = $1 AND deleted_at IS NULL AND extra->>'proxy_mode' = 'random'
+AND COALESCE(extra #>> '{random_proxy_last_used,used_at}', '') < $3`, id, string(payload), usage.UsedAt)
+	return err
+}
+
+// 与更新配置竞争时，以数据库当前策略和当前池为准，避免旧请求误禁用账号。
+func (r *accountRepository) DisableRandomProxyAccountIfUnavailable(ctx context.Context, id int64) error {
+	if r.proxyPool != nil {
+		return r.disableAccountWhenBalancedPoolUnavailable(ctx, id)
+	}
+	_, err := r.sql.ExecContext(ctx, `WITH disabled AS (
+ UPDATE accounts a SET status='disabled', schedulable=FALSE,
+ error_message='random proxy pool has no active proxies', proxy_id=NULL, updated_at=NOW()
+ WHERE a.id=$1 AND a.deleted_at IS NULL AND a.status <> 'disabled'
+ AND lower(btrim(a.extra->>'proxy_mode'))='random'
+ AND lower(btrim(a.extra->>'random_proxy_empty_pool_policy'))='disable'
+ AND NOT EXISTS (
+  SELECT 1 FROM proxies p WHERE p.deleted_at IS NULL AND p.status='active'
+  AND (p.expires_at IS NULL OR p.expires_at>NOW())
+  AND (lower(btrim(COALESCE(a.extra->>'random_proxy_pool_scope','all'))) <> 'selected'
+       OR a.extra->'random_proxy_pool_ids' @> jsonb_build_array(p.id))
+ ) RETURNING a.id
+)
+INSERT INTO scheduler_outbox (event_type,account_id,payload)
+SELECT $2,id,'{}'::jsonb FROM disabled`, id, service.SchedulerOutboxEventAccountChanged)
+	if err == nil {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+	}
+	return err
+}

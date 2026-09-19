@@ -892,6 +892,8 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsAlertEvaluatorService,
 	ProvideOpsCleanupService,
 	ProvideOpsScheduledReportService,
+	ProvideSpendGuardService,
+	ProvideAntiDegradeService,
 	NewEmailService,
 	NewNotificationEmailService,
 	ProvideEmailQueueService,
@@ -923,7 +925,7 @@ var ProviderSet = wire.NewSet(
 	NewUsageCache,
 	NewTotpService,
 	NewErrorPassthroughService,
-	NewTLSFingerprintProfileService,
+	ProvideTLSFingerprintProfileService,
 	NewPluginManager,
 	NewDigestSessionStore,
 	ProvideIdempotencyCoordinator,
@@ -937,6 +939,8 @@ var ProviderSet = wire.NewSet(
 	NewModelPricingResolver,
 	NewModelPlazaService,
 	NewContentModerationService,
+	wire.Bind(new(SecurityPolicyModelReviewer), new(*ContentModerationService)),
+	NewSecurityPolicyService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
@@ -950,6 +954,14 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
 )
+
+// ProvideAntiDegradeService wires account protection with the administrator
+// service, runtime configuration, and plugin registry.
+func ProvideAntiDegradeService(admin AdminService, cfg *config.Config, plugins *PluginManager) *AntiDegradeService {
+	svc := NewAntiDegradeService(admin)
+	svc.cfg, svc.pluginManager = cfg, plugins
+	return svc
+}
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {

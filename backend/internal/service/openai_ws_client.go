@@ -118,6 +118,10 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	headers http.Header,
 	proxyURL string,
 ) (openAIWSClientConn, int, http.Header, error) {
+	return d.dialWithClient(ctx, wsURL, headers, proxyURL, nil)
+}
+
+func (d *coderOpenAIWSClientDialer) dialWithClient(ctx context.Context, wsURL string, headers http.Header, proxyURL string, client *http.Client) (openAIWSClientConn, int, http.Header, error) {
 	targetURL := strings.TrimSpace(wsURL)
 	if targetURL == "" {
 		return nil, 0, nil, errors.New("ws url is empty")
@@ -132,7 +136,9 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			return true
 		},
 	}
-	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
+	if client != nil {
+		opts.HTTPClient = client
+	} else if proxy := strings.TrimSpace(proxyURL); proxy != "" {
 		proxyClient, err := d.proxyHTTPClient(proxy)
 		if err != nil {
 			return nil, 0, nil, err

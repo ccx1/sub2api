@@ -796,6 +796,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    { path: '/admin/spend-guard', label: t('nav.spendGuard'), icon: ShieldIcon },
     {
       path: '/admin/security-audit',
       label: t('nav.securityAudit'),

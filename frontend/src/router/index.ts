@@ -427,6 +427,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/spend-guard',
+    name: 'AdminSpendGuard',
+    component: () => import('@/views/admin/SpendGuardView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Spend Guard',
+      titleKey: 'admin.spendGuard.title',
+      descriptionKey: 'admin.spendGuard.description'
+    }
+  },
+  {
     path: '/admin/ops',
     name: 'AdminOps',
     component: () => import('@/views/admin/ops/OpsDashboard.vue'),

@@ -745,12 +745,101 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     const input = wrapper.get<HTMLInputElement>("#codex-ticket-harvest-proxy");
     expect(input.element.value).toBe("http://user:***@old.example.com:8080");
+    expect(wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode").element.value).toBe("fixed");
     await input.setValue("socks5h://user:new-secret@new.example.com:1080");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_harvest_proxy_url)
       .toBe("socks5h://user:new-secret@new.example.com:1080");
     expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
+    wrapper.unmount();
+  });
+
+  it("defaults ticket harvesting to the balanced pool and saves its account limit", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
+    expect(mode.element.value).toBe("pool");
+    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
+    expect(wrapper.text()).toContain("admin.settings.gatewayForwarding.codexTicketHarvestProxyPoolDesc");
+    await wrapper.get("#proxy-pool-max-accounts").setValue(3);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_harvest_proxy_mode: "pool",
+      proxy_pool_max_accounts: 3,
+    }));
+    wrapper.unmount();
+  });
+
+  it("keeps a stored fixed URL when changing between pool and fixed modes", async () => {
+    const maskedURL = "http://user:***@old.example.com:8080";
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_harvest_proxy_mode: "pool",
+      openai_codex_ticket_harvest_proxy_url: maskedURL,
+      openai_codex_ticket_harvest_proxy_configured: true,
+      proxy_pool_max_accounts: 5,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
+    expect(mode.element.value).toBe("pool");
+    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
+    expect(wrapper.get<HTMLInputElement>("#proxy-pool-max-accounts").element.value).toBe("5");
+    await mode.setValue("fixed");
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-harvest-proxy").element.value).toBe(maskedURL);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_harvest_proxy_mode: "fixed",
+      openai_codex_ticket_harvest_proxy_url: maskedURL,
+    }));
+    wrapper.unmount();
+  });
+
+  it("keeps legacy configured proxies fixed when the URL is hidden or left blank", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_harvest_proxy_url: "",
+      openai_codex_ticket_harvest_proxy_configured: true,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
+    expect(mode.element.value).toBe("fixed");
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-harvest-proxy").element.value).toBe("");
+    await mode.setValue("pool");
+    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_harvest_proxy_mode: "pool",
+      openai_codex_ticket_harvest_proxy_url: "",
+      proxy_pool_max_accounts: 0,
+    }));
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
+    wrapper.unmount();
+  });
+
+  it.each([-1, 1.5, 10001])("rejects invalid proxy account limit %s", async (limit) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("#proxy-pool-max-accounts").setValue(limit);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith("admin.settings.gatewayForwarding.proxyPoolMaxAccountsRangeError");
+    wrapper.unmount();
+  });
+
+  it.each([0, 10000])("accepts proxy account limit boundary %s", async (limit) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("#proxy-pool-max-accounts").setValue(limit);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ proxy_pool_max_accounts: limit }));
     wrapper.unmount();
   });
 

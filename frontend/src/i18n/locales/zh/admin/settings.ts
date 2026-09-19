@@ -540,10 +540,18 @@ export default {
         codexTicketEnabledDesc:
           '关闭后不打票、不注入 x-codex-turn-state，按原链路转发。开启后后台打票，并在业务请求中覆盖该头。',
         codexTicketHarvestProxy: '292 打票代理',
+        codexTicketHarvestProxyFixed: '固定代理 URL',
+        codexTicketHarvestProxyPool: '从代理池均衡选择',
+        codexTicketHarvestProxyPoolDesc:
+          '随机代理账号沿用其代理范围和更换周期，其他账号从整个代理池选择。同一账号优先复用可用代理，重新选择时优先关联账号少的代理，同等关联数优先质量更好的代理。连接失败的代理不参与分配，质量降级代理仅在正常代理没有容量时备用。没有可用容量时跳过本次打票，不回退直连。',
         codexTicketHarvestProxyDesc:
           '仅在门票功能开启时用于打票，保存后后续探测会使用新代理，无需重启。日常业务仍走账号自己的住宅代理。填写完整代理 URL（http 或 socks5h，含用户名和密码）。代理服务商需自行负责出口 IP 轮换。留空并保存表示不改已保存的值。',
         codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
         codexTicketHarvestProxyConfigured: '已配置（密码已隐藏）。要更换请整段粘贴新的代理 URL。',
+        proxyPoolMaxAccounts: '代理池单代理关联账号上限',
+        proxyPoolMaxAccountsDesc:
+          '对打票代理池和账号随机代理共同生效。0 表示不设硬上限，仍尽量均衡；1–10000 为每条代理允许关联的账号数。统计固定挂载账号和最近 10 分钟的动态关联，同一账号在同一代理上只计一次；达到上限后不再分配新账号。固定挂载关系不受此设置修改。',
+        proxyPoolMaxAccountsRangeError: '单代理关联账号上限须为 0–10000 的整数。',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
           '仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效（全局）。在 User-Agent/Originator 之外，用版本区间、引擎指纹门与黑/白名单巩固判定。',

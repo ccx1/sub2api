@@ -5,6 +5,7 @@ package tlsfingerprint
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -41,8 +42,9 @@ type Dialer struct {
 // HTTPProxyDialer creates TLS connections through HTTP/HTTPS proxies with custom fingerprints.
 // It handles the CONNECT tunnel establishment before performing TLS handshake.
 type HTTPProxyDialer struct {
-	profile  *Profile
-	proxyURL *url.URL
+	profile        *Profile
+	proxyURL       *url.URL
+	proxyTLSConfig *tls.Config
 }
 
 // SOCKS5ProxyDialer creates TLS connections through SOCKS5 proxies with custom fingerprints.
@@ -168,7 +170,11 @@ func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr st
 
 	// Step 2: Establish SOCKS5 tunnel to target
 	slog.Debug("tls_fingerprint_socks5_establishing_tunnel", "target", addr)
-	conn, err := socksDialer.Dial("tcp", addr)
+	contextDialer, ok := socksDialer.(proxy.ContextDialer)
+	if !ok {
+		return nil, fmt.Errorf("SOCKS5 dialer does not support request cancellation")
+	}
+	conn, err := contextDialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		slog.Debug("tls_fingerprint_socks5_connect_failed", "error", err)
 		return nil, fmt.Errorf("SOCKS5 connect: %w", err)
@@ -202,6 +208,23 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 	if err != nil {
 		slog.Debug("tls_fingerprint_http_proxy_connect_failed", "error", err)
 		return nil, fmt.Errorf("connect to proxy: %w", err)
+	}
+	// CONNECT 和代理 TLS 握手必须随请求取消；HTTPS 代理先建立外层 TLS。
+	proxyConn := conn
+	stopCancel := context.AfterFunc(ctx, func() { _ = proxyConn.Close() })
+	defer stopCancel()
+	if d.proxyURL.Scheme == "https" {
+		proxyTLSConfig := &tls.Config{ServerName: d.proxyURL.Hostname(), MinVersion: tls.VersionTLS12}
+		if d.proxyTLSConfig != nil {
+			proxyTLSConfig = d.proxyTLSConfig.Clone()
+			proxyTLSConfig.ServerName = d.proxyURL.Hostname()
+		}
+		tlsConn := tls.Client(conn, proxyTLSConfig)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("TLS handshake with proxy: %w", err)
+		}
+		conn = tlsConn
 	}
 	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
 

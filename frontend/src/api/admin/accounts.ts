@@ -240,6 +240,23 @@ export async function update(id: number, updates: UpdateAccountRequest): Promise
   return data
 }
 
+export async function setProtection(
+  id: number,
+  enabled: boolean,
+  confirmDisable = false
+): Promise<Account> {
+  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/protection`, {
+    enabled,
+    confirm_disable: confirmDisable
+  })
+  return data
+}
+
+export async function setCodexTicketEnabled(id: number, enabled: boolean): Promise<Account> {
+  const { data } = await apiClient.put<Account>(`/admin/accounts/${id}/codex-ticket`, { enabled })
+  return data
+}
+
 export async function getGrokMediaEligibility(id: number): Promise<GrokMediaEligibilityState> {
   const { data } = await apiClient.get<GrokMediaEligibilityState>(
     `/admin/accounts/${id}/grok-media-eligibility`
@@ -1079,6 +1096,7 @@ export const accountsAPI = {
   create,
   duplicate,
   update,
+  setCodexTicketEnabled,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,
   checkMixedChannelRisk,

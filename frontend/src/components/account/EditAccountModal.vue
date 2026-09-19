@@ -1648,8 +1648,19 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :disabled="randomProxyEnabled" />
+        <RandomProxySettings
+          v-model:enabled="randomProxyEnabled"
+          v-model:scope="randomProxyPoolScope"
+          v-model:ids="randomProxyPoolIds"
+          v-model:policy="randomProxyEmptyPoolPolicy"
+          v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
+          :proxies="proxies"
+          @update:enabled="handleRandomProxyChange"
+        />
       </div>
+
+      <DailyCooldownSettings v-if="!isSparkShadow" v-model="dailyCooldown" />
 
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
@@ -3069,6 +3080,10 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
+import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -3167,6 +3182,20 @@ const selectableGroups = computed(() => {
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
+
+
+const randomProxyEnabled = ref(false)
+const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
+const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
+const randomProxyPoolIds = ref<number[]>([])
+const randomProxyMaxReuseMinutes = ref(0)
+const dailyCooldown = ref(normalizeDailyCooldown())
+
+const handleRandomProxyChange = (enabled: boolean) => {
+  if (enabled) {
+    form.proxy_id = null
+  }
+}
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
 
@@ -3995,6 +4024,17 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.group_ids = newAccount.group_ids || []
   form.expires_at = newAccount.expires_at ?? null
 
+  const extra = newAccount.extra as Record<string, unknown> | undefined
+  randomProxyEnabled.value = extra?.proxy_mode === 'random'
+  randomProxyEmptyPoolPolicy.value = normalizeRandomProxyEmptyPoolPolicy(extra?.random_proxy_empty_pool_policy)
+  randomProxyPoolScope.value = normalizeRandomProxyPoolScope(extra?.random_proxy_pool_scope)
+  randomProxyPoolIds.value = normalizeRandomProxyPoolIds(extra?.random_proxy_pool_ids)
+  randomProxyMaxReuseMinutes.value = normalizeRandomProxyReuseMinutes(extra?.random_proxy_max_reuse_minutes)
+  dailyCooldown.value = normalizeDailyCooldown(extra?.daily_cooldown)
+  if (randomProxyEnabled.value) {
+    form.proxy_id = null
+  }
+
   // Load intercept warmup requests setting (applies to all account types)
   const credentials = newAccount.credentials as Record<string, unknown> | undefined
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
@@ -4012,7 +4052,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load mixed scheduling setting (only for antigravity accounts)
   mixedScheduling.value = false
   allowOverages.value = false
-	const extra = newAccount.extra as Record<string, unknown> | undefined
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
 	upstreamRequestIdHeader.value = readUpstreamRequestIdHeader(extra)
@@ -4986,8 +5025,40 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
   }
 }
 
+const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknown>) => {
+  if (isSparkShadow.value) {
+    return
+  }
+  const currentExtra =
+    (updatePayload.extra as Record<string, unknown> | undefined) ||
+    ((props.account?.extra as Record<string, unknown> | undefined) || {})
+  const nextExtra: Record<string, unknown> = { ...currentExtra }
+  if (randomProxyEnabled.value) {
+    Object.assign(nextExtra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value }))
+    updatePayload.proxy_id = 0
+  } else {
+    delete nextExtra.proxy_mode
+    delete nextExtra.random_proxy_empty_pool_policy
+    delete nextExtra.random_proxy_pool_scope
+    delete nextExtra.random_proxy_pool_ids
+    delete nextExtra.random_proxy_max_reuse_minutes
+  }
+  updatePayload.extra = dailyCooldown.value.enabled || currentExtra.daily_cooldown
+    ? withDailyCooldownExtra(nextExtra, dailyCooldown.value)
+    : nextExtra
+}
+
 const handleSubmit = async () => {
   if (!props.account) return
+  const cooldownError = !isSparkShadow.value && dailyCooldownValidationError(dailyCooldown.value)
+  if (cooldownError || (!isSparkShadow.value && randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
+    appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
+    return
+  }
+  if (!isSparkShadow.value && randomProxyEnabled.value && randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
+    appStore.showError(t('admin.accounts.randomProxyPoolRequired'))
+    return
+  }
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
@@ -5714,6 +5785,8 @@ const handleSubmit = async () => {
       }
       updatePayload.extra = newExtra
     }
+
+    applyRandomProxySelectionToPayload(updatePayload)
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)

@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"hash/fnv"
@@ -82,6 +83,87 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
+}
+
+// ProxyModeExtraKey stores the account proxy selection mode in accounts.extra.
+const ProxyModeExtraKey = "proxy_mode"
+
+const (
+	ProxyModeRandom = "random"
+
+	RandomProxyEmptyPoolPolicyExtraKey = "random_proxy_empty_pool_policy"
+	RandomProxyEmptyPoolPolicyReject   = "reject"
+	RandomProxyEmptyPoolPolicyDisable  = "disable"
+	RandomProxyEmptyPoolPolicyDirect   = "direct"
+)
+
+// NormalizeProxyModeExtra canonicalizes proxy-related extra keys before they
+// are persisted. Invalid values are dropped so malformed data never enables an
+// unexpected request-time routing mode.
+func NormalizeProxyModeExtra(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	normalizeRandomProxyPoolExtra(extra)
+	raw, ok := extra[ProxyModeExtraKey]
+	if ok {
+		if mode, ok := raw.(string); ok && strings.EqualFold(strings.TrimSpace(mode), ProxyModeRandom) {
+			extra[ProxyModeExtraKey] = ProxyModeRandom
+		} else {
+			delete(extra, ProxyModeExtraKey)
+		}
+	}
+
+	rawPolicy, ok := extra[RandomProxyEmptyPoolPolicyExtraKey]
+	if !ok {
+		return extra
+	}
+	if policy, ok := rawPolicy.(string); ok {
+		switch strings.ToLower(strings.TrimSpace(policy)) {
+		case RandomProxyEmptyPoolPolicyReject:
+			extra[RandomProxyEmptyPoolPolicyExtraKey] = RandomProxyEmptyPoolPolicyReject
+			return extra
+		case RandomProxyEmptyPoolPolicyDisable:
+			extra[RandomProxyEmptyPoolPolicyExtraKey] = RandomProxyEmptyPoolPolicyDisable
+			return extra
+		case RandomProxyEmptyPoolPolicyDirect:
+			extra[RandomProxyEmptyPoolPolicyExtraKey] = RandomProxyEmptyPoolPolicyDirect
+			return extra
+		}
+	}
+	delete(extra, RandomProxyEmptyPoolPolicyExtraKey)
+	return extra
+}
+
+// IsRandomProxy reports whether the account uses runtime proxy-pool selection.
+// The allocator keeps its selected proxy until it becomes unusable or expires.
+func (a *Account) IsRandomProxy() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	mode, ok := a.Extra[ProxyModeExtraKey].(string)
+	return ok && strings.EqualFold(strings.TrimSpace(mode), ProxyModeRandom)
+}
+
+func (a *Account) RandomProxyEmptyPoolPolicy() string {
+	if a == nil || a.Extra == nil {
+		return RandomProxyEmptyPoolPolicyReject
+	}
+	policy, _ := a.Extra[RandomProxyEmptyPoolPolicyExtraKey].(string)
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case RandomProxyEmptyPoolPolicyDisable:
+		return RandomProxyEmptyPoolPolicyDisable
+	case RandomProxyEmptyPoolPolicyDirect:
+		return RandomProxyEmptyPoolPolicyDirect
+	default:
+		return RandomProxyEmptyPoolPolicyReject
+	}
+}
+
+// RandomProxySelector is implemented by repositories that can choose one
+// currently active, non-expired proxy at request time.
+type RandomProxySelector interface {
+	SelectRandomActiveProxy(ctx context.Context) (*Proxy, error)
 }
 
 type OpenAIEndpointCapability string
@@ -179,10 +261,16 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	return a.isSchedulableAt(time.Now())
+}
+
+func (a *Account) isSchedulableAt(now time.Time) bool {
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
-	now := time.Now()
+	if a.IsInDailyCooldown(now) {
+		return false
+	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -206,6 +294,7 @@ func (a *Account) IsSchedulable() bool {
 // 检查「凭据/账号/传输可用性」:
 //   - 账号 active(非禁用/删除);
 //   - OAuth token 未过期(AutoPauseOnExpired+ExpiresAt);
+//   - 不在每日冷却时段，避免影子绕过母账号的休息计划；
 //   - 未处于 TempUnschedulableUntil 冷却期 —— 对 OpenAI 账号该字段由 401 鉴权失败 /
 //     token 刷新耗尽 / transport·proxy 故障写入(ratelimit/token_refresh/upstream_transport),
 //     都代表**共享凭据或传输通道坏死**;影子共享母 token+proxy,故母处于该冷却期时影子也不可用。
@@ -218,6 +307,9 @@ func (a *Account) IsCredentialUsableForShadow() bool {
 		return false
 	}
 	now := time.Now()
+	if a.IsInDailyCooldown(now) {
+		return false
+	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -2383,12 +2475,21 @@ func (a *Account) IsAnthropicOAuthOrSetupToken() bool {
 	return a.Platform == PlatformAnthropic && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
+// IsTLSFingerprintCapable 判断账号协议是否支持账号级 TLS 指纹伪装。
+func (a *Account) IsTLSFingerprintCapable() bool {
+	if a == nil {
+		return false
+	}
+	if a.Type != AccountTypeOAuth && a.Type != AccountTypeSetupToken {
+		return false
+	}
+	return a.Platform == PlatformAnthropic || a.Platform == PlatformOpenAI
+}
+
 // IsTLSFingerprintEnabled 检查是否启用 TLS 指纹伪装
-// 仅适用于 Anthropic OAuth/SetupToken 类型账号
-// 启用后将模拟 Claude Code (Node.js) 客户端的 TLS 握手特征
+// 仅适用于 Anthropic/OpenAI OAuth 或 SetupToken 类型账号。
 func (a *Account) IsTLSFingerprintEnabled() bool {
-	// 仅支持 Anthropic OAuth/SetupToken 账号
-	if !a.IsAnthropicOAuthOrSetupToken() {
+	if !a.IsTLSFingerprintCapable() {
 		return false
 	}
 	if a.Extra == nil {

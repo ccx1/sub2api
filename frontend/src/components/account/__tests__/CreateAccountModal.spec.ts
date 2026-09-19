@@ -214,6 +214,58 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('creates a daily cooldown together with reusable random proxy settings and other extra', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('scheduled account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(true)
+    await wrapper.get('[data-testid="random-proxy-reuse-minutes"]').setValue(1440)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      daily_cooldown: { enabled: true, start: '23:00', end: '08:00', timezone: 'Asia/Shanghai' },
+      proxy_mode: 'random', random_proxy_max_reuse_minutes: 1440,
+      openai_long_context_billing_enabled: false
+    })
+    wrapper.unmount()
+  })
+
+  it('rejects equal daily cooldown times before creating an account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('invalid schedule')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-end"]').setValue('23:00')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(createAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('creates an account with only the selected random proxies', async () => {
+    const wrapper = mountModal()
+    await wrapper.setProps({ proxies: [{ id: 7, name: 'Proxy 7', host: 'proxy.example.com', port: 8080, protocol: 'http' }] as any })
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('random account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('selected')
+    await settings.get('input[value="7"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      proxy_id: null,
+      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_empty_pool_policy: 'reject' }
+    })
+    wrapper.unmount()
+  })
+
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-31T12:34:00'))

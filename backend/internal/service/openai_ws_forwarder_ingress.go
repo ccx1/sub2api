@@ -466,6 +466,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 		normalized = policyApplied
+		if err := checkAccountRequestIntegrity(c, account, trimmed, normalized); err != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+		}
+		stageMode1Request(c, account, trimmed)
 		ingressSessionOriginalModel = originalModel
 
 		return openAIWSClientPayload{
@@ -675,6 +679,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if err != nil {
 					return fmt.Errorf("resolve Grok websocket cache identity: %w", err)
 				}
+			}
+			if err := validateMode1StagedRequest(c, account, bridgePayloadRaw); err != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 			}
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
 				ctx,
@@ -963,13 +970,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		if err := ValidateRandomProxyForReuse(ctx, account, s.accountRepo); err != nil {
+			lease.MarkBroken()
+			return nil, err
+		}
+		if err := validateMode1StagedRequest(c, account, payload); err != nil {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+			reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
 				false,
 			)
 		}
+		RecordRandomProxyUsage(ctx, account, s.accountRepo)
 		if debugEnabled {
 			logOpenAIWSModeDebug(
 				"ingress_ws_turn_request_sent account_id=%d turn=%d conn_id=%s payload_bytes=%d",
@@ -1013,6 +1029,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
+				reportRandomProxyWSFailure(ctx, account, s.accountRepo, readErr)
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",

@@ -221,6 +221,10 @@ export default {
         viewTempUnschedDetails: 'View temp unschedulable details',
         tempUnschedulableUntil: 'Resumes {time}'
       },
+      codexTicketEnabled: 'Included in ticket harvesting',
+      codexTicketDisabled: 'Excluded from ticket harvesting',
+      codexTicketUnsupported: 'This account does not participate in Codex 292 ticket harvesting',
+      failedToToggleCodexTicket: 'Failed to toggle ticket harvesting',
       columns: {
         name: 'Name',
         id: 'Account ID',
@@ -236,6 +240,8 @@ export default {
         schedulerScore: 'Scheduler Score',
         status: 'Status',
         schedulable: 'Schedulable',
+        protection: 'Protection',
+        codexTicket: 'Ticketing',
         todayStats: 'Today Stats',
         groups: 'Groups',
         usageWindows: 'Usage Windows',
@@ -1643,7 +1649,54 @@ export default {
       linkCopied: 'Link Copied',
       needsReauth: 'Re-auth Required',
       rateLimited: 'Rate Limited',
-      usageError: 'Fetch Error'
+      usageError: 'Fetch Error',
+      randomProxy: 'Choose a random proxy',
+      randomProxyHint: 'Reuse the selected proxy for each account. Select again and rebuild related connections when configuration changes, the proxy becomes unavailable or its rotation interval expires. New selections prefer fewer associated accounts, then better quality at equal load. Failed proxies are excluded; degraded proxies are backups when normal proxies have no capacity.',
+      randomProxyMaxReuseMinutes: 'Proxy rotation interval (minutes)',
+      randomProxyMaxReuseHint: '0 disables scheduled rotation. A positive value selects again on the next request after expiry. The proxy must still meet the current scope, capacity and availability requirements. Account protection can be enabled with reusable random proxies.',
+      randomProxyMaxReuseInvalid: 'The proxy rotation interval must be an integer from 0 to 525600 minutes.',
+      dailyCooldown: {
+        title: 'Daily scheduled cooldown',
+        hint: 'Stop accepting new requests during this daily window and automatically resume scheduling afterward. Manual disablement, scheduling switches and other restrictions still apply.',
+        bulkApply: 'Change daily cooldown for selected accounts',
+        start: 'Start cooldown',
+        end: 'Resume scheduling',
+        timezone: 'Time zone',
+        timezoneHint: 'Use an IANA time zone, such as Asia/Shanghai (Beijing), UTC or America/New_York.',
+        overnightHint: 'The end time is on the next day, for example 23:00 to 08:00 the following morning.',
+        invalidTime: 'Select valid start and end times.',
+        equalTimes: 'Start and end times must differ.',
+        invalidTimezone: 'Enter a valid IANA time zone.',
+        active: 'Scheduled cooldown',
+        scheduled: 'Daily cooldown set',
+        schedule: 'Daily {start}–{end} ({timezone})'
+      },
+      randomProxyBalanceHint: 'Shares the per-proxy account limit in system settings with ticket harvesting. Counts fixed assignments and dynamic associations from the last 10 minutes, once per account per proxy. Full proxies receive no new accounts; if none are available, use the policy below.',
+      randomProxyEmptyPoolPolicy: 'When the proxy pool is empty',
+      randomProxyPoolScope: 'Random proxy scope',
+      randomProxyPoolAll: 'All available proxies',
+      randomProxyPoolSelected: 'Selected proxies only',
+      randomProxyPoolChoose: 'Select proxies ({count} selected)',
+      randomProxyPoolSearch: 'Search name, address or region',
+      randomProxyPoolNoMatches: 'No available proxies match',
+      randomProxyPoolUnavailable: 'These selected proxies are unavailable or deleted. Keeping them selected will not expand the pool:',
+      randomProxyPoolUnavailableItem: 'Proxy #{id} (unavailable)',
+      randomProxyPoolRequired: 'Select at least one proxy or switch to all available proxies.',
+      randomProxyPoolSelectedHint: 'Balance only across selected, valid proxies by idle capacity, account count and quality. If all become invalid or reach their account limit, apply the empty-pool policy without using other proxies.',
+      randomProxyPoolSelectedCount: '{count} selected proxies',
+      randomProxyLastUsed: 'Last actual egress',
+      randomProxyLastDirect: 'Direct connection',
+      randomProxyNoUsage: 'No egress recorded yet',
+      randomProxyEmptyPoolPolicies: {
+        reject: 'Reject the request',
+        disable: 'Reject and disable the account',
+        direct: 'Allow direct connection'
+      },
+      randomProxyEmptyPoolPolicyHints: {
+        reject: 'Reject the request when no proxy is available; never fall back to a direct connection.',
+        disable: 'Reject this request and immediately disable the account when the selected pool has no available proxies. Re-enable the account manually after restoring proxies.',
+        direct: 'Allow the request to connect directly when no proxy is available.'
+      }
     },
 
     // Scheduled Tests

@@ -72,6 +72,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	applyStagedCodexFingerprintClientMetadata(c, account, payload)
+	if err := validateMode1StagedRequest(c, account, payloadAsJSONBytes(payload)); err != nil {
+		return nil, err
+	}
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := strings.TrimSpace(clientPromptCacheKey)
@@ -328,6 +331,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
+	if err := ValidateRandomProxyForReuse(ctx, account, s.accountRepo); err != nil {
+		lease.MarkBroken()
+		return nil, err
+	}
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
@@ -343,6 +350,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
+		reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
@@ -353,6 +361,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		)
 		return nil, wrapOpenAIWSFallback("write_request", err)
 	}
+	RecordRandomProxyUsage(ctx, account, s.accountRepo)
 	if debugEnabled {
 		logOpenAIWSModeDebug(
 			"write_request_sent account_id=%d conn_id=%s stream=%v payload_bytes=%d previous_response_id=%s",
@@ -575,6 +584,7 @@ readLoop:
 			return nil, errors.New("upstream websocket returned malformed Responses event JSON after downstream output")
 		}
 		if readErr != nil {
+			reportRandomProxyWSFailure(ctx, account, s.accountRepo, readErr)
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
 			logOpenAIWSModeInfo(

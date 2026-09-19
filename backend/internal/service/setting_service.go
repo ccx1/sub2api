@@ -134,6 +134,8 @@ type SettingService struct {
 	openAICodexTicketEnabledSF         singleflight.Group
 	openAICodexTicketHarvestProxyCache atomic.Value // *cachedOpenAICodexTicketHarvestProxy
 	openAICodexTicketHarvestProxySF    singleflight.Group
+	proxyPoolSettingsMu                sync.Mutex
+	proxyPoolSettingsCache             *cachedProxyPoolSettings
 	codexRestrictionPolicyCache        atomic.Value // *cachedCodexRestrictionPolicy
 	codexRestrictionPolicySF           singleflight.Group
 

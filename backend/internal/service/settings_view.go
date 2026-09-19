@@ -252,6 +252,8 @@ type SystemSettings struct {
 	OpenAICodexVersionAutoSyncEnabled      bool   // 是否启用 Codex 客户端版本号自动同步（默认 true）
 	OpenAICodexTicketEnabled               bool   // Codex 292 打票总开关；关闭则不打票不注入
 	OpenAICodexTicketHarvestProxyURL       string // Codex 292 打票代理 URL；空则回退 yaml/env
+	OpenAICodexTicketHarvestProxyMode      string // fixed/pool；缺失时兼容既有代理 URL
+	ProxyPoolMaxAccounts                   int    // 单条代理的账号关联上限，0 表示不设硬上限
 	MinCodexVersion                        string // codex_cli_only 最低 Codex 引擎版本；空=不检查
 	MaxCodexVersion                        string // codex_cli_only 最高 Codex 引擎版本；空=不检查
 	CodexCLIOnlyBlacklist                  string // codex_cli_only 全局黑名单 JSON（[]AllowedClientEntry，OR deny）
