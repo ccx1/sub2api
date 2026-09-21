@@ -914,6 +914,7 @@ var (
 		{Name: "peak_end", Type: field.TypeString, Size: 5, Default: ""},
 		{Name: "peak_rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "is_exclusive", Type: field.TypeBool, Default: false},
+		{Name: "is_shared_pool", Type: field.TypeBool, Default: false},
 		{Name: "security_policy_enabled", Type: field.TypeBool, Default: false},
 		{Name: "security_policy_mode", Type: field.TypeString, Size: 20, Default: "block_session"},
 		{Name: "security_policy_email_enabled", Type: field.TypeBool, Default: true},
@@ -982,17 +983,17 @@ var (
 			{
 				Name:    "group_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[15]},
+				Columns: []*schema.Column{GroupsColumns[16]},
 			},
 			{
 				Name:    "group_platform",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[17]},
+				Columns: []*schema.Column{GroupsColumns[18]},
 			},
 			{
 				Name:    "group_subscription_type",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[18]},
+				Columns: []*schema.Column{GroupsColumns[19]},
 			},
 			{
 				Name:    "group_is_exclusive",
@@ -1007,12 +1008,12 @@ var (
 			{
 				Name:    "group_sort_order",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[52]},
+				Columns: []*schema.Column{GroupsColumns[53]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",
 				Unique:  true,
-				Columns: []*schema.Column{GroupsColumns[16]},
+				Columns: []*schema.Column{GroupsColumns[17]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "duplicate_operation_id IS NOT NULL AND deleted_at IS NULL",
 				},
@@ -1417,6 +1418,7 @@ var (
 		{Name: "fallback_mode", Type: field.TypeString, Size: 20, Default: "none"},
 		{Name: "expiry_warn_days", Type: field.TypeInt, Default: 7},
 		{Name: "backup_proxy_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// ProxiesTable holds the schema information for the "proxies" table.
 	ProxiesTable = &schema.Table{
@@ -1430,8 +1432,19 @@ var (
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
+			{
+				Symbol:     "proxies_proxy_groups_proxies",
+				Columns:    []*schema.Column{ProxiesColumns[15]},
+				RefColumns: []*schema.Column{ProxyGroupsColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
 		},
 		Indexes: []*schema.Index{
+			{
+				Name:    "proxy_group_id",
+				Unique:  false,
+				Columns: []*schema.Column{ProxiesColumns[15]},
+			},
 			{
 				Name:    "proxy_status",
 				Unique:  false,
@@ -1453,6 +1466,19 @@ var (
 				Columns: []*schema.Column{ProxiesColumns[14]},
 			},
 		},
+	}
+	// ProxyGroupsColumns holds the columns for the "proxy_groups" table.
+	ProxyGroupsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Unique: true, Size: 100},
+	}
+	// ProxyGroupsTable holds the schema information for the "proxy_groups" table.
+	ProxyGroupsTable = &schema.Table{
+		Name:       "proxy_groups",
+		Columns:    ProxyGroupsColumns,
+		PrimaryKey: []*schema.Column{ProxyGroupsColumns[0]},
 	}
 	// RedeemCodesColumns holds the columns for the "redeem_codes" table.
 	RedeemCodesColumns = []*schema.Column{
@@ -2175,6 +2201,7 @@ var (
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
+		ProxyGroupsTable,
 		RedeemCodesTable,
 		SecurityPolicyKeywordsTable,
 		SecuritySecretsTable,
@@ -2289,8 +2316,12 @@ func init() {
 		Table: "promo_code_usages",
 	}
 	ProxiesTable.ForeignKeys[0].RefTable = ProxiesTable
+	ProxiesTable.ForeignKeys[1].RefTable = ProxyGroupsTable
 	ProxiesTable.Annotation = &entsql.Annotation{
 		Table: "proxies",
+	}
+	ProxyGroupsTable.Annotation = &entsql.Annotation{
+		Table: "proxy_groups",
 	}
 	RedeemCodesTable.ForeignKeys[0].RefTable = GroupsTable
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable

@@ -14,7 +14,10 @@ import (
 
 // ExportData exports proxy-only data for migration.
 func (h *ProxyHandler) ExportData(c *gin.Context) {
-	ctx := c.Request.Context()
+	ctx, ok := proxyGroupFilterContext(c)
+	if !ok {
+		return
+	}
 
 	selectedIDs, err := parseProxyIDs(c)
 	if err != nil {

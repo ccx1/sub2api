@@ -754,7 +754,9 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 版本号缓存只做失效，不在此重算：生效值还取决于自动同步写入的 synced 键，
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
-	s.InvalidateOpenAICodexTicketEnabledCache()
+	// 本次写入已成功落库，直接发布已确认的开关值；仅失效缓存会在读库故障
+	// 时把过期哨兵误当成历史值，导致刚保存的 true 被降级为 false。
+	s.cacheOpenAICodexTicketEnabled(settings.OpenAICodexTicketEnabled)
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	s.InvalidateProxyPoolSettingsCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)

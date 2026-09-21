@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"strconv"
-	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -46,6 +45,13 @@ func NewProxyPoolAllocator(client *dbent.Client, rdb *redis.Client, latencyCache
 
 func (a *ProxyPoolAllocator) Select(ctx context.Context, selection service.ProxyPoolSelection) (*service.Proxy, error) {
 	if selection.Restricted && len(selection.IDs) == 0 {
+		if a != nil && a.rdb != nil && selection.AccountID > 0 {
+			member := strconv.FormatInt(selection.AccountID, 10)
+			keys := []string{proxyPoolFailureKey(member), proxyPoolAffinityKey(member)}
+			if err := proxyPoolReserveScript.Run(ctx, a.rdb, keys, member, int(proxyPoolLeaseTTL.Seconds()), 0, "[]", true, 0).Err(); err != nil {
+				return nil, fmt.Errorf("release empty proxy pool association: %w", err)
+			}
+		}
 		return nil, nil
 	}
 	if a == nil || a.rdb == nil || a.latencyCache == nil || a.settings == nil || a.loadCandidates == nil {
@@ -69,7 +75,7 @@ func (a *ProxyPoolAllocator) readCandidates(ctx context.Context, selection servi
 	if a.client == nil {
 		return nil, fmt.Errorf("proxy pool database unavailable")
 	}
-	query := a.client.Proxy.Query().Where(dbproxy.StatusEQ(service.StatusActive), dbproxy.DeletedAtIsNil(),
+	query := a.client.Proxy.Query().Where(excludePrivateSharedProxies, dbproxy.StatusEQ(service.StatusActive), dbproxy.DeletedAtIsNil(),
 		dbproxy.Or(dbproxy.ExpiresAtIsNil(), dbproxy.ExpiresAtGT(time.Now())))
 	if selection.Restricted {
 		query.Where(dbproxy.IDIn(selection.IDs...))
@@ -94,18 +100,22 @@ func (a *ProxyPoolAllocator) readCandidates(ctx context.Context, selection servi
 }
 
 func (a *ProxyPoolAllocator) readFixedAccounts(ctx context.Context, ids []int64) (map[int64][]string, error) {
-	accounts, err := a.client.Account.Query().Where(dbaccount.DeletedAtIsNil(), dbaccount.ProxyIDIn(ids...)).
+	if len(ids) == 0 {
+		return map[int64][]string{}, nil
+	}
+	candidates := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		candidates[id] = true
+	}
+	accounts, err := a.client.Account.Query().Where(dbaccount.DeletedAtIsNil(), dbaccount.Or(
+		dbaccount.ProxyIDIn(ids...), ticketProxyIDIn(ids))).
 		Select(dbaccount.FieldID, dbaccount.FieldProxyID, dbaccount.FieldExtra).All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	fixed := make(map[int64][]string)
 	for _, account := range accounts {
-		mode, _ := account.Extra[service.ProxyModeExtraKey].(string)
-		if account.ProxyID == nil || strings.EqualFold(strings.TrimSpace(mode), service.ProxyModeRandom) {
-			continue
-		}
-		fixed[*account.ProxyID] = append(fixed[*account.ProxyID], strconv.FormatInt(account.ID, 10))
+		appendFixedAccountBindings(fixed, &service.Account{ID: account.ID, ProxyID: account.ProxyID, Extra: account.Extra}, candidates)
 	}
 	return fixed, nil
 }
@@ -172,6 +182,10 @@ func proxyPoolLeaseKey(id string) string {
 
 func proxyPoolAffinityKey(member string) string {
 	return "proxy:{pool}:affinity:" + member
+}
+
+func proxyPoolBoundAccountsKey(id string) string {
+	return "proxy:{pool}:bound_accounts:" + id
 }
 
 func proxyPoolQuality(proxy *service.Proxy, info *service.ProxyLatencyInfo) (quality int, degraded, valid bool) {

@@ -35,7 +35,7 @@ func (s *AntiDegradeService) transition(ctx context.Context, id int64, plan func
 	draft := *original
 	draft.Extra = maps.Clone(original.Extra)
 	store := &protectionDraftStore{account: &draft}
-	planner := &AntiDegradeService{admin: store, cfg: s.cfg, pluginManager: s.pluginManager}
+	planner := &AntiDegradeService{admin: store, cfg: s.cfg, pluginManager: s.pluginManager, settingRepo: s.settingRepo}
 	if err := plan(planner); err != nil {
 		return nil, err
 	}

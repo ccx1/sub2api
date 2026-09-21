@@ -12,6 +12,7 @@ const {
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
+  listProxyGroups,
   getAllGroups,
   refreshCredentials,
   showError,
@@ -23,6 +24,7 @@ const {
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
+  listProxyGroups: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
   showError: vi.fn(),
@@ -43,7 +45,7 @@ vi.mock('@/api/admin', () => ({
       toggleSchedulable: vi.fn(),
       refreshCredentials
     },
-    proxies: { getAll: getAllProxies },
+    proxies: { getAll: getAllProxies, listGroups: listProxyGroups },
     groups: { getAll: getAllGroups }
   }
 }))
@@ -67,6 +69,7 @@ const DataTableStub = defineComponent({
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-proxy" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -93,6 +96,11 @@ const AccountStatsModalStub = defineComponent({
   template: '<div data-test="stats-account">{{ show ? account?.name : "" }}</div>'
 })
 
+const AccountTableActionsStub = defineComponent({
+  emits: ['refresh'],
+  template: '<div><button data-test="manual-refresh" @click="$emit(\'refresh\')">Refresh</button><slot name="after" /></div>'
+})
+
 function mountView(stubActionMenu = true) {
   return mount(AccountsView, {
     attachTo: document.body,
@@ -101,7 +109,7 @@ function mountView(stubActionMenu = true) {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
+        AccountTableActions: AccountTableActionsStub,
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
         Pagination: true,
@@ -156,6 +164,32 @@ const fullAccount = {
   extra: { detail_only: true }
 }
 
+const ticketProxy = {
+  id: 7,
+  name: 'Ticket Tokyo',
+  protocol: 'http',
+  host: 'ticket.example',
+  port: 8080,
+  status: 'active',
+  account_count: 3
+}
+
+function useFixedTicketProxyAccount() {
+  listAccounts.mockResolvedValue({
+    items: [{ ...listRow, extra: { codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: ticketProxy.id } }],
+    total: 1,
+    page: 1,
+    page_size: 20,
+    pages: 1
+  })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(complete => { resolve = complete })
+  return { promise, resolve }
+}
+
 describe('admin AccountsView lite account list', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -165,6 +199,7 @@ describe('admin AccountsView lite account list', () => {
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
     getAllProxies.mockReset().mockResolvedValue([])
+    listProxyGroups.mockReset().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     refreshCredentials.mockReset()
     showError.mockReset()
@@ -194,6 +229,121 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="account-groups"]').text()).toBe('codex')
+    wrapper.unmount()
+  })
+
+  it('shows the random proxy group name and preserves unavailable group scope', async () => {
+    listAccounts.mockResolvedValue({ items: [
+      { ...listRow, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7 } },
+      { ...listRow, id: 43, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 99 } }
+    ], total: 2, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const cells = wrapper.findAll('[data-testid="account-random-proxy"]')
+    expect(cells[0].text()).toContain('accountProxyGroups.listScope')
+    expect(cells[0].text()).toContain('Tokyo pool')
+    expect(cells[1].text()).toContain('accountProxyGroups.unavailableId')
+    expect(cells[1].text()).not.toContain('admin.accounts.randomProxyPoolAll')
+    wrapper.unmount()
+  })
+
+  it('retries proxy groups after a directory failure on manual refresh', async () => {
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, extra: {
+      proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7
+    } }], total: 1, page: 1, page_size: 20, pages: 1 })
+    listProxyGroups.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-random-proxy"]').text()).toContain('accountProxyGroups.listLoadFailed')
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-random-proxy"]').text()).toContain('Tokyo pool')
+    wrapper.unmount()
+  })
+
+  it('resolves a fixed proxy group from its ID when the account snapshot omits the name', async () => {
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, proxy: { ...ticketProxy, group_id: 7 } }], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-account-name="compact row"]').text()).toContain('Tokyo pool')
+    wrapper.unmount()
+  })
+
+  it('waits for the proxy catalog and displays fixed proxies without waiting for groups', async () => {
+    useFixedTicketProxyAccount()
+    const proxiesRequest = deferred<typeof ticketProxy[]>()
+    const groupsRequest = deferred<unknown[]>()
+    getAllProxies.mockReturnValue(proxiesRequest.promise)
+    getAllGroups.mockReturnValue(groupsRequest.promise)
+    const wrapper = mountView()
+    await flushPromises()
+
+    const cell = wrapper.get('[data-testid="account-ticket-proxy"]')
+    expect(cell.text()).toContain('common.loading')
+    expect(cell.text()).not.toContain('admin.accounts.codexTicketProxy.listUnavailable')
+
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(getAllProxies).toHaveBeenCalledTimes(1)
+
+    proxiesRequest.resolve([ticketProxy])
+    await flushPromises()
+    expect(cell.text()).toContain(ticketProxy.name)
+    expect(cell.text()).toContain('http://ticket.example:8080')
+    expect(cell.text()).not.toContain('common.loading')
+    expect(wrapper.get('[data-test="account-groups"]').text()).toBe('')
+
+    groupsRequest.resolve([])
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('marks a fixed proxy unavailable only after a successful catalog response omits it', async () => {
+    useFixedTicketProxyAccount()
+    const wrapper = mountView()
+    await flushPromises()
+
+    const cell = wrapper.get('[data-testid="account-ticket-proxy"]')
+    expect(cell.text()).toContain('admin.accounts.codexTicketProxy.listUnavailable')
+    expect(cell.text()).toContain('ID: 7')
+    expect(cell.text()).not.toContain('common.loading')
+    wrapper.unmount()
+  })
+
+  it('displays explicit account outbound inheritance without requiring an independent proxy', async () => {
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, extra: {
+      proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7,
+      codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0
+    } }], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const cell = wrapper.get('[data-testid="account-ticket-proxy"]')
+    expect(cell.text()).toContain('admin.accounts.codexTicketProxy.account')
+    expect(cell.text()).not.toContain('admin.accounts.codexTicketProxy.inherit')
+    expect(cell.text()).not.toContain('admin.accounts.codexTicketProxy.listUnavailable')
+    wrapper.unmount()
+  })
+
+  it('shows proxy loading errors and retries them on manual refresh', async () => {
+    useFixedTicketProxyAccount()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    getAllProxies.mockRejectedValueOnce(new Error('catalog failed')).mockResolvedValue([ticketProxy])
+    const wrapper = mountView()
+    await flushPromises()
+
+    const cell = wrapper.get('[data-testid="account-ticket-proxy"]')
+    expect(cell.text()).toContain('admin.proxies.failedToLoad')
+    expect(cell.text()).not.toContain('admin.accounts.codexTicketProxy.listUnavailable')
+
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(getAllProxies).toHaveBeenCalledTimes(2)
+    expect(cell.text()).toContain(ticketProxy.name)
+    expect(cell.text()).not.toContain('admin.proxies.failedToLoad')
+
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(getAllProxies).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 
@@ -234,6 +384,7 @@ describe('admin AccountsView lite account list', () => {
       expect.objectContaining({ lite: '1' }),
       expect.objectContaining({ etag: null })
     )
+    expect(getAllProxies).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

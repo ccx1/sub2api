@@ -188,6 +188,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		Platform:                        g.Platform,
 		RateMultiplier:                  g.RateMultiplier,
 		IsExclusive:                     g.IsExclusive,
+		IsSharedPool:                    g.IsSharedPool,
 		Status:                          g.Status,
 		SubscriptionType:                g.SubscriptionType,
 		DailyLimitUSD:                   g.DailyLimitUSD,
@@ -528,6 +529,8 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		return nil
 	}
 	return &Proxy{
+		GroupID:        p.GroupID,
+		GroupName:      p.GroupName,
 		ID:             p.ID,
 		Name:           p.Name,
 		Protocol:       p.Protocol,
@@ -667,7 +670,7 @@ func redeemCodeFromServiceBase(rc *service.RedeemCode) RedeemCode {
 
 	// For admin_balance/admin_concurrency types, include notes so users can see
 	// why they were charged or credited by admin
-	if (rc.Type == "admin_balance" || rc.Type == "admin_concurrency") && rc.Notes != "" {
+	if (rc.Type == "admin_balance" || rc.Type == "admin_concurrency" || rc.Type == service.RedeemTypeSharedPoolTransfer) && rc.Notes != "" {
 		out.Notes = &rc.Notes
 	}
 

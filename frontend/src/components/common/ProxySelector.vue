@@ -68,6 +68,7 @@
         <div class="select-options">
           <!-- No Proxy option -->
           <div
+            v-if="allowDirect"
             @click="selectOption(null)"
             :class="['select-option', modelValue === null && 'select-option-selected']"
           >
@@ -84,14 +85,7 @@
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <span class="truncate font-medium">{{ proxy.name }}</span>
-                <!-- Account count badge -->
-                <span
-                  v-if="proxy.account_count !== undefined"
-                  class="inline-flex flex-shrink-0 items-center rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-dark-600 dark:text-gray-400"
-                >
-                  {{ proxy.account_count }}
-                </span>
+                <span class="min-w-0 break-all font-medium" :title="proxyOptionLabel(proxy)">{{ proxyOptionLabel(proxy) }}</span>
                 <!-- Test result badges -->
                 <template v-if="testResults[proxy.id]">
                   <span
@@ -112,9 +106,6 @@
                     {{ t('admin.proxies.testFailed') }}
                   </span>
                 </template>
-              </div>
-              <div class="truncate text-xs text-gray-500 dark:text-gray-400">
-                {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}
               </div>
             </div>
 
@@ -168,11 +159,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
 import type { Proxy } from '@/types'
+import { proxyOptionLabel } from '@/utils/proxyLabel'
 
 const { t } = useI18n()
 
@@ -190,10 +182,12 @@ interface Props {
   modelValue: number | null
   proxies: Proxy[]
   disabled?: boolean
+  allowDirect?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  disabled: false
+  disabled: false,
+  allowDirect: true
 })
 
 const emit = defineEmits<{
@@ -217,10 +211,11 @@ const selectedProxy = computed(() => {
 
 const selectedLabel = computed(() => {
   if (!selectedProxy.value) {
-    return t('admin.accounts.noProxy')
+    if (props.modelValue !== null) return t('admin.accounts.randomProxyPoolUnavailableItem', { id: props.modelValue })
+    return t(props.allowDirect ? 'admin.accounts.noProxy' : 'common.selectOption')
   }
   const proxy = selectedProxy.value
-  return `${proxy.name} (${proxy.protocol}://${proxy.host}:${proxy.port})`
+  return proxyOptionLabel(proxy)
 })
 
 const filteredProxies = computed(() => {
@@ -228,11 +223,7 @@ const filteredProxies = computed(() => {
     return props.proxies
   }
   const query = searchQuery.value.toLowerCase()
-  return props.proxies.filter((proxy) => {
-    const name = proxy.name.toLowerCase()
-    const host = proxy.host.toLowerCase()
-    return name.includes(query) || host.includes(query)
-  })
+  return props.proxies.filter(proxy => proxyOptionLabel(proxy).toLowerCase().includes(query))
 })
 
 const toggle = () => {
@@ -246,13 +237,15 @@ const toggle = () => {
 }
 
 const selectOption = (value: number | null) => {
+  if (props.disabled || (value === null && !props.allowDirect)) return
+  if (value !== null && !props.proxies.some(proxy => proxy.id === value)) return
   emit('update:modelValue', value)
   isOpen.value = false
   searchQuery.value = ''
 }
 
 const handleTestProxy = async (proxy: Proxy) => {
-  if (testingProxyIds.has(proxy.id)) return
+  if (props.disabled || testingProxyIds.has(proxy.id)) return
 
   testingProxyIds.add(proxy.id)
   try {
@@ -269,7 +262,7 @@ const handleTestProxy = async (proxy: Proxy) => {
 }
 
 const handleBatchTest = async () => {
-  if (batchTesting.value || props.proxies.length === 0) return
+  if (props.disabled || batchTesting.value || props.proxies.length === 0) return
 
   batchTesting.value = true
 
@@ -293,6 +286,13 @@ const handleEscape = (event: KeyboardEvent) => {
     searchQuery.value = ''
   }
 }
+
+watch(() => props.disabled, disabled => {
+  if (disabled) {
+    isOpen.value = false
+    searchQuery.value = ''
+  }
+})
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)

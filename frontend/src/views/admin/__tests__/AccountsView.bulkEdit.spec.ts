@@ -45,6 +45,7 @@ vi.mock('@/api/admin', () => ({
       toggleSchedulable: vi.fn()
     },
     proxies: {
+      listGroups: vi.fn().mockResolvedValue([]),
       getAll: getAllProxies
     },
     groups: {
@@ -120,7 +121,7 @@ const PaginationStub = {
 }
 
 const BulkEditAccountModalStub = {
-  props: ['show', 'target'],
+  props: ['show', 'target', 'proxies'],
   template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
 }
 
@@ -204,11 +205,15 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
+    const refreshedProxies = [{ id: 7, name: 'Fresh count', account_count: 3 }]
+    getAllProxies.mockResolvedValueOnce(refreshedProxies)
     await wrapper.get('[data-test="edit-filtered"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
+    expect(getAllProxies).toHaveBeenCalledTimes(2)
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('proxies')).toEqual(refreshedProxies)
   })
 
   it('renders the created_at column by default', async () => {

@@ -974,13 +974,22 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		service.SharedPoolOwnerKey,
+		service.SharedPoolEnabledKey,
+		service.SharedPoolAdminDisabledKey,
+		service.SharedPoolDispatchConsentKey,
+		service.SharedPoolSettlementMultiplierKey,
+		service.SharedPoolSubscriptionTierKey,
 		service.DailyCooldownExtraKey,
 		"proxy_mode",
 		"random_proxy_empty_pool_policy",
 		"random_proxy_pool_scope",
 		"random_proxy_pool_ids",
+		service.RandomProxyGroupIDExtraKey,
 		"random_proxy_max_reuse_minutes",
 		"codex_ticket_enabled",
+		service.CodexTicketProxyModeExtraKey,
+		service.CodexTicketProxyIDExtraKey,
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",

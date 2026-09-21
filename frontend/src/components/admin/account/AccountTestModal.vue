@@ -365,7 +365,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -375,7 +375,8 @@ import { useClipboard } from '@/composables/useClipboard'
 import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
-import type { Account, ClaudeModel } from '@/types'
+import { sharedPoolAPI, testSharedAccount } from '@/api/sharedPool'
+import type { ClaudeModel } from '@/types'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
@@ -392,11 +393,13 @@ interface PreviewMedia {
 
 const props = defineProps<{
   show: boolean
-  account: Account | null
+  account: { id: number; name: string; platform: string; type: string; status: string } | null
+  apiScope?: 'admin' | 'shared-pool'
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'completed'): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -409,6 +412,7 @@ const selectedModelId = ref('')
 const testPrompt = ref('')
 const loadingModels = ref(false)
 let abortController: AbortController | null = null
+let modelsRequest = 0
 const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
 const generatedVideos = ref<PreviewMedia[]>([])
@@ -733,25 +737,6 @@ const pickDefaultModelForMode = () => {
   selectedModelId.value = opts[0].id
 }
 
-watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
-      testPrompt.value = ''
-      testMode.value = 'default'
-      grokTestMode.value = 'text'
-      resetState()
-      await loadAvailableModels()
-      if (isGrokAccount.value) {
-        pickDefaultModelForMode()
-        applyDefaultPromptForMode()
-      }
-    } else {
-      abortStream()
-    }
-  }
-)
-
 watch(grokTestMode, () => {
   if (!isGrokAccount.value) return
   testPrompt.value = ''
@@ -762,17 +747,19 @@ watch(grokTestMode, () => {
 
 const loadAvailableModels = async () => {
   if (!props.account) return
-
+  const account = props.account
+  const request = ++modelsRequest
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
-    availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
+    const models = await (props.apiScope === 'shared-pool' ? sharedPoolAPI : adminAPI.accounts).getAvailableModels(account.id)
+    if (request !== modelsRequest) return
+    availableModels.value = account.platform === 'gemini' || account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.platform === 'gemini') {
+      if (account.platform === 'gemini') {
         selectedModelId.value = availableModels.value[0].id
       } else {
         // Try to select Sonnet as default, otherwise use first model
@@ -781,12 +768,15 @@ const loadAvailableModels = async () => {
       }
     }
   } catch (error) {
+    if (request !== modelsRequest) return
     console.error('Failed to load available models:', error)
     // Fallback to empty list
     availableModels.value = []
     selectedModelId.value = ''
+    status.value = 'error'
+    errorMessage.value = error instanceof Error ? error.message : t('common.unknownError')
   } finally {
-    loadingModels.value = false
+    if (request === modelsRequest) loadingModels.value = false
   }
 }
 
@@ -842,6 +832,7 @@ const startTest = async () => {
   abortStream()
 
   abortController = new AbortController()
+  const controller = abortController
 
   try {
     const requestBody: {
@@ -875,6 +866,11 @@ const startTest = async () => {
       if (uploadAudioDataURL.value && grokTestMode.value === 'stt') {
         requestBody.audio_data_url = uploadAudioDataURL.value
       }
+    }
+
+    if (props.apiScope === 'shared-pool') {
+      await testSharedAccount(props.account.id, handleEvent, controller.signal, requestBody)
+      return
     }
 
     // Use the configured API base; EventSource does not support POST.
@@ -927,7 +923,7 @@ const startTest = async () => {
       }
     }
   } catch (error: unknown) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       status.value = 'idle'
       return
     }
@@ -935,6 +931,8 @@ const startTest = async () => {
     const msg = error instanceof Error ? error.message : t('common.unknownError')
     errorMessage.value = msg
     addLine(t('admin.accounts.errorPrefix', { message: msg }), 'text-red-400')
+  } finally {
+    if (!controller.signal.aborted) emit('completed')
   }
 }
 
@@ -1051,6 +1049,26 @@ const copyOutput = () => {
   const text = outputLines.value.map((l) => l.text).join('\n')
   copyToClipboard(text, t('admin.accounts.outputCopied'))
 }
+
+watch(
+  () => [props.show, props.account?.id, props.apiScope] as const,
+  async ([show]) => {
+    abortStream()
+    modelsRequest++
+    if (!show || !props.account) return
+    testPrompt.value = ''
+    testMode.value = 'default'
+    grokTestMode.value = 'text'
+    resetState()
+    await loadAvailableModels()
+    if (isGrokAccount.value) {
+      pickDefaultModelForMode()
+      applyDefaultPromptForMode()
+    }
+  },
+  { immediate: true }
+)
+onBeforeUnmount(() => { abortStream(); modelsRequest++ })
 </script>
 
 <style>

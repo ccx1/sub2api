@@ -157,8 +157,8 @@
                     </div>
                   </div>
                 </Teleport>
-              </div>
-            </template>
+            </div>
+          </template>
           </AccountTableActions>
         </div>
         <div
@@ -242,6 +242,7 @@
                 </template>
               </HelpTooltip>
               <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span v-if="row.extra?.shared_pool_owner_id" class="text-xs text-cyan-600 dark:text-cyan-400">{{ t('sharedPool.sharedBadge') }} · {{ t('sharedPool.owner') }} #{{ row.extra.shared_pool_owner_id }}</span>
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -347,9 +348,9 @@
             />
           </template>
           <template #cell-proxy="{ row }">
-            <div v-if="row.extra?.proxy_mode === 'random'" class="flex min-w-40 max-w-64 flex-col gap-1 text-xs">
-              <span class="font-medium text-cyan-700 dark:text-cyan-300">{{ t('admin.accounts.randomProxy') }}</span>
-              <span class="text-gray-500">{{ row.extra.random_proxy_pool_scope === 'selected' ? t('admin.accounts.randomProxyPoolSelectedCount', { count: normalizeRandomProxyPoolIds(row.extra.random_proxy_pool_ids).length }) : t('admin.accounts.randomProxyPoolAll') }}</span>
+            <div v-if="row.extra?.proxy_mode === 'random'" data-testid="account-random-proxy" class="flex min-w-40 max-w-64 flex-col gap-1 text-xs">
+              <span class="font-medium text-cyan-700 dark:text-cyan-300">{{ t(row.extra.random_proxy_pool_scope === 'group' ? 'accountProxyGroups.listScope' : 'admin.accounts.randomProxy') }}</span>
+              <span class="break-words text-gray-500">{{ randomProxyScopeLabel(row) }}</span>
               <template v-if="row.extra.random_proxy_last_used">
                 <span class="text-gray-500">{{ t('admin.accounts.randomProxyLastUsed') }}</span>
                 <span v-if="row.extra.random_proxy_last_used.proxy_id === null" class="text-gray-700 dark:text-gray-300">{{ t('admin.accounts.randomProxyLastDirect') }}</span>
@@ -369,6 +370,7 @@
                 </span>
               </div>
               <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+              <span v-if="row.proxy && fixedProxyGroupName(row.proxy)" class="break-words text-xs text-gray-500">{{ fixedProxyGroupName(row.proxy) }}</span>
               <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
                 <span class="text-gray-600 dark:text-gray-300">{{ formatDateTime(row.proxy.expires_at) }}</span>
                 <span :class="proxyExpiryBadge(row.proxy)">{{ proxyExpiryText(row.proxy) }}</span>
@@ -379,6 +381,27 @@
                 </span>
                 <button class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
               </div>
+            </div>
+            <div v-if="codexTicketProxyForAccount(row)" data-testid="account-ticket-proxy" class="mt-2 flex min-w-40 max-w-64 flex-col gap-1 border-t border-gray-200 pt-2 text-xs dark:border-dark-700">
+              <span class="font-medium text-violet-700 dark:text-violet-300">{{ t('admin.accounts.codexTicketProxy.title') }}</span>
+              <template v-if="codexTicketProxyForAccount(row)?.selection.mode === 'fixed'">
+                <template v-if="codexTicketProxyForAccount(row)?.proxy">
+                  <span class="break-words text-gray-700 dark:text-gray-300">{{ codexTicketProxyForAccount(row)?.proxy?.name }}</span>
+                  <span class="break-all font-mono text-gray-500">{{ codexTicketProxyAddress(codexTicketProxyForAccount(row)!.proxy!) }}</span>
+                </template>
+                <span v-else-if="proxyDirectoryState === 'loaded'" class="text-amber-600 dark:text-amber-400">
+                  {{ t('admin.accounts.codexTicketProxy.listUnavailable') }} (ID: {{ codexTicketProxyForAccount(row)?.selection.proxyId }})
+                </span>
+                <span v-else-if="proxyDirectoryState === 'error'" class="text-amber-600 dark:text-amber-400">
+                  {{ t('admin.proxies.failedToLoad') }}
+                </span>
+                <span v-else class="text-gray-500 dark:text-gray-400">
+                  {{ t('common.loading') }}
+                </span>
+              </template>
+              <span v-else class="text-gray-700 dark:text-gray-300">
+                {{ t(`admin.accounts.codexTicketProxy.${codexTicketProxyForAccount(row)?.selection.mode}`) }}
+              </span>
             </div>
           </template>
           <template #cell-rate_multiplier="{ row }">
@@ -489,8 +512,9 @@
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
+    <CodexTicketHistoryModal :show="showCodexTicketHistory" :account="codexTicketHistoryAcc" @close="closeCodexTicketHistory" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="codexTicketGlobalEnabled && !!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -546,6 +570,7 @@ import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
+import CodexTicketHistoryModal from '@/components/account/CodexTicketHistoryModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
@@ -564,18 +589,77 @@ import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
-import { normalizeRandomProxyPoolIds, randomProxyAddress } from '@/utils/randomProxy'
+import { normalizeRandomProxyPoolIds, normalizeRandomProxyGroupId, randomProxyAddress } from '@/utils/randomProxy'
+import { readCodexTicketProxy, type CodexTicketProxySelection } from '@/utils/codexTicketProxy'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
-import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, ProxyGroup, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
 const proxies = ref<AccountProxy[]>([])
+const proxyGroups = ref<ProxyGroup[]>([])
+const proxyGroupsState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+async function loadProxyGroups() {
+  if (proxyGroupsState.value === 'loading') return
+  proxyGroupsState.value = 'loading'
+  try {
+    proxyGroups.value = await adminAPI.proxies.listGroups()
+    proxyGroupsState.value = 'loaded'
+  } catch {
+    proxyGroupsState.value = 'error'
+  }
+}
+
+function randomProxyScopeLabel(account: Pick<AccountListItem, 'extra'>): string {
+  const extra = account.extra
+  if (extra?.random_proxy_pool_scope === 'selected') {
+    return t('admin.accounts.randomProxyPoolSelectedCount', { count: normalizeRandomProxyPoolIds(extra.random_proxy_pool_ids).length })
+  }
+  if (extra?.random_proxy_pool_scope !== 'group') return t('admin.accounts.randomProxyPoolAll')
+  const id = normalizeRandomProxyGroupId(extra.random_proxy_group_id)
+  if (!id) return t('accountProxyGroups.required')
+  if (proxyGroupsState.value === 'error') return t('accountProxyGroups.listLoadFailed', { id })
+  if (proxyGroupsState.value !== 'loaded') return t('accountProxyGroups.listLoading', { id })
+  return proxyGroups.value.find(group => group.id === id)?.name || t('accountProxyGroups.unavailableId', { id })
+}
+
+function fixedProxyGroupName(proxy: AccountProxy): string {
+  if (proxy.group_name) return proxy.group_name
+  const directoryProxy = proxies.value.find(item => item.id === proxy.id)
+  if (directoryProxy?.group_name) return directoryProxy.group_name
+  const groupId = proxy.group_id ?? directoryProxy?.group_id
+  return proxyGroups.value.find(group => group.id === groupId)?.name || ''
+}
+
+const proxyDirectoryState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+let proxyDirectoryRequest: Promise<void> | null = null
+
+const loadProxyDirectory = (force = false): Promise<void> => {
+  if (proxyDirectoryRequest) return proxyDirectoryRequest
+  if (!force && proxyDirectoryState.value === 'loaded') return Promise.resolve()
+
+  proxyDirectoryState.value = 'loading'
+  let request: Promise<void>
+  request = adminAPI.proxies.getAll()
+    .then(result => {
+      proxies.value = result
+      proxyDirectoryState.value = 'loaded'
+    })
+    .catch(error => {
+      proxyDirectoryState.value = 'error'
+      console.error('Failed to load proxies:', error)
+    })
+    .finally(() => {
+      if (proxyDirectoryRequest === request) proxyDirectoryRequest = null
+    })
+  proxyDirectoryRequest = request
+  return request
+}
 const groups = ref<AdminGroup[]>([])
 const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
 const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): AdminGroup[] => {
@@ -631,6 +715,10 @@ const showImportData = ref(false)
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
+watch([showCreate, showEdit, showBulkEdit], async (opened) => {
+  if (!opened.some(Boolean)) return
+  await loadProxyDirectory(true)
+})
 const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
@@ -638,6 +726,7 @@ const showCreateShadowDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
 const showStats = ref(false)
+const showCodexTicketHistory = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
 const edAcc = ref<Account | null>(null)
@@ -647,6 +736,7 @@ const creatingShadowAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
+const codexTicketHistoryAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
@@ -818,6 +908,20 @@ const isCodexTicketToggleVisible = (account: AccountListItem): boolean =>
 
 const isCodexTicketEnabled = (account: Pick<AccountListItem, 'codex_ticket_enabled'>): boolean =>
   account.codex_ticket_enabled !== false
+
+type AccountWithCodexTicketProxy = Pick<AccountListItem, 'platform' | 'type' | 'parent_account_id' | 'codex_ticket_enabled' | 'extra'>
+
+const codexTicketProxyForAccount = (account: AccountWithCodexTicketProxy): { selection: CodexTicketProxySelection; proxy?: AccountProxy } | null => {
+  if (!isCodexTicketAccount(account) || !isCodexTicketEnabled(account)) return null
+  const selection = readCodexTicketProxy(account.extra)
+  const proxy = selection.mode === 'fixed' && selection.proxyId
+    ? proxies.value.find(item => item.id === selection.proxyId)
+    : undefined
+  return { selection, proxy }
+}
+
+const codexTicketProxyAddress = (proxy: AccountProxy): string =>
+  `${proxy.protocol}://${randomProxyAddress(proxy)}`
 
 const flushQueuedUsageBatch = async () => {
   usageBatchFlushTimer = null
@@ -1132,6 +1236,7 @@ const {
 } = useTableLoader<AccountListItem, any>({
   fetchFn: adminAPI.accounts.list,
   initialParams: {
+    shared: 'all',
     platform: '',
     type: '',
     status: '',
@@ -1229,6 +1334,7 @@ const reload = async () => {
 const buildUpstreamBillingRateFilters = () => {
   const rawParams = toRaw(params) as Record<string, unknown>
   return {
+    shared: typeof rawParams.shared === 'string' ? rawParams.shared : 'all',
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
     status: typeof rawParams.status === 'string' ? rawParams.status : '',
@@ -1420,6 +1526,7 @@ const isAnyModalOpen = computed(() => {
     showReAuth.value ||
     showTest.value ||
     showStats.value ||
+    showCodexTicketHistory.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
     showTLSFingerprintProfiles.value
@@ -1531,7 +1638,12 @@ const refreshAccountsIncrementally = async () => {
 }
 
 const handleManualRefresh = async () => {
-  await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
+  await Promise.all([
+    load(),
+    loadUpstreamBillingProbeGlobalState(),
+    loadProxyGroups(),
+    loadProxyDirectory()
+  ])
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
 }
@@ -2109,6 +2221,7 @@ const buildBulkEditFilterSnapshot = () => {
   const rawParams = toRaw(params) as Record<string, unknown>
   const sortOrder: AccountSortOrder = rawParams.sort_order === 'desc' ? 'desc' : 'asc'
   return {
+    shared: typeof rawParams.shared === 'string' ? rawParams.shared : 'all',
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
     type: typeof rawParams.type === 'string' ? rawParams.type : '',
     status: typeof rawParams.status === 'string' ? rawParams.status : '',
@@ -2186,6 +2299,7 @@ const handleDataImported = () => { showImportData.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
+  shared: params.shared || 'all',
   platform: params.platform || '',
   type: params.type || '',
   status: params.status || '',
@@ -2197,6 +2311,8 @@ const buildAccountQueryFilters = () => ({
 })
 const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
+  if (filters.shared === 'shared' && !account.extra?.shared_pool_owner_id) return false
+  if (filters.shared === 'platform' && account.extra?.shared_pool_owner_id) return false
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
   if (filters.status) {
@@ -2382,6 +2498,15 @@ const handleViewStats = async (a: AccountListItem) => {
   if (!account) return
   statsAcc.value = account
   showStats.value = true
+}
+const closeCodexTicketHistory = () => {
+  showCodexTicketHistory.value = false
+  codexTicketHistoryAcc.value = null
+}
+const handleViewCodexTicketHistory = (account: AccountListItem) => {
+  if (!codexTicketGlobalEnabled.value || !isCodexTicketAccount(account) || !isCodexTicketEnabled(account)) return
+  codexTicketHistoryAcc.value = { id: account.id, name: account.name }
+  showCodexTicketHistory.value = true
 }
 const handleSchedule = async (a: Account) => {
   scheduleAcc.value = a
@@ -2610,15 +2735,11 @@ onMounted(async () => {
 
   load()
   loadUpstreamBillingProbeGlobalState()
-  const [proxiesResult, groupsResult] = await Promise.allSettled([
-    adminAPI.proxies.getAll(),
+  void loadProxyGroups()
+  const [, groupsResult] = await Promise.allSettled([
+    loadProxyDirectory(),
     adminAPI.groups.getAll()
   ])
-  if (proxiesResult.status === 'fulfilled') {
-    proxies.value = proxiesResult.value
-  } else {
-    console.error('Failed to load proxies:', proxiesResult.reason)
-  }
   if (groupsResult.status === 'fulfilled') {
     groups.value = groupsResult.value
   } else {

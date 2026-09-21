@@ -74,7 +74,7 @@ func TestProxyPoolAllocatorHealthyBindingPrecedesIdleOrBetterProxy(t *testing.T)
 	require.Equal(t, first.ID, second.ID)
 }
 
-func TestProxyPoolAllocatorRotatesAtConfiguredPeriod(t *testing.T) {
+func TestProxyPoolAllocatorHealthyBindingIgnoresConfiguredPeriod(t *testing.T) {
 	a, server := newProxyPoolAllocatorTest(t, 1, poolCandidate(1), poolCandidate(2))
 	ctx := context.Background()
 	now := time.Date(2026, 9, 19, 8, 0, 0, 0, time.UTC)
@@ -89,8 +89,8 @@ func TestProxyPoolAllocatorRotatesAtConfiguredPeriod(t *testing.T) {
 	server.SetTime(now.Add(time.Hour))
 	third, err := a.Select(ctx, selection)
 	require.NoError(t, err)
-	require.NotEqual(t, first.ID, third.ID)
-	require.EqualValues(t, 0, a.rdb.ZCard(ctx, proxyPoolLeaseKey(strconv.FormatInt(first.ID, 10))).Val())
+	require.Equal(t, first.ID, third.ID)
+	require.EqualValues(t, 1, a.rdb.ZCard(ctx, proxyPoolLeaseKey(strconv.FormatInt(first.ID, 10))).Val())
 	fourth, err := a.Select(ctx, selection)
 	require.NoError(t, err)
 	require.Equal(t, third.ID, fourth.ID)

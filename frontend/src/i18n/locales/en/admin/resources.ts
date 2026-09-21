@@ -325,6 +325,7 @@ export default {
         invitation: 'Invitation',
         // Admin adjustment types (created when admin modifies user balance/concurrency)
         admin_balance: 'Balance (Admin)',
+        shared_pool_transfer: 'Shared earnings transfer',
         admin_concurrency: 'Concurrency (Admin)'
       },
       selectGroup: 'Select Group',

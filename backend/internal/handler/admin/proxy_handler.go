@@ -27,6 +27,7 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 
 // CreateProxyRequest represents create proxy request
 type CreateProxyRequest struct {
+	GroupID        *int64 `json:"group_id" binding:"omitempty,gt=0"`
 	Name           string `json:"name" binding:"required"`
 	Protocol       string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
 	Host           string `json:"host" binding:"required"`
@@ -41,6 +42,7 @@ type CreateProxyRequest struct {
 
 // UpdateProxyRequest represents update proxy request
 type UpdateProxyRequest struct {
+	GroupID        dto.NullableInt64Field `json:"group_id"`
 	Name           string                 `json:"name"`
 	Protocol       string                 `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
 	Host           string                 `json:"host"`
@@ -57,6 +59,10 @@ type UpdateProxyRequest struct {
 // List handles listing all proxies with pagination
 // GET /api/v1/admin/proxies
 func (h *ProxyHandler) List(c *gin.Context) {
+	ctx, ok := proxyGroupFilterContext(c)
+	if !ok {
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 	protocol := c.Query("protocol")
 	status := c.Query("status")
@@ -69,7 +75,7 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		search = search[:100]
 	}
 
-	proxies, total, err := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
+	proxies, total, err := h.adminService.ListProxiesWithAccountCount(ctx, page, pageSize, protocol, status, search, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -86,10 +92,14 @@ func (h *ProxyHandler) List(c *gin.Context) {
 // GET /api/v1/admin/proxies/all
 // Optional query param: with_count=true to include account count per proxy
 func (h *ProxyHandler) GetAll(c *gin.Context) {
+	ctx, ok := proxyGroupFilterContext(c)
+	if !ok {
+		return
+	}
 	withCount := c.Query("with_count") == "true"
 
 	if withCount {
-		proxies, err := h.adminService.GetAllProxiesWithAccountCount(c.Request.Context())
+		proxies, err := h.adminService.GetAllProxiesWithAccountCount(ctx)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -102,7 +112,7 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	proxies, err := h.adminService.GetAllProxies(c.Request.Context())
+	proxies, err := h.adminService.GetAllProxies(ctx)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -149,6 +159,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 			expiresAt = &t
 		}
 		proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
+			GroupID:        req.GroupID,
 			Name:           strings.TrimSpace(req.Name),
 			Protocol:       strings.TrimSpace(req.Protocol),
 			Host:           strings.TrimSpace(req.Host),
@@ -194,6 +205,8 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		*req.Password = strings.TrimSpace(*req.Password)
 	}
 	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
+		GroupID:        req.GroupID.Value,
+		ClearGroupID:   req.GroupID.Set && req.GroupID.Value == nil,
 		Name:           strings.TrimSpace(req.Name),
 		Protocol:       strings.TrimSpace(req.Protocol),
 		Host:           strings.TrimSpace(req.Host),

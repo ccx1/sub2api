@@ -87,6 +87,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	promptCacheKey string,
 	routingModel string,
 	routingServiceTier string,
+	ticketReceiptOut ...**openAICodexTicketWSReceipt,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
 	headers := make(http.Header)
 	if account == nil || !account.IsOpenAIAgentIdentity() {
@@ -141,7 +142,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if state := strings.TrimSpace(turnState); state != "" {
 		headers.Set(openAIWSTurnStateHeader, state)
 	}
-	if err := s.applyOpenAICodexTicket(ctx, account, routingModel, headers); err != nil {
+	ticketSnapshot, err := s.applyOpenAICodexTicketSnapshot(ctx, account, routingModel, headers)
+	if err != nil {
 		return nil, sessionResolution, err
 	}
 	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
@@ -197,6 +199,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		"soft_routing_hint",
 	)
 
+	if len(ticketReceiptOut) > 0 && ticketReceiptOut[0] != nil {
+		*ticketReceiptOut[0] = codexTicketWSReceiptFromSnapshot(ticketSnapshot)
+	}
 	return headers, sessionResolution, nil
 }
 

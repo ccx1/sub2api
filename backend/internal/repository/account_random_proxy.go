@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	entsql "entgo.io/ent/dialect/sql"
@@ -11,8 +12,22 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
+func (r *accountRepository) ReportRandomProxySuccess(ctx context.Context, accountID, proxyID int64) error {
+	return r.proxyPool.ReportSuccess(ctx, accountID, proxyID)
+}
+
 func (r *accountRepository) SelectRandomActiveProxyFromPool(ctx context.Context, ids []int64) (*service.Proxy, error) {
 	return r.selectRandomActiveProxy(ctx, ids, true)
+}
+
+func (r *accountRepository) GetRandomProxyGroupIDs(ctx context.Context, groupID int64) ([]int64, error) {
+	if groupID <= 0 {
+		return nil, nil
+	}
+	if r == nil || r.client == nil {
+		return nil, errors.New("proxy group database unavailable")
+	}
+	return r.client.Proxy.Query().Where(dbproxy.GroupIDEQ(groupID), dbproxy.DeletedAtIsNil(), excludePrivateSharedProxies).IDs(ctx)
 }
 
 func (r *accountRepository) selectRandomActiveProxy(ctx context.Context, ids []int64, restricted bool) (*service.Proxy, error) {
@@ -21,6 +36,7 @@ func (r *accountRepository) selectRandomActiveProxy(ctx context.Context, ids []i
 	}
 	now := time.Now()
 	query := r.client.Proxy.Query().Where(
+		excludePrivateSharedProxies,
 		dbproxy.StatusEQ(service.StatusActive), dbproxy.DeletedAtIsNil(),
 		dbproxy.Or(dbproxy.ExpiresAtIsNil(), dbproxy.ExpiresAtGT(now)),
 	)
@@ -66,9 +82,13 @@ func (r *accountRepository) DisableRandomProxyAccountIfUnavailable(ctx context.C
  AND lower(btrim(a.extra->>'random_proxy_empty_pool_policy'))='disable'
  AND NOT EXISTS (
   SELECT 1 FROM proxies p WHERE p.deleted_at IS NULL AND p.status='active'
+  AND NOT EXISTS (SELECT 1 FROM shared_pool_proxies sp WHERE sp.proxy_id=p.id)
   AND (p.expires_at IS NULL OR p.expires_at>NOW())
-  AND (lower(btrim(COALESCE(a.extra->>'random_proxy_pool_scope','all'))) <> 'selected'
-       OR a.extra->'random_proxy_pool_ids' @> jsonb_build_array(p.id))
+  AND (lower(btrim(COALESCE(a.extra->>'random_proxy_pool_scope','all'))) NOT IN ('selected','group')
+       OR (lower(btrim(a.extra->>'random_proxy_pool_scope'))='selected'
+           AND a.extra->'random_proxy_pool_ids' @> jsonb_build_array(p.id))
+       OR (lower(btrim(a.extra->>'random_proxy_pool_scope'))='group'
+           AND p.group_id::text=a.extra->>'random_proxy_group_id'))
  ) RETURNING a.id
 )
 INSERT INTO scheduler_outbox (event_type,account_id,payload)

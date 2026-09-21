@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { defineComponent, nextTick } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -26,6 +26,7 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    proxies: { listGroups: vi.fn().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }]) },
     accounts: {
       update: updateAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
@@ -55,6 +56,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import CodexTicketProxySettings from '../CodexTicketProxySettings.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -324,11 +326,109 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it.each([
+    { proxyId: 7, extra: {} },
+    { proxyId: null, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'all' } },
+    { proxyId: null, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7] } },
+    { proxyId: null, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7 } }
+  ])('explicitly follows account outbound settings without a second selection: $extra.random_proxy_pool_scope', async ({ proxyId, extra }) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.proxy_id = proxyId
+    account.extra = extra
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.getComponent(CodexTicketProxySettings).props('modelValue').mode).toBe('inherit')
+    await wrapper.get('[data-testid="codex-ticket-proxy-account"]').setValue(true)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      proxy_id: proxyId ?? 0,
+      extra: expect.objectContaining({ ...extra, codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0 })
+    }))
+    wrapper.unmount()
+  })
+
+  it('saves the ticket proxy separately and preserves outbound random proxy settings', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { custom_flag: 'keep', proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [2] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ proxies: [{ id: 7, name: 'Ticket', protocol: 'http', host: 'ticket.example', port: 8080, status: 'active' }] as any })
+    wrapper.getComponent(CodexTicketProxySettings).vm.$emit('update:modelValue', { mode: 'fixed', proxyId: 7 })
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      proxy_id: 0,
+      extra: expect.objectContaining({ custom_flag: 'keep', proxy_mode: 'random', random_proxy_pool_ids: [2], codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 7 })
+    }))
+    wrapper.unmount()
+  })
+
+  it('blocks an unavailable saved ticket proxy and allows explicit global inheritance', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.proxy_id = 2
+    account.extra = { codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 99 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.getComponent(CodexTicketProxySettings).props('modelValue')).toEqual({ mode: 'fixed', proxyId: 99 })
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="codex-ticket-proxy-inherit"]').setValue(true)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      proxy_id: 2, extra: expect.objectContaining({ codex_ticket_proxy_mode: 'inherit', codex_ticket_proxy_id: 0 })
+    }))
+    wrapper.unmount()
+  })
+
+  it('hides account ticket overrides for API keys and shadow accounts', () => {
+    for (const account of [buildAccount(), buildOpenAISparkShadowAccount()]) {
+      const wrapper = mountModal(account)
+      expect(wrapper.findComponent(CodexTicketProxySettings).exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     authIsSimpleMode.value = true
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it.each([
+    { mode: 'legacy', fingerprint: 'session' },
+    { mode: 'mode2', fingerprint: 'full' }
+  ])('routes $mode fingerprint changes through protection management', ({ mode, fingerprint }) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = {
+      anti_degrade: { enabled: true, mode },
+      codex_fingerprint_mode: fingerprint,
+      enable_tls_fingerprint: true
+    }
+    const wrapper = mountModal(account)
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="edit-codex-fingerprint-mode-select"]')
+    expect(select.element.value).toBe(fingerprint)
+    expect(select.element.disabled).toBe(true)
+    expect(wrapper.get('[data-testid="protection-managed-notice"] a').attributes('href'))
+      .toBe('/admin/account-protection?account_id=7')
+    wrapper.unmount()
+  })
+
+  it.each([undefined, 'invalid', { enabled: false, mode: 'mode2' }, { enabled: true, mode: 'generic' }])(
+    'keeps unmanaged fingerprint settings editable', (marker) => {
+      const account = buildOpenAIOAuthParentAccount()
+      account.extra = { anti_degrade: marker, codex_fingerprint_mode: 'off' }
+      const wrapper = mountModal(account)
+      expect(wrapper.get<HTMLSelectElement>('[data-testid="edit-codex-fingerprint-mode-select"]').element.disabled).toBe(false)
+      expect(wrapper.find('[data-testid="protection-managed-notice"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  )
 
   it('loads and disables daily cooldown without losing unrelated extra or proxy reuse', async () => {
     const account = buildAccount()
@@ -339,10 +439,10 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
-    expect(wrapper.get('[data-testid="daily-cooldown-start"]').element).toHaveProperty('value', '22:15')
+    expect(wrapper.getComponent('[data-testid="daily-cooldown-start"]').props('modelValue')).toBe('22:15')
     expect(wrapper.get('[data-testid="daily-cooldown-timezone"]').element).toHaveProperty('value', 'UTC')
-    expect(wrapper.get('[data-testid="random-proxy-reuse-minutes"]').element).toHaveProperty('value', '120')
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(false)
+    expect(wrapper.find('[data-testid="random-proxy-reuse-minutes"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
       custom_flag: 'keep', proxy_mode: 'random', random_proxy_max_reuse_minutes: 120,
@@ -356,7 +456,7 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
-    expect(wrapper.get<HTMLInputElement>('[data-testid="daily-cooldown-enabled"]').element.checked).toBe(false)
+    expect(wrapper.get('[data-testid="daily-cooldown-enabled"]').attributes('aria-checked')).toBe('false')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('daily_cooldown')
     wrapper.unmount()
@@ -368,24 +468,14 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
-    await wrapper.get('[data-testid="daily-cooldown-end"]').setValue('23:00')
+    wrapper.getComponent('[data-testid="daily-cooldown-end"]').vm.$emit('update:modelValue', '23:00')
+    await nextTick()
     await wrapper.get('[data-testid="daily-cooldown-timezone"]').setValue('Invalid/Zone')
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(false)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra.daily_cooldown).toEqual({ enabled: false })
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra.custom_flag).toBe('keep')
-    wrapper.unmount()
-  })
-
-  it('rejects invalid proxy rotation minutes before updating an account', async () => {
-    const account = buildAccount()
-    account.extra = { proxy_mode: 'random' }
-    updateAccountMock.mockReset()
-    const wrapper = mountModal(account)
-    await wrapper.get('[data-testid="random-proxy-reuse-minutes"]').setValue(-1)
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -411,6 +501,63 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('initializes group random mode and removes the stale group when switching to global', async () => {
+    const account = buildAccount()
+    account.extra = { custom_flag: 'keep', proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="random-proxy-group"]').element).toHaveProperty('value', '7')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      custom_flag: 'keep', random_proxy_pool_scope: 'group', random_proxy_group_id: 7
+    })
+    await wrapper.get('[data-testid="random-proxy-scope"]').setValue('all')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.extra).toMatchObject({
+      custom_flag: 'keep', random_proxy_pool_scope: 'all', random_proxy_group_id: null
+    })
+    wrapper.unmount()
+  })
+
+  it('blocks a deleted group and clears its settings when random mode is disabled', async () => {
+    const account = buildAccount()
+    account.extra = { custom_flag: 'keep', proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 99 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ custom_flag: 'keep', proxy_mode: '' })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('random_proxy_group_id')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('random_proxy_pool_scope')
+    wrapper.unmount()
+  })
+
+  it.each([null, 7])('explicitly disables existing group random mode when choosing fixed proxy %s', async proxyId => {
+    const account = buildAccount()
+    account.extra = { custom_flag: 'keep', proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(false)
+    wrapper.findComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', proxyId)
+    await nextTick()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload.proxy_id).toBe(proxyId ?? 0)
+    expect(payload.extra).toMatchObject({ custom_flag: 'keep', proxy_mode: '' })
+    expect(payload.extra).not.toHaveProperty('random_proxy_group_id')
+    expect(payload.extra).not.toHaveProperty('random_proxy_pool_scope')
     wrapper.unmount()
   })
 

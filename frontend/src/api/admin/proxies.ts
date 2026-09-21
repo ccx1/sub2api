@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   Proxy,
+  ProxyGroup,
   ProxyAccountSummary,
   ProxyQualityCheckResult,
   CreateProxyRequest,
@@ -33,6 +34,7 @@ export async function list(
   pageSize: number = 20,
   filters?: {
     protocol?: string
+    group_id?: number
     status?: 'active' | 'inactive' | 'expired'
     search?: string
     sort_by?: string
@@ -55,13 +57,11 @@ export async function list(
 }
 
 /**
- * Get all active proxies (without pagination)
+ * Get all active proxies with account counts (without pagination)
  * @returns List of all active proxies
  */
 export async function getAll(): Promise<Proxy[]> {
-  const { data } = await apiClient.get<Proxy[]>('/admin/proxies/all')
-  assertProxyArray(data)
-  return data
+  return getAllWithCount()
 }
 
 /**
@@ -236,6 +236,7 @@ export async function exportData(options?: {
   ids?: number[]
   filters?: {
     protocol?: string
+    group_id?: number
     status?: 'active' | 'inactive' | 'expired'
     search?: string
     sort_by?: string
@@ -246,7 +247,8 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { protocol, status, search, sort_by, sort_order } = options.filters
+    const { protocol, group_id, status, search, sort_by, sort_order } = options.filters
+    if (group_id !== undefined) params.group_id = String(group_id)
     if (protocol) params.protocol = protocol
     if (status) params.status = status
     if (search) params.search = search
@@ -264,7 +266,39 @@ export async function importData(payload: {
   return data
 }
 
+export async function listGroups(): Promise<ProxyGroup[]> {
+  const { data } = await apiClient.get<ProxyGroup[]>('/admin/proxy-groups')
+  if (!Array.isArray(data)) throw new Error('Invalid proxy group list response')
+  return data
+}
+
+export async function createGroup(name: string): Promise<ProxyGroup> {
+  const { data } = await apiClient.post<ProxyGroup>('/admin/proxy-groups', { name })
+  return data
+}
+
+export async function updateGroup(id: number, name: string): Promise<ProxyGroup> {
+  const { data } = await apiClient.put<ProxyGroup>(`/admin/proxy-groups/${id}`, { name })
+  return data
+}
+
+export async function deleteGroup(id: number): Promise<void> {
+  await apiClient.delete(`/admin/proxy-groups/${id}`)
+}
+
+export async function batchSetGroup(ids: number[], groupId: number | null): Promise<{ updated_count: number }> {
+  const { data } = await apiClient.post<{ updated_count: number }>('/admin/proxies/batch-group', {
+    ids, group_id: groupId
+  })
+  return data
+}
+
 export const proxiesAPI = {
+  listGroups,
+  createGroup,
+  updateGroup,
+  deleteGroup,
+  batchSetGroup,
   list,
   getAll,
   getAllWithCount,

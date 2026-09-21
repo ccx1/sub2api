@@ -822,6 +822,7 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	NewSharedPoolService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -957,8 +958,8 @@ var ProviderSet = wire.NewSet(
 
 // ProvideAntiDegradeService wires account protection with the administrator
 // service, runtime configuration, and plugin registry.
-func ProvideAntiDegradeService(admin AdminService, cfg *config.Config, plugins *PluginManager) *AntiDegradeService {
-	svc := NewAntiDegradeService(admin)
+func ProvideAntiDegradeService(admin AdminService, cfg *config.Config, plugins *PluginManager, settings SettingRepository, accounts AccountRepository) *AntiDegradeService {
+	svc := NewAntiDegradeServiceWithSettings(admin, settings, accounts)
 	svc.cfg, svc.pluginManager = cfg, plugins
 	return svc
 }

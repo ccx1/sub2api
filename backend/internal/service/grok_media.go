@@ -653,6 +653,9 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	contentType string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	if err := validateSharedPoolMediaBilling(account, endpoint); err != nil {
+		return nil, err
+	}
 	if account == nil {
 		return nil, fmt.Errorf("grok account is required")
 	}

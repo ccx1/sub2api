@@ -15,6 +15,9 @@ const accountProtectionEnabledSQL = "COALESCE(extra -> 'anti_degradation' = 'tru
 // An atomic expression preserves the committed state even when partial updates
 // come from imports or asynchronous credential refreshes with stale snapshots.
 func preserveProtectionExtraSQL(ctx context.Context, expression string) string {
+	expression = preserveCodexTicketProxyExtraSQL(expression)
+	sharedKeys := "ARRAY['shared_pool_owner_id','shared_pool_enabled','shared_pool_admin_disabled','shared_pool_dispatch_consent','shared_pool_settlement_multiplier','shared_pool_subscription_tier']::text[]"
+	expression = "((" + expression + ") - " + sharedKeys + ") || COALESCE((SELECT jsonb_object_agg(key,value) FROM jsonb_each(COALESCE(extra,'{}'::jsonb)) WHERE key = ANY(" + sharedKeys + ")), '{}'::jsonb)"
 	expression = "((" + expression + ") - 'random_proxy_last_used') || CASE WHEN extra ? 'random_proxy_last_used' THEN jsonb_build_object('random_proxy_last_used', extra -> 'random_proxy_last_used') ELSE '{}'::jsonb END"
 	if service.ProtectionManagedWrite(ctx) {
 		return expression
@@ -72,6 +75,18 @@ func preserveLockedAccountProtection(ctx context.Context, client *dbent.Client, 
 	}
 	current := &service.Account{Platform: a.Platform, Type: a.Type, Extra: extra}
 	a.Extra = service.PreserveAccountProtection(ctx, current, a.Extra)
+	// 整对象同步可能携带旧快照；只有管理员明确提交的字段可以覆盖当前配置。
+	writeMode, writeID := service.CodexTicketProxyWriteFields(ctx)
+	if !writeMode {
+		delete(a.Extra, service.CodexTicketProxyModeExtraKey)
+	}
+	if !writeID {
+		delete(a.Extra, service.CodexTicketProxyIDExtraKey)
+	}
+	a.Extra = service.MergeOpenAICodexTicketExtra(a.Extra, extra)
+	if err := service.ValidateCodexTicketProxyExtra(a.Extra); err != nil {
+		return err
+	}
 	service.BoundAccountProtectionConcurrency(a)
 	if err := service.ValidateAccountProtectionConfiguration(a); err != nil {
 		return err

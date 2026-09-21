@@ -367,6 +367,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
+		account = selection.Account
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
@@ -451,6 +452,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					zap.Int("max_switches", maxAccountSwitches),
 				)
 				continue
+			}
+			if errors.Is(err, service.ErrSharedPoolAsyncMediaUnsupported) {
+				h.errorResponse(c, http.StatusBadRequest, "unsupported_shared_pool_media", "共享池暂不支持异步视频任务")
+				return
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, grokMediaScheduleModel(account, routingModel, nil), false, nil)
 			if !service.IsResponseCommitted(c) && c.Writer.Size() == writerSizeBeforeForward {

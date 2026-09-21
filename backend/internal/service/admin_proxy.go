@@ -56,6 +56,9 @@ func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
+	if err := s.validateProxyGroup(ctx, input.GroupID); err != nil {
+		return nil, err
+	}
 	if !isJSONTimeInRange(input.ExpiresAt) {
 		return nil, infraerrors.BadRequest("PROXY_EXPIRY_INVALID", "proxy expiry year must be between 0 and 9999")
 	}
@@ -73,6 +76,7 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	}
 
 	proxy := &Proxy{
+		GroupID:        input.GroupID,
 		Name:           input.Name,
 		Protocol:       input.Protocol,
 		Host:           input.Host,
@@ -94,6 +98,9 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 }
 
 func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *UpdateProxyInput) (*Proxy, error) {
+	if err := s.validateProxyGroup(ctx, input.GroupID); err != nil {
+		return nil, err
+	}
 	if !isJSONTimeInRange(input.ExpiresAt) {
 		return nil, infraerrors.BadRequest("PROXY_EXPIRY_INVALID", "proxy expiry year must be between 0 and 9999")
 	}
@@ -124,6 +131,11 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 
 	if input.Name != "" {
 		proxy.Name = input.Name
+	}
+	proxy.GroupIDSet = input.GroupID != nil || input.ClearGroupID
+	if proxy.GroupIDSet {
+		proxy.GroupID = input.GroupID
+		proxy.GroupName = ""
 	}
 	if input.Protocol != "" {
 		proxy.Protocol = input.Protocol

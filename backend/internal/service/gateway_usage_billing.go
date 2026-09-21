@@ -287,6 +287,10 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		AccountType:        p.Account.Type,
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
 	}
+	applySharedPoolBillingSnapshot(cmd, p.Account, p.APIKey, usageLog)
+	if cmd.SharedPoolSettlementMultiplier != nil {
+		cmd.SharedPoolBaseCost = p.Cost.TotalCost
+	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
 		cmd.BillingType = usageLog.BillingType
@@ -755,6 +759,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		pricingAt = timezone.Now()
 	}
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, pricingAt)
+	if terms := account.SharedPoolSettlement; terms.Valid() {
+		multiplier, imageMultiplier = terms.ConsumerTokenMultiplier, terms.ConsumerImageMultiplier
+	}
 
 	// 确定计费模型
 	concreteBillingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)

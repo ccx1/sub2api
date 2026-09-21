@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/proxygroup"
 )
 
 // ProxyCreate is the builder for creating a Proxy entity.
@@ -61,6 +62,20 @@ func (_c *ProxyCreate) SetDeletedAt(v time.Time) *ProxyCreate {
 func (_c *ProxyCreate) SetNillableDeletedAt(v *time.Time) *ProxyCreate {
 	if v != nil {
 		_c.SetDeletedAt(*v)
+	}
+	return _c
+}
+
+// SetGroupID sets the "group_id" field.
+func (_c *ProxyCreate) SetGroupID(v int64) *ProxyCreate {
+	_c.mutation.SetGroupID(v)
+	return _c
+}
+
+// SetNillableGroupID sets the "group_id" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableGroupID(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetGroupID(*v)
 	}
 	return _c
 }
@@ -185,6 +200,11 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 		_c.SetExpiryWarnDays(*v)
 	}
 	return _c
+}
+
+// SetGroup sets the "group" edge to the ProxyGroup entity.
+func (_c *ProxyCreate) SetGroup(v *ProxyGroup) *ProxyCreate {
+	return _c.SetGroupID(v.ID)
 }
 
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
@@ -431,6 +451,23 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
 	}
+	if nodes := _c.mutation.GroupIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.GroupTable,
+			Columns: []string{proxy.GroupColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxygroup.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.GroupID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -559,6 +596,24 @@ func (u *ProxyUpsert) UpdateDeletedAt() *ProxyUpsert {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (u *ProxyUpsert) ClearDeletedAt() *ProxyUpsert {
 	u.SetNull(proxy.FieldDeletedAt)
+	return u
+}
+
+// SetGroupID sets the "group_id" field.
+func (u *ProxyUpsert) SetGroupID(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldGroupID, v)
+	return u
+}
+
+// UpdateGroupID sets the "group_id" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateGroupID() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldGroupID)
+	return u
+}
+
+// ClearGroupID clears the value of the "group_id" field.
+func (u *ProxyUpsert) ClearGroupID() *ProxyUpsert {
+	u.SetNull(proxy.FieldGroupID)
 	return u
 }
 
@@ -807,6 +862,27 @@ func (u *ProxyUpsertOne) UpdateDeletedAt() *ProxyUpsertOne {
 func (u *ProxyUpsertOne) ClearDeletedAt() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetGroupID sets the "group_id" field.
+func (u *ProxyUpsertOne) SetGroupID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetGroupID(v)
+	})
+}
+
+// UpdateGroupID sets the "group_id" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateGroupID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateGroupID()
+	})
+}
+
+// ClearGroupID clears the value of the "group_id" field.
+func (u *ProxyUpsertOne) ClearGroupID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearGroupID()
 	})
 }
 
@@ -1249,6 +1325,27 @@ func (u *ProxyUpsertBulk) UpdateDeletedAt() *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) ClearDeletedAt() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.ClearDeletedAt()
+	})
+}
+
+// SetGroupID sets the "group_id" field.
+func (u *ProxyUpsertBulk) SetGroupID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetGroupID(v)
+	})
+}
+
+// UpdateGroupID sets the "group_id" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateGroupID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateGroupID()
+	})
+}
+
+// ClearGroupID clears the value of the "group_id" field.
+func (u *ProxyUpsertBulk) ClearGroupID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearGroupID()
 	})
 }
 

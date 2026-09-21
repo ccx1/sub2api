@@ -9,6 +9,7 @@ const {
   showWarningMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
+  refreshOpenAITokenMock,
   authIsSimpleMode,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
   showWarningMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
+  refreshOpenAITokenMock: vi.fn(),
   authIsSimpleMode: { value: true },
 }))
 
@@ -38,6 +40,7 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    proxies: { listGroups: vi.fn().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }]) },
     accounts: {
       create: createAccountMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
@@ -45,6 +48,7 @@ vi.mock('@/api/admin', () => ({
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }),
       importCodexSession: importCodexSessionMock,
       createOpenAICodexPAT: createOpenAICodexPATMock,
+      refreshOpenAIToken: refreshOpenAITokenMock,
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
@@ -69,6 +73,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import CodexTicketProxySettings from '../CodexTicketProxySettings.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -86,7 +91,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  emits: ['import-codex-session', 'import-codex-pat', 'validate-refresh-token'],
   template: `
     <div>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
@@ -195,6 +200,76 @@ async function openCodexImportStep(toggleClicks = 0) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
+  it('defaults new OAuth accounts to their outbound proxy and retains group selection on import', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get<HTMLInputElement>('[data-testid="codex-ticket-proxy-account"]').element.checked).toBe(true)
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('group')
+    await flushPromises()
+    await settings.get('[data-testid="random-proxy-group"]').setValue('7')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Account proxy tickets')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      proxy_id: null,
+      extra: expect.objectContaining({
+        codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0,
+        proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7
+      })
+    }))
+    wrapper.unmount()
+  })
+
+  it('preserves independent ticket proxy settings on each account in a refresh-token batch', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-ticket-proxy-random"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('RT tickets')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('validate-refresh-token', 'rt-first\nrt-second')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(2)
+    for (const [payload] of createAccountMock.mock.calls) {
+      expect(payload.extra).toEqual(expect.objectContaining({ codex_ticket_proxy_mode: 'random', codex_ticket_proxy_id: 0 }))
+      expect(payload.proxy_id).toBeNull()
+      expect(payload.extra.proxy_mode).toBeUndefined()
+    }
+    wrapper.unmount()
+  })
+
+  it.each(['session', 'pat'])('keeps a fixed ticket proxy separate in Codex %s imports', async (method) => {
+    const wrapper = mountModal()
+    await wrapper.setProps({ proxies: [{ id: 7, name: 'Ticket', protocol: 'http', host: 'ticket.example', port: 8080, status: 'active' }] as any })
+    await selectButtonByText(wrapper, 'OpenAI')
+    wrapper.getComponent(CodexTicketProxySettings).vm.$emit('update:modelValue', { mode: 'fixed', proxyId: 7 })
+    await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Ticket test')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get(`[data-testid="import-codex-${method}"]`).trigger('click')
+    await flushPromises()
+    const mock = method === 'session' ? importCodexSessionMock : createOpenAICodexPATMock
+    expect(mock).toHaveBeenCalledWith(expect.objectContaining({
+      proxy_id: null,
+      extra: expect.objectContaining({ codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 7, proxy_mode: 'random' })
+    }))
+    wrapper.unmount()
+  })
+
+  it('prevents entering OAuth import with an empty fixed ticket proxy', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-ticket-proxy-fixed"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Ticket test')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
+    expect(importCodexSessionMock).not.toHaveBeenCalled()
+    expect(createOpenAICodexPATMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     authIsSimpleMode.value = true
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
@@ -210,6 +285,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       warnings: [],
     })
     createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+    refreshOpenAITokenMock.mockReset().mockResolvedValue({ access_token: 'test-access', refresh_token: 'test-refresh' })
   })
 
   afterEach(() => vi.useRealTimers())
@@ -220,14 +296,14 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await selectButtonByText(wrapper, 'API Key')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('scheduled account')
     await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(true)
-    await wrapper.get('[data-testid="random-proxy-reuse-minutes"]').setValue(1440)
+    expect(wrapper.find('[data-testid="random-proxy-reuse-minutes"]').exists()).toBe(false)
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
       daily_cooldown: { enabled: true, start: '23:00', end: '08:00', timezone: 'Asia/Shanghai' },
-      proxy_mode: 'random', random_proxy_max_reuse_minutes: 1440,
+      proxy_mode: 'random', random_proxy_max_reuse_minutes: 0,
       openai_long_context_billing_enabled: false
     })
     wrapper.unmount()
@@ -239,8 +315,9 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await selectButtonByText(wrapper, 'API Key')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('invalid schedule')
     await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="daily-cooldown-end"]').setValue('23:00')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
+    wrapper.getComponent('[data-testid="daily-cooldown-end"]').vm.$emit('update:modelValue', '23:00')
+    await flushPromises()
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     expect(createAccountMock).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -263,6 +340,49 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       proxy_id: null,
       extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_empty_pool_policy: 'reject' }
     })
+    wrapper.unmount()
+  })
+
+  it('requires a group and creates an account using its dynamic membership', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('group account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('group')
+    await flushPromises()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(createAccountMock).not.toHaveBeenCalled()
+    await settings.get('[data-testid="random-proxy-group"]').setValue('7')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      proxy_id: null,
+      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7, random_proxy_pool_ids: [] }
+    })
+    wrapper.unmount()
+  })
+
+  it('omits transient group settings when random mode is disabled before creation', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('direct account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('group')
+    await flushPromises()
+    await settings.get('[data-testid="random-proxy-group"]').setValue('7')
+    await settings.get('input[type="checkbox"]').setValue(false)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload.proxy_id).toBeNull()
+    expect(payload.extra || {}).not.toHaveProperty('random_proxy_group_id')
+    expect(payload.extra || {}).not.toHaveProperty('proxy_mode')
     wrapper.unmount()
   })
 

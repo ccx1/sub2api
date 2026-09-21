@@ -21,6 +21,56 @@ async function openSelector() {
 }
 
 describe('proxy connection tests', () => {
+  it('displays and searches the proxy group for fixed selection', async () => {
+    const wrapper = await openSelector()
+    await wrapper.setProps({ proxies: [
+      { ...wrapper.props('proxies')[0], group_name: 'Tokyo pool' },
+      wrapper.props('proxies')[1]
+    ] })
+    await wrapper.get('.select-search-input').setValue('Tokyo pool')
+    expect(wrapper.findAll('.select-option')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Proxy 1 [Tokyo pool]')
+    expect(wrapper.text()).not.toContain('Proxy 2')
+    await wrapper.setProps({ modelValue: 1 })
+    expect(wrapper.get('.select-value').text()).toContain('[Tokyo pool]')
+  })
+
+  it('shows account count, name and credential-free IPv6 address in both options and selection', async () => {
+    const wrapper = await openSelector()
+    await wrapper.setProps({ proxies: [{ id: 9, name: 'IPv6', account_count: 4, protocol: 'socks5', host: '2001:db8::1', port: 1080, username: 'private-user', password: 'private-pass' } as Proxy] })
+    expect(wrapper.text()).toContain('(4) IPv6 socks5://[2001:db8::1]:1080')
+    await wrapper.findAll('.select-option')[1].trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([9])
+    await wrapper.setProps({ modelValue: 9 })
+    expect(wrapper.get('.select-value').text()).toBe('(4) IPv6 socks5://[2001:db8::1]:1080')
+    expect(wrapper.text()).not.toContain('private-')
+    await wrapper.setProps({ proxies: [{ ...wrapper.props('proxies')[0], account_count: 0 }] })
+    expect(wrapper.get('.select-value').text()).toMatch(/^\(0\)/)
+  })
+
+  it('hides direct mode for fixed ticket selection and preserves an unavailable selected ID', async () => {
+    const wrapper = await openSelector()
+    await wrapper.setProps({ allowDirect: false })
+    expect(wrapper.findAll('.select-option')).toHaveLength(2)
+    expect(wrapper.text()).not.toContain('admin.accounts.noProxy')
+    expect(wrapper.get('.select-value').text()).toBe('common.selectOption')
+    await wrapper.setProps({ modelValue: 99 })
+    expect(wrapper.get('.select-value').text()).toBe('admin.accounts.randomProxyPoolUnavailableItem')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('closes the dropdown and prevents stale selection or proxy tests after disabling', async () => {
+    const wrapper = await openSelector()
+    const staleOption = wrapper.findAll('.select-option')[1]
+    const staleTest = wrapper.findAll('.test-btn')[0]
+    await wrapper.setProps({ disabled: true })
+    await staleOption.trigger('click')
+    await staleTest.trigger('click')
+    await vi.waitFor(() => expect(wrapper.find('.select-dropdown').exists()).toBe(false))
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(testProxy).not.toHaveBeenCalled()
+  })
+
   it('does not restart an individual test when a batch is started', async () => {
     let finish!: (result: object) => void
     testProxy.mockImplementation((id: number) => id === 1

@@ -100,6 +100,7 @@ type Group struct {
 	Platform                   string  `json:"platform"`
 	RateMultiplier             float64 `json:"rate_multiplier"`
 	IsExclusive                bool    `json:"is_exclusive"`
+	IsSharedPool               bool    `json:"is_shared_pool"`
 	Status                     string  `json:"status"`
 
 	SubscriptionType          string   `json:"subscription_type"`
@@ -446,6 +447,8 @@ type AccountGroup struct {
 }
 
 type Proxy struct {
+	GroupID   *int64    `json:"group_id"`
+	GroupName string    `json:"group_name,omitempty"`
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	Protocol  string    `json:"protocol"`

@@ -375,6 +375,9 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	if input.IsSharedPool {
+		return nil, infraerrors.BadRequest("SHARED_POOL_GROUP_RETIRED", "共享分组已停用，请创建普通分组并在共享账号管理中分配账号")
+	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && NormalizeGroupPlatform(input.Platform) == PlatformComposite {
 		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
 	}
@@ -566,6 +569,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Platform:                        platform,
 		RateMultiplier:                  input.RateMultiplier,
 		IsExclusive:                     input.IsExclusive,
+		IsSharedPool:                    input.IsSharedPool,
 		SecurityPolicyEnabled:           input.SecurityPolicyEnabled,
 		SecurityPolicyMode:              securityPolicyMode,
 		SecurityPolicyEmailEnabled:      securityPolicyEmailEnabled,
@@ -758,6 +762,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
+	if input.IsSharedPool != nil && *input.IsSharedPool && !group.IsSharedPool {
+		return nil, infraerrors.BadRequest("SHARED_POOL_GROUP_RETIRED", "共享分组已停用，请在共享账号管理中分配账号")
+	}
+	if err := s.validateSharedPoolRemoval(ctx, group, input); err != nil {
+		return nil, err
+	}
 	if err := s.validateSimpleModeGroupAccess(group); err != nil {
 		return nil, err
 	}
@@ -770,6 +780,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 
 	// 渠道缓存里存了 groupID → platform 的映射，改了平台要让它失效（见函数末尾）
 	previousPlatform := group.Platform
+	wasSharedPool := group.IsSharedPool
 
 	if input.Name != "" {
 		group.Name = input.Name
@@ -801,6 +812,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
+	}
+	if input.IsSharedPool != nil {
+		group.IsSharedPool = *input.IsSharedPool
 	}
 	if input.Status != "" {
 		group.Status = input.Status
@@ -1070,7 +1084,11 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 
-	if err := s.groupRepo.Update(ctx, group); err != nil {
+	update := s.groupRepo.Update
+	if wasSharedPool && !group.IsSharedPool {
+		update = s.groupRepo.(SharedPoolGroupBindings).UpdateWithoutSharedPool
+	}
+	if err := update(ctx, group); err != nil {
 		return nil, err
 	}
 

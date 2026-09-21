@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/proxygroup"
 )
 
 // ProxyUpdate is the builder for updating Proxy entities.
@@ -52,6 +53,26 @@ func (_u *ProxyUpdate) SetNillableDeletedAt(v *time.Time) *ProxyUpdate {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (_u *ProxyUpdate) ClearDeletedAt() *ProxyUpdate {
 	_u.mutation.ClearDeletedAt()
+	return _u
+}
+
+// SetGroupID sets the "group_id" field.
+func (_u *ProxyUpdate) SetGroupID(v int64) *ProxyUpdate {
+	_u.mutation.SetGroupID(v)
+	return _u
+}
+
+// SetNillableGroupID sets the "group_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableGroupID(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetGroupID(*v)
+	}
+	return _u
+}
+
+// ClearGroupID clears the value of the "group_id" field.
+func (_u *ProxyUpdate) ClearGroupID() *ProxyUpdate {
+	_u.mutation.ClearGroupID()
 	return _u
 }
 
@@ -247,6 +268,11 @@ func (_u *ProxyUpdate) AddExpiryWarnDays(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetGroup sets the "group" edge to the ProxyGroup entity.
+func (_u *ProxyUpdate) SetGroup(v *ProxyGroup) *ProxyUpdate {
+	return _u.SetGroupID(v.ID)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -285,6 +311,12 @@ func (_u *ProxyUpdate) SetBackupProxy(v *Proxy) *ProxyUpdate {
 // Mutation returns the ProxyMutation object of the builder.
 func (_u *ProxyUpdate) Mutation() *ProxyMutation {
 	return _u.mutation
+}
+
+// ClearGroup clears the "group" edge to the ProxyGroup entity.
+func (_u *ProxyUpdate) ClearGroup() *ProxyUpdate {
+	_u.mutation.ClearGroup()
+	return _u
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -483,6 +515,35 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 	}
+	if _u.mutation.GroupCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.GroupTable,
+			Columns: []string{proxy.GroupColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxygroup.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.GroupIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.GroupTable,
+			Columns: []string{proxy.GroupColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxygroup.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -645,6 +706,26 @@ func (_u *ProxyUpdateOne) SetNillableDeletedAt(v *time.Time) *ProxyUpdateOne {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (_u *ProxyUpdateOne) ClearDeletedAt() *ProxyUpdateOne {
 	_u.mutation.ClearDeletedAt()
+	return _u
+}
+
+// SetGroupID sets the "group_id" field.
+func (_u *ProxyUpdateOne) SetGroupID(v int64) *ProxyUpdateOne {
+	_u.mutation.SetGroupID(v)
+	return _u
+}
+
+// SetNillableGroupID sets the "group_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableGroupID(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetGroupID(*v)
+	}
+	return _u
+}
+
+// ClearGroupID clears the value of the "group_id" field.
+func (_u *ProxyUpdateOne) ClearGroupID() *ProxyUpdateOne {
+	_u.mutation.ClearGroupID()
 	return _u
 }
 
@@ -840,6 +921,11 @@ func (_u *ProxyUpdateOne) AddExpiryWarnDays(v int) *ProxyUpdateOne {
 	return _u
 }
 
+// SetGroup sets the "group" edge to the ProxyGroup entity.
+func (_u *ProxyUpdateOne) SetGroup(v *ProxyGroup) *ProxyUpdateOne {
+	return _u.SetGroupID(v.ID)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -878,6 +964,12 @@ func (_u *ProxyUpdateOne) SetBackupProxy(v *Proxy) *ProxyUpdateOne {
 // Mutation returns the ProxyMutation object of the builder.
 func (_u *ProxyUpdateOne) Mutation() *ProxyMutation {
 	return _u.mutation
+}
+
+// ClearGroup clears the "group" edge to the ProxyGroup entity.
+func (_u *ProxyUpdateOne) ClearGroup() *ProxyUpdateOne {
+	_u.mutation.ClearGroup()
+	return _u
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -1105,6 +1197,35 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if _u.mutation.GroupCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.GroupTable,
+			Columns: []string{proxy.GroupColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxygroup.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.GroupIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.GroupTable,
+			Columns: []string{proxy.GroupColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxygroup.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

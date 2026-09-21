@@ -833,6 +833,10 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}
+	account, err := s.openAIUsageProbeAccount(ctx, account)
+	if err != nil {
+		return nil, err
+	}
 	accessToken := ""
 	if !account.IsOpenAIAgentIdentity() {
 		accessToken = account.GetOpenAIAccessToken()
@@ -908,7 +912,9 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, err
 	}
 	if len(updates) > 0 {
-		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+		if err := s.persistOpenAIUsageProbeSnapshot(ctx, account, updates); err != nil {
+			return nil, err
+		}
 		return updates, nil
 	}
 	return nil, nil

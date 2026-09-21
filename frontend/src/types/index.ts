@@ -571,6 +571,7 @@ export interface Group {
   max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   is_exclusive: boolean
+  is_shared_pool?: boolean
   status: 'active' | 'inactive'
   subscription_type: SubscriptionType
   daily_limit_usd: number | null
@@ -827,6 +828,7 @@ export interface CreateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  is_shared_pool?: boolean
   subscription_type?: SubscriptionType
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
@@ -896,6 +898,7 @@ export interface UpdateGroupRequest {
   platform?: GroupPlatform
   rate_multiplier?: number
   is_exclusive?: boolean
+  is_shared_pool?: boolean
   status?: 'active' | 'inactive'
   subscription_type?: SubscriptionType
   daily_limit_usd?: number | null
@@ -993,6 +996,8 @@ export interface ClaudeModel {
 
 export interface Proxy {
   id: number
+  group_id?: number | null
+  group_name?: string
   name: string
   protocol: ProxyProtocol
   host: string
@@ -1020,6 +1025,13 @@ export interface Proxy {
   expiry_warn_days: number
   created_at: string
   updated_at: string
+}
+
+export interface ProxyGroup {
+  id: number
+  name: string
+  proxy_count: number
+  active_proxy_count: number
 }
 
 export interface ProxyAccountSummary {
@@ -1244,7 +1256,8 @@ export interface Account {
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     proxy_mode?: 'random'
-    random_proxy_pool_scope?: 'all' | 'selected'
+    random_proxy_pool_scope?: 'all' | 'selected' | 'group'
+    random_proxy_group_id?: number | null
     random_proxy_pool_ids?: number[]
     random_proxy_empty_pool_policy?: 'reject' | 'disable' | 'direct'
     random_proxy_last_used?: {
@@ -1624,6 +1637,7 @@ export interface CheckMixedChannelResponse {
 }
 
 export interface CreateProxyRequest {
+  group_id?: number | null
   name: string
   protocol: ProxyProtocol
   host: string
@@ -1637,6 +1651,7 @@ export interface CreateProxyRequest {
 }
 
 export interface UpdateProxyRequest {
+  group_id?: number | null
   name?: string
   protocol?: ProxyProtocol
   host?: string
@@ -1767,7 +1782,7 @@ export interface CodexSessionImportResult {
 
 // ==================== Usage & Redeem Types ====================
 
-export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
+export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation' | 'shared_pool_transfer'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber' | 'live'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>

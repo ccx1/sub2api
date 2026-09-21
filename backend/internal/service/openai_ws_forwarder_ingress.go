@@ -779,6 +779,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	firstRoutingFields := gjson.GetManyBytes(firstPayload.payloadRaw, "model", "service_tier")
+	var initialTicketReceipt *openAICodexTicketWSReceipt
 	wsHeaders, _, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,
@@ -791,14 +792,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		firstPayload.promptCacheKey,
 		firstRoutingFields[0].String(),
 		firstRoutingFields[1].String(),
+		&initialTicketReceipt,
 	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:            account,
+		WSURL:              wsURL,
+		Headers:            wsHeaders,
+		CodexTicketReceipt: initialTicketReceipt,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -866,6 +869,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	agentTaskRecoveryTried := false
+	var activeTicketReceipt *openAICodexTicketWSReceipt
+	ticketHandshakeModel := firstRoutingFields[0].String()
 	var acquireTurnLease func(int, string, bool, bool) (*openAIWSConnLease, error)
 	acquireTurnLease = func(turn int, preferred string, forcePreferredConn bool, forceNewConn bool) (*openAIWSConnLease, error) {
 		req := cloneOpenAIWSAcquireRequest(baseAcquireReq)
@@ -874,6 +879,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// dedicated 模式下每次获取均新建连接，避免跨会话复用残留上下文；
 		// 上游读写失败后的重试同样新建，避免再拿到同批陈旧的空闲连接。
 		req.ForceNewConn = dedicatedMode || forceNewConn
+		// baseAcquireReq 已在本轮进入前准备好票据头和 immutable receipt。
+		// 这里不能再次按当前开关/模型读取票据，否则首握手的 header 与
+		// receipt 会来自两个不同时间点。需要刷新时由外层本轮准备阶段统一完成。
+		ticketReceipt := req.CodexTicketReceipt
 		acquireCtx, acquireCancel := context.WithTimeout(ctx, acquireTimeout)
 		lease, acquireErr := pool.Acquire(acquireCtx, req)
 		acquireCancel()
@@ -934,6 +943,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, acquireErr
 		}
 		connID := strings.TrimSpace(lease.ConnID())
+		activeTicketReceipt = confirmedOpenAICodexTicketWSReceipt(ticketReceipt, lease)
+		activeTicketReceipt.observeHandshake(ctx, s, lease.HandshakeHeaders())
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			turnState = handshakeTurnState
 			if stateStore != nil && sessionHash != "" {
@@ -1026,6 +1037,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				mappedModelBytes = []byte(mappedModel)
 			}
 		}
+		ticketWatchdog := activeTicketReceipt.watch(ctx, s, mappedModel)
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
@@ -1037,6 +1049,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					wroteDownstream,
 				)
 			}
+			ticketWatchdog.observe(upstreamMessage)
 			if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 				upstreamMessage = normalized
 			}
@@ -1654,6 +1667,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		forcePreferredConn := isStrictAffinityTurn(currentPayload)
+		ticketHandshakeModel = openAIWSPayloadStringFromRaw(currentPayload, "model")
+		// The first request already has the snapshot returned by
+		// buildOpenAIWSHeaders. Preserve it through the initial dial even if
+		// settings or the cached ticket change while the request is queued.
+		// Refresh only for a follow-up turn or an explicit same-turn retry.
+		if err := s.refreshOpenAICodexTicketWSHeadersForTurn(ctx, account, ticketHandshakeModel, turn, turnRetry, &baseAcquireReq); err != nil {
+			return fmt.Errorf("refresh websocket ticket: %w", err)
+		}
+		ticketChanged := sessionLease != nil && activeTicketReceipt.identity() != baseAcquireReq.CodexTicketReceipt.identity()
 		if sessionLease == nil {
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, turnRetry > 0)
 			if acquireErr != nil {
@@ -1673,8 +1695,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				shouldPreflightPing = false
 			}
 		}
-		if shouldPreflightPing {
-			if pingErr := sessionLease.PingWithTimeout(openAIWSProbePingTO); pingErr != nil {
+		if shouldPreflightPing || ticketChanged {
+			var pingErr error
+			if ticketChanged {
+				pingErr = ErrOpenAICodexTicketUnavailable
+			} else {
+				pingErr = sessionLease.PingWithTimeout(openAIWSProbePingTO)
+			}
+			if pingErr != nil {
 				logOpenAIWSModeInfo(
 					"ingress_ws_upstream_preflight_ping_fail account_id=%d turn=%d conn_id=%s cause=%s",
 					account.ID,
@@ -1903,6 +1931,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if nextPayload.promptCacheKey != "" {
 			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
 			// prompt_cache_key 对握手头的更新仅在未来需要重新建连时生效。
+			var updatedTicketReceipt *openAICodexTicketWSReceipt
 			updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(
 				ctx,
 				c,
@@ -1915,11 +1944,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nextPayload.promptCacheKey,
 				nextRoutingFields[0].String(),
 				nextRoutingFields[1].String(),
+				&updatedTicketReceipt,
 			)
 			if updHdrErr != nil {
 				logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
 			} else {
 				baseAcquireReq.Headers = updatedHeaders
+				baseAcquireReq.CodexTicketReceipt = updatedTicketReceipt
+				ticketHandshakeModel = nextRoutingFields[0].String()
 			}
 		}
 		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())

@@ -4515,10 +4515,9 @@
                       {{ t("admin.settings.gatewayForwarding.codexTicketEnabledDesc") }}
                     </p>
                   </div>
-                  <Toggle
-                    id="codex-ticket-enabled"
-                    v-model="form.openai_codex_ticket_enabled"
-                  />
+                  <RouterLink to="/admin/codex-ticket-settings" class="btn btn-secondary shrink-0">
+                    {{ t('codexTicketSettings.title') }}
+                  </RouterLink>
                 </div>
                 <div>
                   <label for="codex-ticket-harvest-proxy-mode" class="block text-base font-semibold text-gray-900 dark:text-white">
@@ -8878,6 +8877,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { RouterLink, useRoute } from "vue-router";
 import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
@@ -8993,6 +8993,10 @@ type SettingsTab =
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+const settingsRoute = useRoute();
+watch(() => settingsRoute.hash, (hash) => {
+  if (hash === '#gateway') activeTab.value = 'gateway';
+}, { immediate: true });
 const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
@@ -11527,7 +11531,6 @@ async function saveSettings() {
         form.openai_codex_client_version?.trim() || "",
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
-      openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
       openai_codex_ticket_harvest_proxy_mode: form.openai_codex_ticket_harvest_proxy_mode,
       openai_codex_ticket_harvest_proxy_url:
         form.openai_codex_ticket_harvest_proxy_url?.trim() || "",

@@ -637,7 +637,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 		}
 		for i := range accounts {
 			account := accounts[i]
-			if !account.IsSchedulable() || !provider.SupportsAccount(&account) {
+			if !account.IsSchedulable() || !provider.SupportsAccount(&account) || isSharedPoolBillingAccount(&account) {
 				continue
 			}
 			for _, model := range batchImageModelsFromAccountMapping(&account) {
@@ -953,7 +953,7 @@ func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, 
 		})
 		for i := range accounts {
 			account := accounts[i]
-			if !account.IsSchedulable() || !account.IsModelSupported(model) {
+			if !account.IsSchedulable() || !account.IsModelSupported(model) || isSharedPoolBillingAccount(&account) {
 				continue
 			}
 			if provider.SupportsAccount(&account) {

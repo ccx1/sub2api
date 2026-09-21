@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import ProxiesView from '../ProxiesView.vue'
+import ProxyGroupSelect from '@/components/admin/proxy/ProxyGroupSelect.vue'
 
 const { list, update, getAllWithCount } = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn(), getAllWithCount: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { list, update, getAllWithCount } } }))
@@ -36,6 +37,19 @@ async function submit() {
 }
 
 describe('proxy credential updates', () => {
+  it('does not overwrite a concurrent group change when the group is untouched', async () => {
+    list.mockResolvedValueOnce({ items: [{ id: 9, name: 'proxy', protocol: 'http', host: 'proxy.example', port: 8080, status: 'active', group_id: 7 }], total: 1, pages: 1 })
+    await edit()
+    expect((await submit())).not.toHaveProperty('group_id')
+  })
+
+  it.each([8, null])('sends an explicit group edit to %s', async (groupId) => {
+    list.mockResolvedValueOnce({ items: [{ id: 9, name: 'proxy', protocol: 'http', host: 'proxy.example', port: 8080, status: 'active', group_id: 7 }], total: 1, pages: 1 })
+    await edit()
+    wrapper.getComponent(ProxyGroupSelect).vm.$emit('update:modelValue', groupId)
+    expect((await submit()).group_id).toBe(groupId)
+  })
+
   it('sends an explicit empty username when cleared', async () => {
     await edit()
     const username = wrapper.findAll<HTMLInputElement>('#edit-proxy-form input').find(input => input.element.value === 'old-user')!

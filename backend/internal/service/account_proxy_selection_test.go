@@ -102,6 +102,9 @@ func TestNormalizeProxyModeExtra(t *testing.T) {
 		{name: "nil map stays nil", input: nil, want: nil},
 		{name: "random kept", input: map[string]any{ProxyModeExtraKey: " Random "}, want: map[string]any{ProxyModeExtraKey: ProxyModeRandom}},
 		{name: "invalid mode dropped", input: map[string]any{ProxyModeExtraKey: "fixed"}, want: map[string]any{}},
+		{name: "disabled random clears group", input: map[string]any{ProxyModeExtraKey: nil, RandomProxyGroupIDExtraKey: int64(3)}, want: map[string]any{}},
+		{name: "fixed clears group", input: map[string]any{ProxyModeExtraKey: "fixed", RandomProxyGroupIDExtraKey: int64(3)}, want: map[string]any{}},
+		{name: "random keeps group", input: map[string]any{ProxyModeExtraKey: "random", RandomProxyGroupIDExtraKey: float64(3)}, want: map[string]any{ProxyModeExtraKey: "random", RandomProxyGroupIDExtraKey: int64(3)}},
 		{name: "policy canonicalized", input: map[string]any{RandomProxyEmptyPoolPolicyExtraKey: " Direct "}, want: map[string]any{RandomProxyEmptyPoolPolicyExtraKey: RandomProxyEmptyPoolPolicyDirect}},
 		{name: "invalid policy dropped", input: map[string]any{RandomProxyEmptyPoolPolicyExtraKey: "drop"}, want: map[string]any{}},
 	}

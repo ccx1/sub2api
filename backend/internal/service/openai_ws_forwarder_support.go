@@ -77,6 +77,13 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	}
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
+	prewarmModel, _ := prewarmPayload["model"].(string)
+	receipt := confirmedOpenAICodexTicketWSReceipt(nil, lease)
+	watchdog := receipt.watch(ctx, s, prewarmModel)
+	if watchdog != nil {
+		// 预热结束后会立即发送业务请求，撤票须先完成本机禁用再允许回退。
+		watchdog.invalidate = func() { s.invalidateOpenAICodexTicket(ctx, receipt.account, &receipt.ticket) }
+	}
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
 		reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
@@ -112,6 +119,13 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			return wrapOpenAIWSFallback("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr)
 		}
 
+		watchdog.observe(message)
+		if watchdog != nil {
+			if completed, matches := watchdog.observer.Result(); completed && !matches {
+				lease.MarkBroken()
+				return wrapOpenAIWSFallback("prewarm_ticket_mismatch", ErrOpenAICodexTicketUnavailable)
+			}
+		}
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
 		if eventType == "" {
 			continue
@@ -311,6 +325,7 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 }
 
 func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) string {
+	observeRandomProxyWSTerminal(ctx, account, s.accountRepo, canonicalModel, payload)
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	terminalEvent := normalizeOpenAIWSTerminalEvent(eventType)
 	if terminalEvent != "response.failed" {
@@ -325,6 +340,7 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	if eventType != "error" {
 		return
 	}
+	observeRandomProxyWSTerminal(ctx, account, s.accountRepo, canonicalModel, payload)
 	status := openAIWSPayloadTransientStatus(payload)
 	if status != 0 {
 		if status == http.StatusTooManyRequests {
@@ -628,7 +644,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, latest); vetoed {
 			return 0, nil, "", nil
 		}
-		if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+		if s.isOpenAIAccountRequestRuntimeBlockedContext(ctx, latest, requestedModel, requireCompact) {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}

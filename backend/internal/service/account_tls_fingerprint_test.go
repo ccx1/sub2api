@@ -2,7 +2,7 @@ package service
 
 import "testing"
 
-func TestConfigureAccountProtectionOpenAILegacyTLSValidation(t *testing.T) {
+func TestConfigureAccountProtectionOpenAIFullTLSValidation(t *testing.T) {
 	account := &Account{
 		ID:          1,
 		Platform:    PlatformOpenAI,
@@ -19,8 +19,8 @@ func TestConfigureAccountProtectionOpenAILegacyTLSValidation(t *testing.T) {
 	if !account.IsTLSFingerprintEnabled() {
 		t.Fatalf("OpenAI OAuth account should report TLS fingerprint enabled after protection is configured")
 	}
-	if got := account.Extra["tls_fingerprint_builtin"]; got != "nodejs24" {
-		t.Fatalf("tls_fingerprint_builtin = %v, want nodejs24", got)
+	if got := account.Extra["tls_fingerprint_builtin"]; got != "nodejs22" {
+		t.Fatalf("tls_fingerprint_builtin = %v, want nodejs22", got)
 	}
 	if _, ok := codexFingerprintSeed(account.Extra); !ok {
 		t.Fatalf("protected OpenAI account should have a persistent Codex identity seed")

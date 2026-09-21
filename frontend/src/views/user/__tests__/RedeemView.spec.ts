@@ -55,6 +55,20 @@ describe('RedeemView refresh after redemption', () => {
     vi.restoreAllMocks()
   })
 
+  it('shows shared transfers as earnings credited to balance with a full source reference', async () => {
+    getHistory.mockResolvedValue({ items: [{ id: 9, code: 'SHARED-123456789', type: 'shared_pool_transfer', value: 12.3456, notes: '共享收益转入余额', used_at: '2026-09-20T00:00:00Z' }], total: 1 })
+    const wrapper = mount(RedeemView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('redeem.sharedPoolTransfer')
+    expect(wrapper.text()).toContain('+$12.35')
+    expect(wrapper.text()).toContain('SHARED-123456789')
+    expect(wrapper.text()).toContain('共享收益转入余额')
+    expect(wrapper.text()).not.toContain('redeem.balanceAddedRedeem')
+    expect(wrapper.text()).not.toContain('12.3456 redeem.requests')
+    expect(redeem).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it.each(['balance', 'concurrency', 'subscription'])(
     'keeps a successful %s redemption when profile refresh fails', async (type) => {
       redeem.mockResolvedValue({ type, value: 20, message: 'Code applied' })

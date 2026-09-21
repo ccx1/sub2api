@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, randomProxyExtra } from '../randomProxy'
+import { isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, randomProxyExtra } from '../randomProxy'
 
 describe('random proxy settings serialization', () => {
   it('defaults legacy accounts to the full pool', () => {
@@ -9,12 +9,28 @@ describe('random proxy settings serialization', () => {
 
   it('preserves selected IDs without checking the currently available pool', () => {
     expect(randomProxyExtra('selected', [1, 99, 1], 'disable')).toEqual({
-      proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [1, 99], random_proxy_empty_pool_policy: 'disable', random_proxy_max_reuse_minutes: 0
+      proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [1, 99], random_proxy_group_id: null, random_proxy_empty_pool_policy: 'disable', random_proxy_max_reuse_minutes: 0
     })
   })
 
   it('drops stale selected IDs when explicitly switching to all', () => {
     expect(randomProxyExtra('all', [99], 'direct').random_proxy_pool_ids).toEqual([])
+  })
+
+  it('preserves group scope independently of the current member list', () => {
+    expect(normalizeRandomProxyPoolScope('group')).toBe('group')
+    expect(randomProxyExtra('group', [99], { policy: 'reject', maxReuseMinutes: 0, groupId: 7 })).toMatchObject({
+      random_proxy_pool_scope: 'group', random_proxy_group_id: 7, random_proxy_pool_ids: []
+    })
+  })
+
+  it.each(['all', 'selected'] as const)('clears the stale group when switching to %s', scope => {
+    expect(randomProxyExtra(scope, [99], { policy: 'reject', maxReuseMinutes: 0, groupId: 7 }).random_proxy_group_id).toBeNull()
+  })
+
+  it.each([0, -1, 1.5, '7', undefined, null, NaN, Infinity])('keeps invalid group IDs invalid instead of selecting all: %s', groupId => {
+    expect(normalizeRandomProxyGroupId(groupId)).toBeNull()
+    expect(randomProxyExtra('group', [], { policy: 'reject', maxReuseMinutes: 0 }).random_proxy_pool_scope).toBe('group')
   })
 
   it('rejects malformed persisted IDs', () => {

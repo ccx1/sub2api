@@ -13,6 +13,8 @@ import (
 
 func createPoolTestProxy(t *testing.T, client *dbent.Client, name string) *dbent.Proxy {
 	t.Helper()
+	_, err := client.ExecContext(context.Background(), "CREATE TABLE IF NOT EXISTS shared_pool_proxies (proxy_id INTEGER PRIMARY KEY, owner_user_id INTEGER, fingerprint TEXT)")
+	require.NoError(t, err)
 	proxy, err := client.Proxy.Create().SetName(name).SetProtocol("http").SetHost("localhost").SetPort(8080).Save(context.Background())
 	require.NoError(t, err)
 	return proxy

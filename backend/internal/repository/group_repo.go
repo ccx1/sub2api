@@ -25,8 +25,9 @@ type sqlExecutor interface {
 }
 
 type groupRepository struct {
-	client *dbent.Client
-	sql    sqlExecutor
+	client    *dbent.Client
+	sql       sqlExecutor
+	proxyPool *ProxyPoolAllocator
 }
 
 // lockLiveGroups makes account-group inserts participate in the same row-lock
@@ -101,6 +102,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetSortOrder(groupIn.SortOrder).
 		SetIsExclusive(groupIn.IsExclusive).
+		SetIsSharedPool(groupIn.IsSharedPool).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
 		SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
@@ -291,6 +293,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetIsExclusive(groupIn.IsExclusive).
+		SetIsSharedPool(groupIn.IsSharedPool).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
 		SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
@@ -1089,9 +1092,14 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		return err
 	}
 	exec := sqlExecutor(r.client)
+	client := r.client
 	if tx != nil {
 		defer func() { _ = tx.Rollback() }()
 		exec = tx.Client()
+		client = tx.Client()
+	}
+	if err := validateSharedAccountsForGroup(ctx, client, accountIDs, groupID); err != nil {
+		return err
 	}
 	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
 		return err

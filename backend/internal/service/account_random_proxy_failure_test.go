@@ -68,3 +68,30 @@ func TestRandomProxyFailureDoesNotEvictOnClientCancelOrFixedProxy(t *testing.T) 
 	require.False(t, ReportRandomProxyTransportFailure(context.Background(), a, reporter, io.ErrUnexpectedEOF))
 	require.Empty(t, reporter.accounts)
 }
+
+type randomProxySuccessStub struct {
+	accounts, proxies []int64
+}
+
+func (s *randomProxySuccessStub) ReportRandomProxySuccess(_ context.Context, accountID, proxyID int64) error {
+	s.accounts = append(s.accounts, accountID)
+	s.proxies = append(s.proxies, proxyID)
+	return nil
+}
+
+func TestRandomProxySuccessReportsOnlyActualRandomExit(t *testing.T) {
+	account := randomProxyAccount("")
+	account.ID = 42
+	proxyID := int64(7)
+	account.ProxyID = &proxyID
+	reporter := &randomProxySuccessStub{}
+	require.True(t, ReportRandomProxySuccess(context.Background(), account, reporter))
+	require.Equal(t, []int64{42}, reporter.accounts)
+	require.Equal(t, []int64{7}, reporter.proxies)
+	account.Extra = nil
+	require.False(t, ReportRandomProxySuccess(context.Background(), account, reporter))
+	account.Extra = map[string]any{ProxyModeExtraKey: ProxyModeRandom}
+	account.ProxyID = nil
+	require.False(t, ReportRandomProxySuccess(context.Background(), account, reporter))
+	require.Len(t, reporter.accounts, 1)
+}

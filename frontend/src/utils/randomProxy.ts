@@ -1,10 +1,13 @@
 import type { Proxy } from '@/types'
 
-export type RandomProxyPoolScope = 'all' | 'selected'
+export type RandomProxyPoolScope = 'all' | 'selected' | 'group'
 export type RandomProxyEmptyPoolPolicy = 'reject' | 'disable' | 'direct'
 
 export const normalizeRandomProxyPoolScope = (value: unknown): RandomProxyPoolScope =>
-  value === 'selected' ? 'selected' : 'all'
+  value === 'selected' || value === 'group' ? value : 'all'
+
+export const normalizeRandomProxyGroupId = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
 
 export const normalizeRandomProxyEmptyPoolPolicy = (value: unknown): RandomProxyEmptyPoolPolicy =>
   value === 'disable' || value === 'direct' ? value : 'reject'
@@ -21,12 +24,14 @@ export const isValidRandomProxyReuseMinutes = (value: unknown): value is number 
 export const normalizeRandomProxyReuseMinutes = (value: unknown): number =>
   isValidRandomProxyReuseMinutes(value) ? value : 0
 
-export function randomProxyExtra(scope: RandomProxyPoolScope, ids: number[], options: RandomProxyEmptyPoolPolicy | { policy: RandomProxyEmptyPoolPolicy; maxReuseMinutes: number }) {
+export function randomProxyExtra(scope: RandomProxyPoolScope, ids: number[], options: RandomProxyEmptyPoolPolicy | { policy: RandomProxyEmptyPoolPolicy; maxReuseMinutes: number; groupId?: number | null }) {
   const { policy, maxReuseMinutes } = typeof options === 'string' ? { policy: options, maxReuseMinutes: 0 } : options
+  const groupId = typeof options === 'string' ? null : normalizeRandomProxyGroupId(options.groupId)
   return {
     proxy_mode: 'random',
     random_proxy_pool_scope: scope,
     random_proxy_pool_ids: scope === 'selected' ? normalizeRandomProxyPoolIds(ids) : [],
+    random_proxy_group_id: scope === 'group' ? groupId : null,
     random_proxy_empty_pool_policy: policy,
     random_proxy_max_reuse_minutes: maxReuseMinutes
   }

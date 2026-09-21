@@ -42,6 +42,7 @@ export async function list(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    shared?: string
     platform?: string
     type?: string
     status?: string
@@ -84,6 +85,7 @@ export async function getUpstreamBillingRatesWithEtag(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    shared?: string
     platform?: string
     type?: string
     status?: string
@@ -117,6 +119,7 @@ export async function listWithEtag(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    shared?: string
     platform?: string
     type?: string
     status?: string
@@ -254,6 +257,88 @@ export async function setProtection(
 
 export async function setCodexTicketEnabled(id: number, enabled: boolean): Promise<Account> {
   const { data } = await apiClient.put<Account>(`/admin/accounts/${id}/codex-ticket`, { enabled })
+  return data
+}
+
+export interface CodexTicketHistoryProxy {
+  id?: number
+  name?: string
+  address: string
+}
+
+export interface CodexTicketHTTPMessage {
+  method?: string
+  url?: string
+  status_code?: number
+  headers?: Record<string, string[]>
+  body?: string
+  body_bytes: number
+  body_truncated?: boolean
+  headers_truncated?: boolean
+}
+
+export interface CodexTicketExchange {
+  requested_model: string
+  reported_models?: string[]
+  models_truncated?: boolean
+  request?: CodexTicketHTTPMessage | null
+  response?: CodexTicketHTTPMessage | null
+}
+
+export interface CodexTicketHistoryAttempt {
+  id: string
+  started_at: string
+  finished_at: string
+  model: string
+  success: boolean
+  reason: string
+  harvest_proxy?: CodexTicketHistoryProxy | null
+  business_proxy?: CodexTicketHistoryProxy | null
+  length_mode?: 'auto' | 'strict'
+  target_length?: number | null
+  rejected_lengths?: number[]
+  harvest_ticket_length?: number | null
+  business_ticket_length?: number | null
+  harvest_http_status?: number | null
+  business_http_status?: number | null
+  harvest_exchange?: CodexTicketExchange | null
+  business_exchange?: CodexTicketExchange | null
+}
+
+export interface CodexTicketHistory {
+  summary: { total: number; success: number; failed: number; last_attempt_at?: string }
+  items: CodexTicketHistoryAttempt[]
+  total: number
+  page: number
+  page_size: number
+  retained_limit: number
+  exchange_retained_limit?: number
+}
+
+export async function getCodexTicketHistory(
+  id: number,
+  params: { page: number; page_size: number }
+): Promise<CodexTicketHistory> {
+  const { data } = await apiClient.get<CodexTicketHistory>(
+    `/admin/accounts/${id}/codex-ticket/history`, { params }
+  )
+  return data
+}
+
+export interface CodexTicketRetryResult {
+  scheduled: number
+  skipped: number
+  models: string[]
+}
+
+export async function retryCodexTicket(
+  id: number,
+  model?: string
+): Promise<CodexTicketRetryResult> {
+  const { data } = await apiClient.post<CodexTicketRetryResult>(
+    `/admin/accounts/${id}/codex-ticket/retry`,
+    model ? { model } : {}
+  )
   return data
 }
 
@@ -1097,6 +1182,8 @@ export const accountsAPI = {
   duplicate,
   update,
   setCodexTicketEnabled,
+  getCodexTicketHistory,
+  retryCodexTicket,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,
   checkMixedChannelRisk,

@@ -176,6 +176,20 @@ func (_c *GroupCreate) SetNillableIsExclusive(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (_c *GroupCreate) SetIsSharedPool(v bool) *GroupCreate {
+	_c.mutation.SetIsSharedPool(v)
+	return _c
+}
+
+// SetNillableIsSharedPool sets the "is_shared_pool" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableIsSharedPool(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetIsSharedPool(*v)
+	}
+	return _c
+}
+
 // SetSecurityPolicyEnabled sets the "security_policy_enabled" field.
 func (_c *GroupCreate) SetSecurityPolicyEnabled(v bool) *GroupCreate {
 	_c.mutation.SetSecurityPolicyEnabled(v)
@@ -1113,6 +1127,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
 	}
+	if _, ok := _c.mutation.IsSharedPool(); !ok {
+		v := group.DefaultIsSharedPool
+		_c.mutation.SetIsSharedPool(v)
+	}
 	if _, ok := _c.mutation.SecurityPolicyEnabled(); !ok {
 		v := group.DefaultSecurityPolicyEnabled
 		_c.mutation.SetSecurityPolicyEnabled(v)
@@ -1311,6 +1329,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
+	}
+	if _, ok := _c.mutation.IsSharedPool(); !ok {
+		return &ValidationError{Name: "is_shared_pool", err: errors.New(`ent: missing required field "Group.is_shared_pool"`)}
 	}
 	if _, ok := _c.mutation.SecurityPolicyEnabled(); !ok {
 		return &ValidationError{Name: "security_policy_enabled", err: errors.New(`ent: missing required field "Group.security_policy_enabled"`)}
@@ -1556,6 +1577,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 		_node.IsExclusive = value
+	}
+	if value, ok := _c.mutation.IsSharedPool(); ok {
+		_spec.SetField(group.FieldIsSharedPool, field.TypeBool, value)
+		_node.IsSharedPool = value
 	}
 	if value, ok := _c.mutation.SecurityPolicyEnabled(); ok {
 		_spec.SetField(group.FieldSecurityPolicyEnabled, field.TypeBool, value)
@@ -2086,6 +2111,18 @@ func (u *GroupUpsert) SetIsExclusive(v bool) *GroupUpsert {
 // UpdateIsExclusive sets the "is_exclusive" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateIsExclusive() *GroupUpsert {
 	u.SetExcluded(group.FieldIsExclusive)
+	return u
+}
+
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (u *GroupUpsert) SetIsSharedPool(v bool) *GroupUpsert {
+	u.Set(group.FieldIsSharedPool, v)
+	return u
+}
+
+// UpdateIsSharedPool sets the "is_shared_pool" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateIsSharedPool() *GroupUpsert {
+	u.SetExcluded(group.FieldIsSharedPool)
 	return u
 }
 
@@ -3250,6 +3287,20 @@ func (u *GroupUpsertOne) SetIsExclusive(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateIsExclusive() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (u *GroupUpsertOne) SetIsSharedPool(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetIsSharedPool(v)
+	})
+}
+
+// UpdateIsSharedPool sets the "is_shared_pool" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateIsSharedPool() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateIsSharedPool()
 	})
 }
 
@@ -4738,6 +4789,20 @@ func (u *GroupUpsertBulk) SetIsExclusive(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateIsExclusive() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (u *GroupUpsertBulk) SetIsSharedPool(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetIsSharedPool(v)
+	})
+}
+
+// UpdateIsSharedPool sets the "is_shared_pool" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateIsSharedPool() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateIsSharedPool()
 	})
 }
 

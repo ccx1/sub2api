@@ -67,6 +67,11 @@ func PrepareNewAccountProtection(a *Account) {
 	if a == nil {
 		return
 	}
+	resetNewAccountProtection(a)
+	configureAccountProtection(a)
+}
+
+func resetNewAccountProtection(a *Account) {
 	a.Extra = maps.Clone(a.Extra)
 	if a.Extra == nil {
 		a.Extra = map[string]any{}
@@ -75,7 +80,6 @@ func PrepareNewAccountProtection(a *Account) {
 	delete(a.Extra, AntiDegradationExtraKey)
 	delete(a.Extra, ProtectionScopeExtraKey)
 	delete(a.Extra, codexFingerprintSeedExtraKey)
-	configureAccountProtection(a)
 }
 
 func configureAccountProtection(a *Account) {
@@ -91,7 +95,8 @@ func configureAccountProtection(a *Account) {
 	prev := map[string]any{"concurrency": a.Concurrency}
 	if (isOpenAIOAuthLike(a) || isAnthropicOAuthLike(a)) && !a.IsShadow() {
 		prev = snapshotAntiDegradeConfig(a)
-		fingerprint, tlsProfile, _ := antiDegradeModeSettings(DefaultAntiDegradeMode)
+		mode := defaultAccountProtectionMode(a)
+		fingerprint, tlsProfile, _ := antiDegradeModeSettings(mode)
 		if isOpenAIOAuthLike(a) {
 			a.Extra[codexFingerprintModeExtraKey] = string(fingerprint)
 			a.Extra = prepareCodexFingerprintExtraForUpdate(a, a.Extra)
@@ -99,7 +104,7 @@ func configureAccountProtection(a *Account) {
 		a.Extra["enable_tls_fingerprint"] = true
 		a.Extra["tls_fingerprint_builtin"] = tlsProfile
 		delete(a.Extra, "tls_fingerprint_profile_id")
-		a.Extra[AntiDegradeMarkerExtraKey] = map[string]any{"enabled": true, "mode": string(DefaultAntiDegradeMode), "max_concurrency": cap, "prev": prev, "applied_at": time.Now().UTC().Format(time.RFC3339)}
+		a.Extra[AntiDegradeMarkerExtraKey] = map[string]any{"enabled": true, "mode": string(mode), "max_concurrency": cap, "prev": prev, "applied_at": time.Now().UTC().Format(time.RFC3339)}
 		a.Extra[ProtectionScopeExtraKey] = "legacy"
 	} else {
 		// Generic protection is a persisted concurrency bound only. It must not
@@ -135,6 +140,7 @@ func PreserveAccountProtection(ctx context.Context, current *Account, incoming m
 	if result == nil {
 		result = map[string]any{}
 	}
+	PreserveSharedPoolExtra(current.Extra, result)
 	delete(result, "random_proxy_last_used")
 	if value, exists := current.Extra["random_proxy_last_used"]; exists {
 		result["random_proxy_last_used"] = value
@@ -209,6 +215,10 @@ func ValidateAccountProtectionConfiguration(a *Account) error {
 // Caller must independently authenticate an administrator. Confirmation is
 // checked here as well as at the HTTP boundary.
 func (s *AntiDegradeService) SetProtection(ctx context.Context, id int64, enabled, confirmDisable bool) (*Account, error) {
+	if s != nil && enabled {
+		s.settingsMu.Lock()
+		defer s.settingsMu.Unlock()
+	}
 	return s.transition(ctx, id, func(planner *AntiDegradeService) error {
 		_, err := planner.setProtection(ctx, id, enabled, confirmDisable)
 		return err
@@ -228,6 +238,9 @@ func (s *AntiDegradeService) setProtection(ctx context.Context, id int64, enable
 	}
 	if !enabled {
 		return s.revertAntiDegrade(ctx, id)
+	}
+	if (isOpenAIOAuthLike(a) || isAnthropicOAuthLike(a)) && !a.IsShadow() {
+		return s.applyAntiDegradeMode(ctx, id, "")
 	}
 	configureAccountProtection(a)
 	return s.admin.UpdateAccount(context.WithValue(ctx, mode1ManagedWriteKey{}, true), id, &UpdateAccountInput{Extra: a.Extra, Concurrency: &a.Concurrency})

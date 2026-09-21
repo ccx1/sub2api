@@ -238,6 +238,7 @@ type CreateGroupInput struct {
 	Platform                   string
 	RateMultiplier             float64
 	IsExclusive                bool
+	IsSharedPool               bool
 	SubscriptionType           string   // standard/subscription
 	DailyLimitUSD              *float64 // 日限额 (USD)
 	WeeklyLimitUSD             *float64 // 周限额 (USD)
@@ -321,6 +322,7 @@ type UpdateGroupInput struct {
 	Platform                   string
 	RateMultiplier             *float64 // 使用指针以支持设置为0
 	IsExclusive                *bool
+	IsSharedPool               *bool
 	Status                     string
 	SubscriptionType           string   // standard/subscription
 	DailyLimitUSD              *float64 // 日限额 (USD)
@@ -473,6 +475,7 @@ type BulkUpdateAccountsInput struct {
 }
 
 type BulkUpdateAccountFilters struct {
+	Shared      string
 	Platform    string
 	Type        string
 	Status      string
@@ -528,6 +531,7 @@ type BulkUpdateAccountsResult struct {
 }
 
 type CreateProxyInput struct {
+	GroupID        *int64
 	Name           string
 	Protocol       string
 	Host           string
@@ -543,6 +547,8 @@ type CreateProxyInput struct {
 // UpdateProxyInput preserves omitted expiry/backup values; Clear flags explicitly
 // remove them. A nil ExpiryWarnDays preserves the current warning period.
 type UpdateProxyInput struct {
+	GroupID        *int64
+	ClearGroupID   bool
 	Name           string
 	Protocol       string
 	Host           string

@@ -844,6 +844,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
+	var ticketReceipt *openAICodexTicketWSReceipt
 	headers, _, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,
@@ -856,6 +857,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		promptCacheKey,
 		gjson.GetBytes(firstClientMessage, "model").String(),
 		gjson.GetBytes(firstClientMessage, "service_tier").String(),
+		&ticketReceipt,
 	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
@@ -941,6 +943,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
+	ticketReceipt.observeHandshake(ctx, s, handshakeHeaders)
+	upstreamFrameConn = s.observeOpenAICodexTicketWSFrames(ctx, upstreamFrameConn, ticketReceipt, account)
 	upstreamFrameConn = &randomProxyObservedWSFrameConn{FrameConn: upstreamFrameConn, account: account, source: s.accountRepo}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,

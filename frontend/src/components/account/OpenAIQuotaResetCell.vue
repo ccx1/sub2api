@@ -17,7 +17,7 @@
       <button
         type="button"
         class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
-        :disabled="loading || resetting"
+        :disabled="actionsDisabled"
         :title="countButtonTitle"
         @click="handleQuery()"
       >
@@ -41,7 +41,7 @@
       <button
         type="button"
         class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-orange-600 transition-colors hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-orange-400 dark:hover:bg-orange-900/30"
-        :disabled="resetting || loading || !canReset"
+        :disabled="actionsDisabled || !canReset"
         :title="resetButtonTitle"
         @click="openResetConfirm"
       >
@@ -164,23 +164,31 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import {
   refreshOpenAIQuota,
   resetOpenAIQuota,
   type OpenAIQuotaUsage,
+  type OpenAIQuotaRefreshResult,
   type OpenAIQuotaResetResult
 } from '@/api/admin/accounts'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
+type QuotaAccount = Pick<Account, 'id' | 'platform' | 'type' | 'parent_account_id' | 'extra'>
+
 const props = defineProps<{
-  account: Account
+  account: QuotaAccount
+  queryQuota?: (id: number) => Promise<OpenAIQuotaRefreshResult>
+  resetQuota?: (id: number) => Promise<OpenAIQuotaResetResult>
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{
   'account-updated': [account: Account]
+  'quota-reset': [result: OpenAIQuotaResetResult]
+  'busy-change': [busy: boolean]
 }>()
 
 const { t } = useI18n()
@@ -197,6 +205,16 @@ const resetMessage = ref<string | null>(null)
 const resetWarning = ref<string | null>(null)
 const showResetConfirm = ref(false)
 const showResetCreditDetails = ref(false)
+const busy = computed(() => loading.value || resetting.value)
+const actionsDisabled = computed(() => props.disabled || busy.value || !visible.value)
+let requestGeneration = 0
+let liveRequestStarted = false
+let unmounted = false
+
+const isCurrentRequest = (generation: number, accountID: number) =>
+  !unmounted && generation === requestGeneration && props.account.id === accountID
+
+watch(busy, (value) => emit('busy-change', value), { flush: 'sync' })
 
 type AutoResetCreditState = NonNullable<NonNullable<Account['extra']>['codex_auto_reset_credit_state']>
 const validAutoResetStatuses = new Set(['checking', 'available', 'resetting', 'success', 'no_credit', 'failed'])
@@ -239,7 +257,7 @@ const autoResetStateClass = computed(() => {
 // freshness signal, so an unfiltered read would offer to consume credits that no
 // longer exist. A snapshot claiming credits with no usable expiration left is
 // treated as absent, which keeps the reset button gated on a live query.
-const readCachedResetCredits = (account: Account): OpenAIQuotaUsage | null => {
+const readCachedResetCredits = (account: QuotaAccount): OpenAIQuotaUsage | null => {
   const cached = account.extra?.codex_reset_credit_snapshot
   if (!cached || typeof cached !== 'object' || Array.isArray(cached)) return null
 
@@ -383,14 +401,18 @@ const toggleResetCreditDetails = () => {
 }
 
 const handleQuery = async () => {
-  if (loading.value) return
+  if (actionsDisabled.value) return
+  const generation = ++requestGeneration
+  const accountID = props.account.id
+  liveRequestStarted = true
   loading.value = true
   error.value = null
   resetMessage.value = null
   resetWarning.value = null
   showResetCreditDetails.value = false
   try {
-    const result = await refreshOpenAIQuota(props.account.id)
+    const result = await (props.queryQuota ?? refreshOpenAIQuota)(accountID)
+    if (!isCurrentRequest(generation, accountID)) return
     // The upstream read succeeded even when the snapshot write was rejected, so
     // the live count is always adopted. Only the persisted view is left alone,
     // which keeps the displayed expirations consistent with what is stored.
@@ -401,14 +423,14 @@ const handleQuery = async () => {
       resetWarning.value = t('admin.accounts.openaiQuotaReset.refreshCachePersistFailed')
     }
   } catch (e) {
-    error.value = extractErrorMessage(e)
+    if (isCurrentRequest(generation, accountID)) error.value = extractErrorMessage(e)
   } finally {
-    loading.value = false
+    if (isCurrentRequest(generation, accountID)) loading.value = false
   }
 }
 
 const openResetConfirm = () => {
-  if (resetting.value || loading.value) return
+  if (actionsDisabled.value) return
   if (!canReset.value) {
     error.value = t('admin.accounts.openaiQuotaReset.noCreditsAvailable')
     return
@@ -418,44 +440,50 @@ const openResetConfirm = () => {
 
 const confirmReset = async () => {
   showResetConfirm.value = false
-  if (resetting.value) return
+  if (actionsDisabled.value) return
   if (!canReset.value) {
     error.value = t('admin.accounts.openaiQuotaReset.noCreditsAvailable')
     return
   }
+  const generation = ++requestGeneration
+  const accountID = props.account.id
+  liveRequestStarted = true
   resetting.value = true
   error.value = null
   resetMessage.value = null
   resetWarning.value = null
+  let completed: OpenAIQuotaResetResult | null = null
   try {
-    const result: OpenAIQuotaResetResult = await resetOpenAIQuota(props.account.id)
-    showResetCreditDetails.value = false
-    if (result.cache_refreshed && result.quota) {
-      data.value = result.quota
-      cachedData.value = result.quota
-    } else {
-      // A credit was consumed but the post-reset count could not be read back.
-      // Whatever we still hold is one generation stale, so report the count as
-      // unknown instead of letting a second consumption start from stale data.
-      data.value = null
-    }
-    if (result.account) emit('account-updated', result.account)
-
-    if (result.warning_code === 'reset_credit_cache_refresh_failed') {
-      resetWarning.value = t('admin.accounts.openaiQuotaReset.resetCacheRefreshFailed')
-    } else if (result.warning_code === 'account_state_recovery_failed') {
-      resetWarning.value = t('admin.accounts.openaiQuotaReset.resetAccountRecoveryFailed')
-    } else if (result.warning_code === 'account_state_refresh_failed') {
-      resetWarning.value = t('admin.accounts.openaiQuotaReset.resetAccountRefreshFailed')
-    } else {
-      resetMessage.value = t('admin.accounts.openaiQuotaReset.resetSuccess', {
-        windows: result.windows_reset
-      })
-    }
+    const result = await (props.resetQuota ?? resetOpenAIQuota)(accountID)
+    if (!isCurrentRequest(generation, accountID)) return
+    applyResetResult(result)
+    completed = result
   } catch (e) {
-    error.value = extractErrorMessage(e)
+    if (isCurrentRequest(generation, accountID)) error.value = extractErrorMessage(e)
   } finally {
-    resetting.value = false
+    if (isCurrentRequest(generation, accountID)) resetting.value = false
+  }
+  if (completed && isCurrentRequest(generation, accountID)) emit('quota-reset', completed)
+}
+
+const applyResetResult = (result: OpenAIQuotaResetResult) => {
+  showResetCreditDetails.value = false
+  if (result.cache_refreshed && result.quota) {
+    data.value = result.quota
+    cachedData.value = result.quota
+  } else {
+    // 已扣次但回读失败时，保留到期明细，次数必须未知且不能被旧快照恢复。
+    data.value = null
+  }
+  if (result.account) emit('account-updated', result.account)
+  if (result.warning_code === 'reset_credit_cache_refresh_failed') {
+    resetWarning.value = t('admin.accounts.openaiQuotaReset.resetCacheRefreshFailed')
+  } else if (result.warning_code === 'account_state_recovery_failed') {
+    resetWarning.value = t('admin.accounts.openaiQuotaReset.resetAccountRecoveryFailed')
+  } else if (result.warning_code === 'account_state_refresh_failed') {
+    resetWarning.value = t('admin.accounts.openaiQuotaReset.resetAccountRefreshFailed')
+  } else {
+    resetMessage.value = t('admin.accounts.openaiQuotaReset.resetSuccess', { windows: result.windows_reset })
   }
 }
 
@@ -463,6 +491,8 @@ watch(
   () => props.account.id,
   () => {
     // Account row may be reused across paginated lists; reset local state.
+    ++requestGeneration
+    liveRequestStarted = false
     cachedData.value = readCachedResetCredits(props.account)
     data.value = cachedData.value
     error.value = null
@@ -472,8 +502,26 @@ watch(
     resetting.value = false
     showResetConfirm.value = false
     showResetCreditDetails.value = false
-  }
+  },
+  { flush: 'sync' }
 )
+
+watch(() => props.account.extra?.codex_reset_credit_snapshot, () => {
+  // 仅首次主动操作前接收异步快照；之后以本组件查询或消费得到的实时结果为准。
+  if (liveRequestStarted) return
+  cachedData.value = readCachedResetCredits(props.account)
+  data.value = cachedData.value
+}, { deep: true, flush: 'sync' })
+
+watch(() => props.disabled, (disabled) => {
+  if (disabled) showResetConfirm.value = false
+})
+
+onBeforeUnmount(() => {
+  unmounted = true
+  ++requestGeneration
+  if (busy.value) emit('busy-change', false)
+})
 
 watch(
   resetCreditExpirations,

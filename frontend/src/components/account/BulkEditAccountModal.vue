@@ -694,6 +694,8 @@
             v-model:enabled="randomProxyEnabled"
             v-model:scope="randomProxyPoolScope"
             v-model:ids="randomProxyPoolIds"
+            v-model:group-id="randomProxyGroupId"
+            v-model:group-error="randomProxyGroupError"
             v-model:policy="randomProxyEmptyPoolPolicy"
             v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
             :proxies="proxies"
@@ -709,6 +711,26 @@
           <input id="bulk-edit-daily-cooldown-enabled" v-model="enableDailyCooldown" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
         </label>
         <DailyCooldownSettings v-model="dailyCooldown" :disabled="!enableDailyCooldown" :class="!enableDailyCooldown && 'opacity-50'" />
+      </div>
+
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="mb-3 flex cursor-pointer items-center justify-between gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+          <span>{{ t('admin.accounts.codexTicketProxy.bulkApply') }}</span>
+          <input
+            id="bulk-edit-codex-ticket-proxy-enabled"
+            v-model="enableCodexTicketProxy"
+            type="checkbox"
+            :disabled="!allOpenAIOAuth || submitting"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </label>
+        <CodexTicketProxySettings
+          v-if="allOpenAIOAuth"
+          v-model="codexTicketProxy"
+          :proxies="proxies"
+          :disabled="!enableCodexTicketProxy || submitting"
+        />
+        <p v-else class="input-hint">{{ t('admin.accounts.codexTicketProxy.bulkUnsupported') }}</p>
       </div>
 
       <!-- Concurrency & Priority -->
@@ -1007,8 +1029,10 @@
           <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.openai.codexFingerprintModeDesc') }}
           </p>
-          <Select v-model="codexFingerprintMode" data-testid="bulk-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
+          <Select v-model="codexFingerprintMode" data-testid="bulk-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" :disabled="!enableCodexFingerprintMode" />
         </div>
+        <p class="mt-3 text-xs text-gray-600 dark:text-gray-400">{{ t('accountProtection.bulkManagedHint') }}</p>
+        <a href="/admin/account-protection" class="mt-1 inline-block text-sm text-primary-600 hover:underline dark:text-primary-400">{{ t('accountProtection.manageAction') }}</a>
       </div>
 
       <!-- Upstream billing auto probe (any API-key platform) -->
@@ -1510,9 +1534,11 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
+import { readCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
-import { randomProxyExtra, isValidRandomProxyReuseMinutes, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1711,9 +1737,13 @@ const headerOverrideEnabled = ref(false)
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
 const proxyId = ref<number | null>(null)
 const randomProxyEnabled = ref(false)
+const enableCodexTicketProxy = ref(false)
+const codexTicketProxy = ref(readCodexTicketProxy())
 const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
 const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
 const randomProxyPoolIds = ref<number[]>([])
+const randomProxyGroupId = ref<number | null>(null)
+const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
 const enableDailyCooldown = ref(false)
 const dailyCooldown = ref(normalizeDailyCooldown())
@@ -1979,12 +2009,17 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.proxy_id = randomProxyEnabled.value || proxyId.value === null ? 0 : proxyId.value
     const extra = ensureExtra()
     if (randomProxyEnabled.value) {
-      Object.assign(extra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value }))
+      Object.assign(extra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value }))
+    } else {
+      extra.proxy_mode = ''
     }
   }
 
   if (enableDailyCooldown.value) {
     updates.extra = withDailyCooldownExtra(ensureExtra(), dailyCooldown.value)
+  }
+  if (enableCodexTicketProxy.value && allOpenAIOAuth.value) {
+    Object.assign(ensureExtra(), codexTicketProxyExtra(codexTicketProxy.value))
   }
 
   if (enableConcurrency.value) {
@@ -2240,6 +2275,14 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
+  const ticketProxyError = enableCodexTicketProxy.value && (!allOpenAIOAuth.value
+    ? 'admin.accounts.codexTicketProxy.bulkUnsupported'
+    : codexTicketProxyValidationError(codexTicketProxy.value, props.proxies))
+  if (ticketProxyError) {
+    appStore.showError(t(ticketProxyError))
+    return
+  }
   const cooldownError = enableDailyCooldown.value && dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError || (enableProxy.value && randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
     appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
@@ -2249,12 +2292,17 @@ const handleSubmit = async () => {
     appStore.showError(t('admin.accounts.randomProxyPoolRequired'))
     return
   }
+  if (enableProxy.value && randomProxyEnabled.value && randomProxyPoolScope.value === 'group' && (!normalizeRandomProxyGroupId(randomProxyGroupId.value) || randomProxyGroupError.value)) {
+    appStore.showError(t(randomProxyGroupError.value || 'accountProxyGroups.required'))
+    return
+  }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
   }
 
   const hasAnyFieldEnabled =
+    enableCodexTicketProxy.value ||
     enableDailyCooldown.value ||
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
@@ -2413,6 +2461,8 @@ watch(
       enableInterceptWarmup.value = false
       enableHeaderOverride.value = false
       enableProxy.value = false
+      enableCodexTicketProxy.value = false
+      codexTicketProxy.value = readCodexTicketProxy()
       enableConcurrency.value = false
       enableLoadFactor.value = false
       enablePriority.value = false
@@ -2438,6 +2488,8 @@ watch(
       randomProxyEmptyPoolPolicy.value = 'reject'
       randomProxyPoolScope.value = 'all'
       randomProxyPoolIds.value = []
+      randomProxyGroupId.value = null
+      randomProxyGroupError.value = null
       randomProxyMaxReuseMinutes.value = 0
       enableDailyCooldown.value = false
       dailyCooldown.value = normalizeDailyCooldown()

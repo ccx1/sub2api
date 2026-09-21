@@ -28,7 +28,7 @@ func TestProtectionSurvivesStaleAdminForm(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, updated.AntiDegradationEnabled())
 	require.Equal(t, enabled.Extra[AntiDegradeMarkerExtraKey], updated.Extra[AntiDegradeMarkerExtraKey])
-	require.Equal(t, "session", updated.Extra[codexFingerprintModeExtraKey])
+	require.Equal(t, "full", updated.Extra[codexFingerprintModeExtraKey])
 	_, err = protection.SetProtection(ctx, 1, false, true)
 	require.NoError(t, err)
 	updated, err = admin.UpdateAccount(ctx, 1, &UpdateAccountInput{Extra: staleEnabled})
@@ -77,7 +77,7 @@ func TestProtectionOpenAIHTTPUsesConfiguredTLS(t *testing.T) {
 			defer response.Body.Close()
 			if enabled {
 				require.Equal(t, 1, transport.fingerprint)
-				require.Equal(t, tlsfingerprint.BuiltinProfile("nodejs24").CacheKey(), transport.profile.CacheKey())
+				require.Equal(t, tlsfingerprint.BuiltinProfile("nodejs22").CacheKey(), transport.profile.CacheKey())
 			} else {
 				require.Equal(t, 1, transport.standard)
 				require.Zero(t, transport.fingerprint)

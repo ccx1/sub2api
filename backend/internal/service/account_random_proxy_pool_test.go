@@ -52,6 +52,30 @@ func TestResolveRandomProxyEmptySelectedPoolPolicies(t *testing.T) {
 	}
 }
 
+func TestResolveRandomProxyEmptySelectedPoolReachesBalancedRelease(t *testing.T) {
+	for _, policy := range []string{RandomProxyEmptyPoolPolicyReject, RandomProxyEmptyPoolPolicyDisable, RandomProxyEmptyPoolPolicyDirect} {
+		t.Run(policy, func(t *testing.T) {
+			account := randomProxyAccount(policy)
+			account.Extra[RandomProxyPoolScopeExtraKey] = RandomProxyPoolSelected
+			selector := &balancedAccountProxyStub{pluginDirectoryProxyRepo: pluginDirectoryProxyRepo{
+				proxy: &Proxy{ID: 7, Status: StatusActive},
+			}}
+			err := ResolveRandomProxy(context.Background(), account, selector)
+			if policy == RandomProxyEmptyPoolPolicyDirect {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrRandomProxyUnavailable)
+				require.Equal(t, policy, RandomProxyUnavailablePolicy(err))
+			}
+			require.Len(t, selector.selections, 1, "空范围仍需通知allocator释放旧动态绑定")
+			require.True(t, selector.selections[0].Restricted)
+			require.Empty(t, selector.selections[0].IDs)
+			require.Nil(t, account.ProxyID, "allocator异常返回其它代理也不能越过空范围")
+			require.Zero(t, selector.globalCalls)
+		})
+	}
+}
+
 func TestValidateRandomProxyPoolExtra(t *testing.T) {
 	for _, raw := range []string{
 		`{"random_proxy_pool_scope":"selected","random_proxy_pool_ids":[]}`,

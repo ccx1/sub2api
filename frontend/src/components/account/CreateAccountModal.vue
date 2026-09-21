@@ -3008,12 +3008,21 @@
           v-model:enabled="randomProxyEnabled"
           v-model:scope="randomProxyPoolScope"
           v-model:ids="randomProxyPoolIds"
+          v-model:group-id="randomProxyGroupId"
+          v-model:group-error="randomProxyGroupError"
           v-model:policy="randomProxyEmptyPoolPolicy"
           v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
           :proxies="proxies"
           @update:enabled="handleRandomProxyChange"
         />
       </div>
+
+      <CodexTicketProxySettings
+        v-if="supportsCodexTicketProxy(form)"
+        v-model="codexTicketProxy"
+        :proxies="proxies"
+        :disabled="submitting || openaiOAuth.loading.value"
+      />
 
       <DailyCooldownSettings v-model="dailyCooldown" />
 
@@ -3942,9 +3951,11 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
+import { readCodexTicketProxy, supportsCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
-import { randomProxyExtra, isValidRandomProxyReuseMinutes, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -4748,9 +4759,17 @@ const form = reactive({
 
 
 const randomProxyEnabled = ref(false)
+const codexTicketProxy = ref(readCodexTicketProxy({ codex_ticket_proxy_mode: 'account' }))
+function validateCodexTicketProxy(): boolean {
+  const error = supportsCodexTicketProxy(form) && codexTicketProxyValidationError(codexTicketProxy.value, props.proxies)
+  if (error) appStore.showError(t(error))
+  return !error
+}
 const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
 const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
 const randomProxyPoolIds = ref<number[]>([])
+const randomProxyGroupId = ref<number | null>(null)
+const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
 const dailyCooldown = ref(normalizeDailyCooldown())
 
@@ -4761,6 +4780,11 @@ const handleRandomProxyChange = (enabled: boolean) => {
 }
 
 const withProxySelection = <T extends { proxy_id?: number | null; extra?: Record<string, unknown> }>(payload: T): T => {
+  if (supportsCodexTicketProxy(form)) {
+    const error = codexTicketProxyValidationError(codexTicketProxy.value, props.proxies)
+    if (error) throw new Error(t(error))
+    payload = { ...payload, extra: { ...payload.extra, ...codexTicketProxyExtra(codexTicketProxy.value) } }
+  }
   const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError) throw new Error(t(cooldownError))
   if (dailyCooldown.value.enabled) payload = { ...payload, extra: withDailyCooldownExtra(payload.extra, dailyCooldown.value) }
@@ -4771,12 +4795,15 @@ const withProxySelection = <T extends { proxy_id?: number | null; extra?: Record
   if (randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
     throw new Error(t('admin.accounts.randomProxyPoolRequired'))
   }
+  if (randomProxyPoolScope.value === 'group' && (!normalizeRandomProxyGroupId(randomProxyGroupId.value) || randomProxyGroupError.value)) {
+    throw new Error(t(randomProxyGroupError.value || 'accountProxyGroups.required'))
+  }
   return {
     ...payload,
     proxy_id: null,
     extra: {
       ...(payload.extra || {}),
-      ...randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value })
+      ...randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value })
     }
   }
 }
@@ -5358,9 +5385,12 @@ const resetForm = () => {
   form.group_ids = []
   form.expires_at = null
   randomProxyEnabled.value = false
+  codexTicketProxy.value = readCodexTicketProxy({ codex_ticket_proxy_mode: 'account' })
   randomProxyEmptyPoolPolicy.value = 'reject'
   randomProxyPoolScope.value = 'all'
   randomProxyPoolIds.value = []
+  randomProxyGroupId.value = null
+  randomProxyGroupError.value = null
   randomProxyMaxReuseMinutes.value = 0
   dailyCooldown.value = normalizeDailyCooldown()
   accountCategory.value = 'oauth-based'
@@ -5676,6 +5706,8 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (submitting.value || openaiOAuth.loading.value) return
+  if (!validateCodexTicketProxy()) return
   const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError || (randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
     appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
@@ -5683,6 +5715,10 @@ const handleSubmit = async () => {
   }
   if (randomProxyEnabled.value && randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
     appStore.showError(t('admin.accounts.randomProxyPoolRequired'))
+    return
+  }
+  if (randomProxyEnabled.value && randomProxyPoolScope.value === 'group' && (!normalizeRandomProxyGroupId(randomProxyGroupId.value) || randomProxyGroupError.value)) {
+    appStore.showError(t(randomProxyGroupError.value || 'accountProxyGroups.required'))
     return
   }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
@@ -6349,6 +6385,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
 
 // OpenAI OAuth 授权码兑换
 const handleOpenAIExchange = async (authCode: string) => {
+  if (!validateCodexTicketProxy()) return
   const oauthClient = openaiOAuth
   if (!authCode.trim() || !oauthClient.sessionId.value) return
 
@@ -6483,6 +6520,7 @@ const isAgentIdentityImportContent = (content: string) => {
 }
 
 const handleOpenAIImportCodexSession = async (content: string) => {
+  if (!validateCodexTicketProxy()) return
   const oauthClient = openaiOAuth
   const trimmed = content.trim()
   if (!trimmed) {
@@ -6565,6 +6603,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 }
 
 const handleOpenAIImportCodexPAT = async (accessToken: string) => {
+  if (!validateCodexTicketProxy()) return
   const oauthClient = openaiOAuth
   const trimmed = accessToken.trim()
   if (!trimmed) {
@@ -6615,6 +6654,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
 // OpenAI RT 批量验证和创建（共享逻辑）
 const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string) => {
+  if (!validateCodexTicketProxy()) return
   const oauthClient = openaiOAuth
   if (!refreshTokenInput.trim()) return
 

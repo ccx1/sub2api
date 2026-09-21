@@ -255,6 +255,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, err
 	}
+	if _, shared := source.Extra[SharedPoolOwnerKey]; shared {
+		return nil, infraerrors.BadRequest("SHARED_ACCOUNT_DUPLICATE_UNSUPPORTED", "共享账号不能复制为平台自有账号，请使用共享池分组分配")
+	}
 	if source.IsCredentialShadow() {
 		return nil, infraerrors.BadRequest(
 			"ACCOUNT_DUPLICATE_SHADOW_UNSUPPORTED",
@@ -411,6 +414,10 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	accountExtra, err := normalizeCodexTicketProxyUpdate(accountExtra, nil)
+	if err != nil {
+		return nil, err
+	}
 	if err := ValidateRandomProxyPoolExtra(accountExtra); err != nil {
 		return nil, err
 	}
@@ -541,6 +548,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateAccountRandomProxyGroup(ctx, account); err != nil {
+		return nil, err
+	}
+	if err := s.validateCodexTicketProxyAccountUpdate(ctx, account, account.Extra); err != nil {
+		return nil, err
+	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
@@ -590,6 +603,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
+		update := *input
+		update.Extra = mergeRandomProxyRoutingExtra(input.Extra, account.Extra)
+		input = &update
 		if err := ValidateRandomProxyPoolExtra(input.Extra); err != nil {
 			return nil, err
 		}
@@ -603,7 +619,23 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err != nil {
 			return nil, err
 		}
+		normalizedExtra, err = normalizeCodexTicketProxyUpdate(normalizedExtra, account.Extra)
+		if err != nil {
+			return nil, err
+		}
+		if hasCodexTicketProxyUpdates(input.Extra) {
+			proxyAccount := *account
+			if input.Type != "" {
+				proxyAccount.Type = input.Type
+			}
+			if err := s.validateCodexTicketProxyAccountUpdate(ctx, &proxyAccount, normalizedExtra); err != nil {
+				return nil, err
+			}
+		}
 		normalizedExtra = NormalizeProxyModeExtra(normalizedExtra)
+		if err := s.validateAccountRandomProxyGroup(ctx, &Account{Extra: normalizedExtra}); err != nil {
+			return nil, err
+		}
 		normalizedExtra, err = normalizeGrokMediaEligibilityUpdateExtra(account, input, normalizedExtra)
 		if err != nil {
 			return nil, err
@@ -872,6 +904,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	account.Extra = codexTicketProxyExplicitExtra(account.Extra, input.Extra)
+	writeCtx := WithCodexTicketProxyWrite(ctx, input.Extra)
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -882,7 +916,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if updater != nil {
 		if err := updater.UpdateWithAccountBillingSettings(
-			ctx,
+			writeCtx,
 			account,
 			requestedProbeEnabledUpdate,
 			requestedRateSyncEnabledUpdate,
@@ -893,7 +927,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		billingSettingsAppliedAtomically = true
 	}
 	if !billingSettingsAppliedAtomically {
-		if err := s.accountRepo.Update(ctx, account); err != nil {
+		if err := s.accountRepo.Update(writeCtx, account); err != nil {
 			return nil, err
 		}
 		if (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil) &&
@@ -937,6 +971,29 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	routingUpdates := maps.Clone(updates)
+	if hasRandomProxyGroupUpdates(updates) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := s.validateRandomProxyGroupUpdate(ctx, account, updates); err != nil {
+			return err
+		}
+	}
+	if hasCodexTicketProxyUpdates(updates) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		normalized, err := normalizeCodexTicketProxyUpdate(updates, account.Extra)
+		if err != nil {
+			return err
+		}
+		if err := s.validateCodexTicketProxyAccountUpdate(ctx, account, normalized); err != nil {
+			return err
+		}
+	}
 	if err := ValidateRandomProxyReuseExtra(updates); err != nil {
 		return err
 	}
@@ -944,6 +1001,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 		return err
 	}
 	updates = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(updates, nil))
+	updates = explicitRandomProxyRoutingPatch(updates, routingUpdates)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -970,6 +1028,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	routingUpdates := maps.Clone(input.Extra)
 	if err := ValidateRandomProxyPoolExtra(input.Extra); err != nil {
 		return nil, err
 	}
@@ -981,6 +1040,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(input.Extra, nil))
+	input.Extra = explicitRandomProxyRoutingPatch(input.Extra, routingUpdates)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
@@ -1024,7 +1084,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || hasCodexTicketProxyUpdates(input.Extra) || hasRandomProxyGroupUpdates(routingUpdates) {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1035,6 +1095,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+			if hasRandomProxyGroupUpdates(routingUpdates) {
+				if err := s.validateRandomProxyGroupUpdate(ctx, account, routingUpdates); err != nil {
+					return nil, err
+				}
+			}
+			if hasCodexTicketProxyUpdates(input.Extra) {
+				normalized, err := normalizeCodexTicketProxyUpdate(input.Extra, account.Extra)
+				if err != nil {
+					return nil, err
+				}
+				if err := s.validateCodexTicketProxyAccountUpdate(ctx, account, normalized); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	if openAISettings.any() {
@@ -1265,6 +1339,7 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	if filters == nil {
 		return nil, nil
 	}
+	ctx = WithSharedAccountFilter(ctx, filters.Shared)
 
 	groupID := int64(0)
 	switch strings.TrimSpace(filters.Group) {
@@ -1392,6 +1467,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 	parent, err := s.accountRepo.GetByID(ctx, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("get parent account: %w", err)
+	}
+	if _, shared := parent.Extra[SharedPoolOwnerKey]; shared {
+		return nil, infraerrors.BadRequest("SHARED_ACCOUNT_SHADOW_UNSUPPORTED", "共享账号暂不支持创建影子账号")
 	}
 	if !parent.IsOpenAIOAuth() {
 		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_INVALID_PARENT",

@@ -42,6 +42,17 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+
+	// 共享池请求快照；普通账号保持零值，不增加收益查询。
+	GroupID                        int64
+	SharedPoolOwnerID              int64
+	SharedPoolGroup                bool
+	UsesPlatformProxy              bool
+	SharedPoolProxyID              *int64
+	SharedPoolBaseCost             float64
+	SharedPoolSettlementMultiplier *float64
+	SharedPoolPlatformRateBPS      *int
+	SharedPoolProxyRateBPS         *int
 }
 
 func (c *UsageBillingCommand) Normalize() {
@@ -131,6 +142,15 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	)
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
+	}
+	if c.SharedPoolOwnerID > 0 {
+		raw += fmt.Sprintf("|shared:%d:%d:%t:%t:%d", c.SharedPoolOwnerID, c.GroupID, c.SharedPoolGroup, c.UsesPlatformProxy, valueOrZero(c.SharedPoolProxyID))
+		if c.SharedPoolSettlementMultiplier != nil {
+			raw += fmt.Sprintf("|settlement:%0.10f:%0.10f", c.SharedPoolBaseCost, *c.SharedPoolSettlementMultiplier)
+			if c.SharedPoolPlatformRateBPS != nil && c.SharedPoolProxyRateBPS != nil {
+				raw += fmt.Sprintf(":%d:%d", *c.SharedPoolPlatformRateBPS, *c.SharedPoolProxyRateBPS)
+			}
+		}
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

@@ -6,6 +6,12 @@ import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
 
+const route = vi.hoisted(() => ({ query: {} as Record<string, string> }))
+vi.mock('vue-router', async () => ({
+  ...await vi.importActual<typeof import('vue-router')>('vue-router'),
+  useRoute: () => route
+}))
+
 const {
   listKeys,
   updateKey,
@@ -268,6 +274,7 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
 describe('user KeysView column settings', () => {
   beforeEach(() => {
     localStorage.clear()
+    route.query = {}
 
     listKeys.mockReset()
     updateKey.mockReset()
@@ -581,6 +588,16 @@ describe('user KeysView column settings', () => {
       await chooseProvider(wrapper, 'other')
       expect(optionIds(wrapper)).toEqual([7, 8, 9, 10, 11])
       expect(wrapper.findAllComponents({ name: 'Select' })[0].props('options')).toHaveLength(13)
+    })
+
+    it('ignores retired shared pool links without opening key creation', async () => {
+      route.query = { shared_group_id: '2' }
+      getAvailableGroups.mockResolvedValue(availableGroups.map(group => ({ ...group, is_shared_pool: group.id === 2 })))
+      const wrapper = await mountView()
+      expect(wrapper.find('#key-form').exists()).toBe(false)
+      expect(keysAPI.create).not.toHaveBeenCalled()
+      expect(updateKey).not.toHaveBeenCalled()
+      wrapper.unmount()
     })
 
     it('clears the previous group on provider change and submits only the newly selected group', async () => {

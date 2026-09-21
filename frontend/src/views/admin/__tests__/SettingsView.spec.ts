@@ -7,6 +7,10 @@ import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ hash: '' }),
+  RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
+}));
 
 const {
   getSettings,
@@ -720,18 +724,18 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("submits the Codex ticket harvest toggle", async () => {
+  it("links to ticket configuration and does not overwrite its enabled flag from stale system settings", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       openai_codex_ticket_enabled: false,
     });
     const wrapper = mountView();
     await flushPromises();
-    const toggle = wrapper.get("#codex-ticket-enabled");
-    await toggle.setValue(true);
+    expect(wrapper.find("#codex-ticket-enabled").exists()).toBe(false);
+    expect(wrapper.get('a[href="/admin/codex-ticket-settings"]').exists()).toBe(true);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_enabled).toBe(true);
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty('openai_codex_ticket_enabled');
     wrapper.unmount();
   });
 

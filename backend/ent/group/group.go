@@ -38,6 +38,8 @@ const (
 	FieldPeakRateMultiplier = "peak_rate_multiplier"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
+	// FieldIsSharedPool holds the string denoting the is_shared_pool field in the database.
+	FieldIsSharedPool = "is_shared_pool"
 	// FieldSecurityPolicyEnabled holds the string denoting the security_policy_enabled field in the database.
 	FieldSecurityPolicyEnabled = "security_policy_enabled"
 	// FieldSecurityPolicyMode holds the string denoting the security_policy_mode field in the database.
@@ -240,6 +242,7 @@ var Columns = []string{
 	FieldPeakEnd,
 	FieldPeakRateMultiplier,
 	FieldIsExclusive,
+	FieldIsSharedPool,
 	FieldSecurityPolicyEnabled,
 	FieldSecurityPolicyMode,
 	FieldSecurityPolicyEmailEnabled,
@@ -351,6 +354,8 @@ var (
 	DefaultPeakRateMultiplier float64
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
+	// DefaultIsSharedPool holds the default value on creation for the "is_shared_pool" field.
+	DefaultIsSharedPool bool
 	// DefaultSecurityPolicyEnabled holds the default value on creation for the "security_policy_enabled" field.
 	DefaultSecurityPolicyEnabled bool
 	// DefaultSecurityPolicyMode holds the default value on creation for the "security_policy_mode" field.
@@ -514,6 +519,11 @@ func ByPeakRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByIsExclusive orders the results by the is_exclusive field.
 func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsExclusive, opts...).ToFunc()
+}
+
+// ByIsSharedPool orders the results by the is_shared_pool field.
+func ByIsSharedPool(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldIsSharedPool, opts...).ToFunc()
 }
 
 // BySecurityPolicyEnabled orders the results by the security_policy_enabled field.

@@ -132,6 +132,10 @@ type SettingService struct {
 	openAICodexVersionSF               singleflight.Group
 	openAICodexTicketEnabledCache      atomic.Value // *cachedOpenAICodexTicketEnabled
 	openAICodexTicketEnabledSF         singleflight.Group
+	openAICodexTicketEnabledMu         sync.Mutex
+	codexTicketSettingsMu              sync.Mutex
+	codexTicketPublishMu               sync.RWMutex
+	codexTicketSettingsCache           atomic.Pointer[cachedCodexTicketSettings]
 	openAICodexTicketHarvestProxyCache atomic.Value // *cachedOpenAICodexTicketHarvestProxy
 	openAICodexTicketHarvestProxySF    singleflight.Group
 	proxyPoolSettingsMu                sync.Mutex

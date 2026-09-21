@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
+import CodexTicketProxySettings from '../CodexTicketProxySettings.vue'
 import { adminAPI } from '@/api/admin'
 
 const { showError, showSuccess, translate } = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    proxies: { listGroups: vi.fn().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }]) },
     accounts: {
       bulkUpdate: vi.fn(),
       checkMixedChannelRisk: vi.fn()
@@ -81,10 +83,71 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('only applies account outbound inheritance after the ticket proxy field is enabled', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    expect(wrapper.get<HTMLInputElement>('#bulk-edit-codex-ticket-proxy-enabled').element.checked).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="codex-ticket-proxy-account"]').element.disabled).toBe(true)
+    await wrapper.get('#bulk-edit-codex-ticket-proxy-enabled').setValue(true)
+    await wrapper.get('[data-testid="codex-ticket-proxy-account"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0 }
+    })
+    wrapper.unmount()
+  })
+
+  it('writes ticket proxy settings only after explicitly enabling the bulk field', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-codex-ticket-proxy-enabled').setValue(true)
+    await wrapper.get('[data-testid="codex-ticket-proxy-random"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { codex_ticket_proxy_mode: 'random', codex_ticket_proxy_id: 0 }
+    })
+    wrapper.unmount()
+  })
+
+  it('does not write an unchecked ticket proxy field', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-codex-ticket-proxy-enabled').setValue(true)
+    await wrapper.get('[data-testid="codex-ticket-proxy-random"]').setValue(true)
+    await wrapper.get('#bulk-edit-codex-ticket-proxy-enabled').setValue(false)
+    await wrapper.get('#bulk-edit-concurrency-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { concurrency: 1 })
+    wrapper.unmount()
+  })
+
+  it('blocks fixed ticket proxy saving without an available managed proxy', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'] })
+    await wrapper.get('#bulk-edit-codex-ticket-proxy-enabled').setValue(true)
+    await wrapper.get('[data-testid="codex-ticket-proxy-fixed"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.codexTicketProxy.required')
+    wrapper.unmount()
+  })
+
+  it('disables ticket proxy edits for mixed platforms or API keys', () => {
+    for (const selectedPlatforms of [['openai', 'anthropic'], ['anthropic']]) {
+      const wrapper = mountModal({ selectedPlatforms, selectedTypes: ['oauth'] })
+      expect(wrapper.get<HTMLInputElement>('#bulk-edit-codex-ticket-proxy-enabled').element.disabled).toBe(true)
+      expect(wrapper.findComponent(CodexTicketProxySettings).exists()).toBe(false)
+      expect(wrapper.text()).toContain('admin.accounts.codexTicketProxy.bulkUnsupported')
+      wrapper.unmount()
+    }
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] })
+    expect(wrapper.get<HTMLInputElement>('#bulk-edit-codex-ticket-proxy-enabled').element.disabled).toBe(true)
+    wrapper.unmount()
+  })
+
   it('only writes daily cooldown when bulk modification is explicitly selected', async () => {
     const wrapper = mountModal()
     await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(false)
     await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
     await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(true)
@@ -98,7 +161,7 @@ describe('BulkEditAccountModal', () => {
   it.each([true, false])('explicitly sets daily cooldown enabled=%s without writing other extra', async enabled => {
     const wrapper = mountModal()
     await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
-    if (enabled) await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    if (enabled) await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
@@ -110,7 +173,7 @@ describe('BulkEditAccountModal', () => {
   it('rejects an invalid timezone in an enabled bulk cooldown', async () => {
     const wrapper = mountModal()
     await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('[data-testid="daily-cooldown-timezone"]').setValue('Invalid/Zone')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
@@ -121,10 +184,11 @@ describe('BulkEditAccountModal', () => {
   it('allows disabling a bulk cooldown after entering invalid hidden values', async () => {
     const wrapper = mountModal()
     await wrapper.get('#bulk-edit-daily-cooldown-enabled').setValue(true)
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(true)
-    await wrapper.get('[data-testid="daily-cooldown-end"]').setValue('23:00')
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
+    wrapper.getComponent('[data-testid="daily-cooldown-end"]').vm.$emit('update:modelValue', '23:00')
+    await nextTick()
     await wrapper.get('[data-testid="daily-cooldown-timezone"]').setValue('Invalid/Zone')
-    await wrapper.get('[data-testid="daily-cooldown-enabled"]').setValue(false)
+    await wrapper.get('[data-testid="daily-cooldown-enabled"]').trigger('click')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { daily_cooldown: { enabled: false } } })
@@ -143,7 +207,7 @@ describe('BulkEditAccountModal', () => {
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
       proxy_id: 0,
-      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_empty_pool_policy: 'reject', random_proxy_max_reuse_minutes: 0 }
+      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_group_id: null, random_proxy_empty_pool_policy: 'reject', random_proxy_max_reuse_minutes: 0 }
     }))
     wrapper.unmount()
   })
@@ -157,6 +221,42 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
     expect(showError).toHaveBeenCalledWith('admin.accounts.randomProxyPoolRequired')
+    wrapper.unmount()
+  })
+
+  it('requires a group and applies the selected group to every target account', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('group')
+    await flushPromises()
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    await settings.get('[data-testid="random-proxy-group"]').setValue('7')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
+      proxy_id: 0,
+      extra: expect.objectContaining({ random_proxy_pool_scope: 'group', random_proxy_group_id: 7, random_proxy_pool_ids: [] })
+    }))
+    wrapper.unmount()
+  })
+
+  it('explicitly clears group random routing when the bulk proxy field is set to direct', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-proxy-enabled').setValue(true)
+    const settings = wrapper.get('[data-testid="random-proxy-settings"]')
+    await settings.get('input[type="checkbox"]').setValue(true)
+    await settings.get('[data-testid="random-proxy-scope"]').setValue('group')
+    await flushPromises()
+    await settings.get('[data-testid="random-proxy-group"]').setValue('7')
+    await settings.get('input[type="checkbox"]').setValue(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      proxy_id: 0, extra: { proxy_mode: '' }
+    })
     wrapper.unmount()
   })
   beforeEach(() => {

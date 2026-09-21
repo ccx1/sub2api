@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/proxygroup"
 )
 
 // ProxyQuery is the builder for querying Proxy entities.
@@ -25,6 +26,7 @@ type ProxyQuery struct {
 	order              []proxy.OrderOption
 	inters             []Interceptor
 	predicates         []predicate.Proxy
+	withGroup          *ProxyGroupQuery
 	withAccounts       *AccountQuery
 	withPrimaryProxies *ProxyQuery
 	withBackupProxy    *ProxyQuery
@@ -63,6 +65,28 @@ func (_q *ProxyQuery) Unique(unique bool) *ProxyQuery {
 func (_q *ProxyQuery) Order(o ...proxy.OrderOption) *ProxyQuery {
 	_q.order = append(_q.order, o...)
 	return _q
+}
+
+// QueryGroup chains the current query on the "group" edge.
+func (_q *ProxyQuery) QueryGroup() *ProxyGroupQuery {
+	query := (&ProxyGroupClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(proxy.Table, proxy.FieldID, selector),
+			sqlgraph.To(proxygroup.Table, proxygroup.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, proxy.GroupTable, proxy.GroupColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
 }
 
 // QueryAccounts chains the current query on the "accounts" edge.
@@ -323,6 +347,7 @@ func (_q *ProxyQuery) Clone() *ProxyQuery {
 		order:              append([]proxy.OrderOption{}, _q.order...),
 		inters:             append([]Interceptor{}, _q.inters...),
 		predicates:         append([]predicate.Proxy{}, _q.predicates...),
+		withGroup:          _q.withGroup.Clone(),
 		withAccounts:       _q.withAccounts.Clone(),
 		withPrimaryProxies: _q.withPrimaryProxies.Clone(),
 		withBackupProxy:    _q.withBackupProxy.Clone(),
@@ -330,6 +355,17 @@ func (_q *ProxyQuery) Clone() *ProxyQuery {
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithGroup tells the query-builder to eager-load the nodes that are connected to
+// the "group" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProxyQuery) WithGroup(opts ...func(*ProxyGroupQuery)) *ProxyQuery {
+	query := (&ProxyGroupClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withGroup = query
+	return _q
 }
 
 // WithAccounts tells the query-builder to eager-load the nodes that are connected to
@@ -443,7 +479,8 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	var (
 		nodes       = []*Proxy{}
 		_spec       = _q.querySpec()
-		loadedTypes = [3]bool{
+		loadedTypes = [4]bool{
+			_q.withGroup != nil,
 			_q.withAccounts != nil,
 			_q.withPrimaryProxies != nil,
 			_q.withBackupProxy != nil,
@@ -470,6 +507,12 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withGroup; query != nil {
+		if err := _q.loadGroup(ctx, query, nodes, nil,
+			func(n *Proxy, e *ProxyGroup) { n.Edges.Group = e }); err != nil {
+			return nil, err
+		}
+	}
 	if query := _q.withAccounts; query != nil {
 		if err := _q.loadAccounts(ctx, query, nodes,
 			func(n *Proxy) { n.Edges.Accounts = []*Account{} },
@@ -493,6 +536,38 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	return nodes, nil
 }
 
+func (_q *ProxyQuery) loadGroup(ctx context.Context, query *ProxyGroupQuery, nodes []*Proxy, init func(*Proxy), assign func(*Proxy, *ProxyGroup)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*Proxy)
+	for i := range nodes {
+		if nodes[i].GroupID == nil {
+			continue
+		}
+		fk := *nodes[i].GroupID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(proxygroup.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "group_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
 func (_q *ProxyQuery) loadAccounts(ctx context.Context, query *AccountQuery, nodes []*Proxy, init func(*Proxy), assign func(*Proxy, *Account)) error {
 	fks := make([]driver.Value, 0, len(nodes))
 	nodeids := make(map[int64]*Proxy)
@@ -619,6 +694,9 @@ func (_q *ProxyQuery) querySpec() *sqlgraph.QuerySpec {
 			if fields[i] != proxy.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withGroup != nil {
+			_spec.Node.AddColumnOnce(proxy.FieldGroupID)
 		}
 		if _q.withBackupProxy != nil {
 			_spec.Node.AddColumnOnce(proxy.FieldBackupProxyID)

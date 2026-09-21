@@ -1,12 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import RandomProxySettings from '../RandomProxySettings.vue'
 import type { Proxy } from '@/types'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const listGroups = vi.hoisted(() => vi.fn())
+vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { listGroups } } }))
+beforeEach(() => { listGroups.mockReset().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }]) })
 
 const proxies = [
-  { id: 1, name: 'Tokyo', protocol: 'http', host: 'tokyo.example.com', port: 8080, country: 'Japan', region: 'Tokyo' },
+  { id: 1, name: 'Tokyo', account_count: 7, protocol: 'http', host: 'tokyo.example.com', port: 8080, country: 'Japan', region: 'Tokyo' },
   { id: 2, name: 'Berlin', protocol: 'socks5', host: '2001:db8::1', port: 1080, country: 'Germany' }
 ] as Proxy[]
 
@@ -15,6 +18,62 @@ function mountSettings(ids: number[] = []) {
 }
 
 describe('RandomProxySettings', () => {
+  it('loads groups and reports a required selection without defaulting to all', async () => {
+    const wrapper = mountSettings([1])
+    await wrapper.setProps({ scope: 'group' })
+    await flushPromises()
+    expect(listGroups).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('accountProxyGroups.required')
+    await wrapper.get('[data-testid="random-proxy-group"]').setValue('7')
+    expect(wrapper.emitted('update:groupId')?.at(-1)).toEqual([7])
+    expect(wrapper.props('ids')).toEqual([1])
+    expect(wrapper.emitted('update:scope')).toBeUndefined()
+  })
+
+  it('preserves an unavailable group and blocks saving instead of selecting all', async () => {
+    const wrapper = mountSettings()
+    await wrapper.setProps({ scope: 'group', groupId: 99 })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="random-proxy-group"]').element).toHaveProperty('value', '99')
+    expect(wrapper.text()).toContain('accountProxyGroups.unavailable')
+    expect(wrapper.emitted('update:groupError')?.at(-1)).toEqual(['accountProxyGroups.unavailable'])
+    expect(wrapper.emitted('update:groupId')).toBeUndefined()
+  })
+
+  it('warns about an empty group while retaining the chosen empty-pool policy', async () => {
+    listGroups.mockResolvedValue([{ id: 7, name: 'Empty', proxy_count: 0, active_proxy_count: 0 }])
+    const wrapper = mountSettings()
+    await wrapper.setProps({ scope: 'group', groupId: 7, policy: 'disable' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('accountProxyGroups.emptyPool')
+    expect(wrapper.emitted('update:groupError')?.at(-1)).toEqual([null])
+    expect(wrapper.props('policy')).toBe('disable')
+    expect(wrapper.emitted('update:scope')).toBeUndefined()
+  })
+
+  it('shows loading and failure states and retries the group directory', async () => {
+    listGroups.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountSettings()
+    await wrapper.setProps({ scope: 'group', groupId: 7 })
+    await flushPromises()
+    expect(wrapper.text()).toContain('accountProxyGroups.loadFailed')
+    expect(wrapper.emitted('update:groupError')?.at(-1)).toEqual(['accountProxyGroups.loadFailed'])
+    await wrapper.get('[data-testid="random-proxy-group-settings"] button').trigger('click')
+    await flushPromises()
+    expect(listGroups).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('update:groupError')?.at(-1)).toEqual([null])
+    expect(wrapper.text()).not.toContain('accountProxyGroups.loadFailed')
+  })
+
+  it('shows an empty directory without changing group scope', async () => {
+    listGroups.mockResolvedValue([])
+    const wrapper = mountSettings()
+    await wrapper.setProps({ scope: 'group' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('accountProxyGroups.empty')
+    expect(wrapper.emitted('update:scope')).toBeUndefined()
+  })
+
   it('explains the shared balancing limit while retaining all empty-pool policies', () => {
     const wrapper = mountSettings([1])
     expect(wrapper.text()).toContain('admin.accounts.randomProxyHint')
@@ -23,8 +82,20 @@ describe('RandomProxySettings', () => {
       .toEqual(['reject', 'disable', 'direct'])
   })
 
+  it('hides scheduled rotation while preserving the legacy stored value', async () => {
+    const wrapper = mountSettings([1])
+    await wrapper.setProps({ maxReuseMinutes: 120 })
+    expect(wrapper.find('[data-testid="random-proxy-reuse-minutes"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.randomProxyMaxReuseHint')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="random-proxy-scope"]').setValue('all')
+    expect(wrapper.props('maxReuseMinutes')).toBe(120)
+    expect(wrapper.emitted('update:maxReuseMinutes')).toBeUndefined()
+  })
+
   it('searches region and displays proxy addresses without credentials', async () => {
     const wrapper = mountSettings()
+    expect(wrapper.text()).toContain('(7) Tokyo http://tokyo.example.com:8080')
     expect(wrapper.text()).toContain('socks5://[2001:db8::1]:1080')
     await wrapper.get('input[type="search"]').setValue('Japan')
     expect(wrapper.text()).toContain('Tokyo')

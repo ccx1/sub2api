@@ -536,16 +536,16 @@ export default {
         openaiCodexVersionAutoSyncHint: '每 6 小时从官方仓库获取最新稳定版客户端版本号，无需为了跟版本而升级本服务。关闭后仅使用上方手填版本或内置版本。',
         openaiCodexVersionSyncedValue: '当前同步到：{version}',
         codexHardeningTitle: 'Codex 设置',
-        codexTicketEnabled: '292 打票',
+        codexTicketEnabled: 'Codex 打票',
         codexTicketEnabledDesc:
-          '关闭后不打票、不注入 x-codex-turn-state，按原链路转发。开启后后台打票，并在业务请求中覆盖该头。',
-        codexTicketHarvestProxy: '292 打票代理',
+          '在打票配置页面统一管理总开关、订阅档次规则、重试和冷却参数。',
+        codexTicketHarvestProxy: '全局默认打票代理',
         codexTicketHarvestProxyFixed: '固定代理 URL',
         codexTicketHarvestProxyPool: '从代理池均衡选择',
         codexTicketHarvestProxyPoolDesc:
-          '随机代理账号沿用其代理范围和更换周期，其他账号从整个代理池选择。同一账号优先复用可用代理，重新选择时优先关联账号少的代理，同等关联数优先质量更好的代理。连接失败的代理不参与分配，质量降级代理仅在正常代理没有容量时备用。没有可用容量时跳过本次打票，不回退直连。',
+          '适用于未单独配置打票代理的账号；可在账号管理中单独选择固定或随机打票代理。跟随全局时，业务随机账号沿用其代理范围，其他账号使用整个代理池。持续复用健康代理，持续失败或质量下降时才更换；重新选择优先占用较低、质量较好的代理。没有可用容量时跳过打票，不回退直连。',
         codexTicketHarvestProxyDesc:
-          '仅在门票功能开启时用于打票，保存后后续探测会使用新代理，无需重启。日常业务仍走账号自己的住宅代理。填写完整代理 URL（http 或 socks5h，含用户名和密码）。代理服务商需自行负责出口 IP 轮换。留空并保存表示不改已保存的值。',
+          '适用于未单独配置打票代理的账号；账号管理中的打票代理设置可覆盖本规则。仅用于打票，业务请求使用账号业务出口。保存后后续探测生效，无需重启。填写完整代理 URL（http 或 socks5h，含用户名和密码）。留空并保存表示不修改已保存的地址。',
         codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
         codexTicketHarvestProxyConfigured: '已配置（密码已隐藏）。要更换请整段粘贴新的代理 URL。',
         proxyPoolMaxAccounts: '代理池单代理关联账号上限',

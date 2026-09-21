@@ -334,7 +334,11 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 	if s == nil {
 		return selected, false, ""
 	}
-	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
+	latest, vetoed, reason := profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
+	if vetoed {
+		return latest, true, reason
+	}
+	return sharedPoolAdmissionLatest(ctx, latest, s.accountRepo, s.ResolveUserGroupRateMultiplier)
 }
 
 // bindOpenAIStickySessionDuringSelection preserves the official eager binding

@@ -74,9 +74,10 @@ type openAIWSAcquireRequest struct {
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
-	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
-	ProxyURL        string
-	PreferredConnID string
+	HeadersFactory     func(context.Context, http.Header) (http.Header, error)
+	CodexTicketReceipt *openAICodexTicketWSReceipt
+	ProxyURL           string
+	PreferredConnID    string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
@@ -84,6 +85,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	codexTicket         openAICodexTicketWSIdentity
 	proxyIdentity       [32]byte
 	tlsProfile          string
 	betaFeatures        string
@@ -286,6 +288,7 @@ type openAIWSConn struct {
 
 	handshakeHeaders       http.Header
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
+	codexTicketReceipt     *openAICodexTicketWSReceipt
 	routingAffinity        string
 
 	leaseCh   chan struct{}
@@ -1141,13 +1144,16 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	if stringsTrim(req.WSURL) == "" {
 		return nil, errors.New("ws url is empty")
 	}
+	if req.CodexTicketReceipt != nil && req.Headers.Get(openAICodexTurnStateHeader) != req.CodexTicketReceipt.ticket.State {
+		return nil, ErrOpenAICodexTicketUnavailable
+	}
 	if queueWait == nil {
 		queueWait = &openAIWSAcquireQueueWait{}
 	}
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSTransportCompatibility(req)
+	compatibility := normalizeOpenAIWSTicketCompatibility(req)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -2128,6 +2134,9 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	if req.CodexTicketReceipt != nil && headers.Get(openAICodexTurnStateHeader) != req.CodexTicketReceipt.ticket.State {
+		return nil, ErrOpenAICodexTicketUnavailable
+	}
 	conn, status, handshakeHeaders, err := p.dialWithAccountTransport(ctx, req, headers)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
@@ -2154,7 +2163,8 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSTransportCompatibility(req)
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSTicketCompatibility(req)
+	pooledConn.codexTicketReceipt = req.CodexTicketReceipt
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
 }
@@ -2335,7 +2345,7 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSTransportCompatibility(a) == normalizeOpenAIWSTransportCompatibility(b)
+		normalizeOpenAIWSTicketCompatibility(a) == normalizeOpenAIWSTicketCompatibility(b)
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {

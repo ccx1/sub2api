@@ -268,7 +268,7 @@ type cachedOpenAICodexTicketEnabled struct {
 
 const openAICodexTicketEnabledCacheTTL = 5 * time.Second
 
-// GetOpenAICodexTicketEnabled 返回后台 292 打票总开关。
+// GetOpenAICodexTicketEnabled 返回后台打票总开关。
 // 设置键存在时以后台为准；缺失则回退 yaml/env。
 func (s *SettingService) GetOpenAICodexTicketEnabled(ctx context.Context, fallback bool) bool {
 	if ctx == nil {
@@ -286,6 +286,8 @@ func (s *SettingService) GetOpenAICodexTicketEnabled(ctx context.Context, fallba
 		}
 	}
 	resultCh := s.openAICodexTicketEnabledSF.DoChan(SettingKeyOpenAICodexTicketEnabled, func() (any, error) {
+		s.openAICodexTicketEnabledMu.Lock()
+		defer s.openAICodexTicketEnabledMu.Unlock()
 		if cached, ok := s.openAICodexTicketEnabledCache.Load().(*cachedOpenAICodexTicketEnabled); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return cached.value, nil
@@ -328,8 +330,22 @@ func (s *SettingService) InvalidateOpenAICodexTicketEnabledCache() {
 	if s == nil {
 		return
 	}
+	// 与在途读取互斥，防止保存后迟到的旧值重新填充缓存。
+	s.openAICodexTicketEnabledMu.Lock()
+	defer s.openAICodexTicketEnabledMu.Unlock()
 	s.openAICodexTicketEnabledSF.Forget(SettingKeyOpenAICodexTicketEnabled)
-	s.openAICodexTicketEnabledCache.Store(&cachedOpenAICodexTicketEnabled{expiresAt: 0})
+	var next *cachedOpenAICodexTicketEnabled
+	if cached, ok := s.openAICodexTicketEnabledCache.Load().(*cachedOpenAICodexTicketEnabled); ok && cached != nil {
+		next = &cachedOpenAICodexTicketEnabled{value: cached.value}
+	}
+	s.openAICodexTicketEnabledCache.Store(next)
+}
+
+func (s *SettingService) cacheOpenAICodexTicketEnabled(enabled bool) {
+	s.openAICodexTicketEnabledMu.Lock()
+	defer s.openAICodexTicketEnabledMu.Unlock()
+	s.openAICodexTicketEnabledSF.Forget(SettingKeyOpenAICodexTicketEnabled)
+	s.openAICodexTicketEnabledCache.Store(&cachedOpenAICodexTicketEnabled{value: enabled, expiresAt: time.Now().Add(openAICodexTicketEnabledCacheTTL).UnixNano()})
 }
 
 type cachedOpenAICodexTicketHarvestProxy struct {
@@ -339,7 +355,7 @@ type cachedOpenAICodexTicketHarvestProxy struct {
 
 const openAICodexTicketHarvestProxyCacheTTL = 5 * time.Second
 
-// GetOpenAICodexTicketHarvestProxyURL 返回后台配置的 292 打票代理。空则调用方回退 yaml/env。
+// GetOpenAICodexTicketHarvestProxyURL 返回后台配置的打票代理。空则调用方回退 yaml/env。
 func (s *SettingService) GetOpenAICodexTicketHarvestProxyURL(ctx context.Context) string {
 	if ctx == nil {
 		ctx = context.Background()
@@ -402,6 +418,26 @@ func (s *SettingService) InvalidateOpenAICodexTicketHarvestProxyCache() {
 	}
 	s.openAICodexTicketHarvestProxySF.Forget(SettingKeyOpenAICodexTicketHarvestProxyURL)
 	s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{expiresAt: 0})
+}
+
+// 模式与地址来自同一受锁快照，防止旧 URL 在途读取跨过保存失效后重新污染采集配置。
+func (s *SettingService) GetOpenAICodexTicketHarvestProxySettings(ctx context.Context) (string, string, error) {
+	values, err := s.getProxyPoolSettingValues(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	proxyURL := strings.TrimSpace(values[SettingKeyOpenAICodexTicketHarvestProxyURL])
+	mode, err := s.resolveCodexTicketHarvestProxyMode(values[SettingKeyOpenAICodexTicketHarvestProxyMode], proxyURL)
+	if err != nil || mode != OpenAICodexTicketHarvestProxyModeFixed {
+		return mode, "", err
+	}
+	if proxyURL == "" && s.cfg != nil {
+		proxyURL = strings.TrimSpace(s.cfg.Gateway.OpenAICodexTicket.HarvestProxyURL)
+	}
+	if err := ValidateOpenAICodexTicketHarvestProxyURL(proxyURL); err != nil {
+		return "", "", err
+	}
+	return mode, proxyURL, nil
 }
 
 // GetOpenAICodexUserAgent 返回 OpenAI Codex 上游请求使用的 User-Agent。

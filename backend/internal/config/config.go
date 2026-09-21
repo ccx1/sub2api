@@ -1004,7 +1004,7 @@ type GatewayConfig struct {
 	// OpenAICompactModel: /responses/compact 上游使用的模型。
 	// compact 端点支持模型滞后于普通 /responses 时，可用该配置降级规避上游错误。
 	OpenAICompactModel string `mapstructure:"openai_compact_model"`
-	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获 292 长度
+	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获并复验票据
 	// x-codex-turn-state，并在住宅 IP 业务请求中注入该头。默认关闭。
 	OpenAICodexTicket OpenAICodexTicketConfig `mapstructure:"openai_codex_ticket"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
@@ -1222,18 +1222,34 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 }
 
 // OpenAICodexTicketConfig 控制 ChatGPT OAuth 的 x-codex-turn-state 门票。
-// 打票走 harvest_proxy_url（SOCKS），业务出站仍用账号住宅 proxy_id，只替换该请求头。
-// 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
+// 采集代理使用固定地址或代理池，候选票通过账号业务出口复验后才发布。
+// 后台设置优先于启动配置；随机代理账号持续复用未过期的合格票据。
 type OpenAICodexTicketConfig struct {
-	Enabled                      bool     `mapstructure:"enabled"`
-	TargetLength                 int      `mapstructure:"target_length"`
-	TTLSeconds                   int      `mapstructure:"ttl_seconds"`
-	RefreshBeforeSeconds         int      `mapstructure:"refresh_before_seconds"`
-	HarvestProxyURL              string   `mapstructure:"harvest_proxy_url"`
-	HarvestProbeIntervalSeconds  int      `mapstructure:"harvest_probe_interval_seconds"`
-	HarvestAttemptTimeoutSeconds int      `mapstructure:"harvest_attempt_timeout_seconds"`
-	FailClosed                   bool     `mapstructure:"fail_closed"`
-	Models                       []string `mapstructure:"models"`
+	Enabled                       bool                  `mapstructure:"enabled" json:"enabled"`
+	LengthMode                    string                `mapstructure:"length_mode" json:"length_mode"`
+	TargetLength                  int                   `mapstructure:"target_length" json:"target_length"`
+	TTLSeconds                    int                   `mapstructure:"ttl_seconds" json:"ttl_seconds"`
+	RefreshBeforeSeconds          int                   `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
+	HarvestProxyURL               string                `mapstructure:"harvest_proxy_url" json:"-"`
+	HarvestProbeIntervalSeconds   int                   `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
+	HarvestAttemptTimeoutSeconds  int                   `mapstructure:"harvest_attempt_timeout_seconds" json:"harvest_attempt_timeout_seconds"`
+	FailClosed                    bool                  `mapstructure:"fail_closed" json:"fail_closed"`
+	Models                        []string              `mapstructure:"models" json:"models"`
+	TierRules                     []CodexTicketTierRule `mapstructure:"tier_rules" json:"tier_rules"`
+	RejectedLengths               []int                 `mapstructure:"rejected_lengths" json:"rejected_lengths"`
+	HarvestConcurrency            int                   `mapstructure:"harvest_concurrency" json:"harvest_concurrency"`
+	RetryBackoffSeconds           []int                 `mapstructure:"retry_backoff_seconds" json:"retry_backoff_seconds"`
+	RetryMaxAttempts              int                   `mapstructure:"retry_max_attempts" json:"retry_max_attempts"`
+	RetryExhaustedCooldownSeconds int                   `mapstructure:"retry_exhausted_cooldown_seconds" json:"retry_exhausted_cooldown_seconds"`
+	AuthCooldownSeconds           int                   `mapstructure:"auth_cooldown_seconds" json:"auth_cooldown_seconds"`
+	RateLimitCooldownSeconds      int                   `mapstructure:"rate_limit_cooldown_seconds" json:"rate_limit_cooldown_seconds"`
+	RespectRetryAfter             bool                  `mapstructure:"respect_retry_after" json:"respect_retry_after"`
+}
+
+type CodexTicketTierRule struct {
+	Tier         string   `mapstructure:"tier" json:"tier"`
+	Aliases      []string `mapstructure:"aliases" json:"aliases"`
+	TargetLength int      `mapstructure:"target_length" json:"target_length"`
 }
 
 // DefaultOpenAIWSClientFirstMessageTimeoutSeconds preserves the legacy ingress deadline.
@@ -2400,6 +2416,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
+	viper.SetDefault("gateway.openai_codex_ticket.length_mode", CodexTicketLengthStrict)
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
 	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
@@ -2408,6 +2425,16 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 25)
 	viper.SetDefault("gateway.openai_codex_ticket.fail_closed", true)
 	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
+	ticketDefaults := NormalizeOpenAICodexTicketConfig(OpenAICodexTicketConfig{})
+	viper.SetDefault("gateway.openai_codex_ticket.tier_rules", ticketDefaults.TierRules)
+	viper.SetDefault("gateway.openai_codex_ticket.rejected_lengths", ticketDefaults.RejectedLengths)
+	viper.SetDefault("gateway.openai_codex_ticket.harvest_concurrency", ticketDefaults.HarvestConcurrency)
+	viper.SetDefault("gateway.openai_codex_ticket.retry_backoff_seconds", ticketDefaults.RetryBackoffSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.retry_max_attempts", ticketDefaults.RetryMaxAttempts)
+	viper.SetDefault("gateway.openai_codex_ticket.retry_exhausted_cooldown_seconds", ticketDefaults.RetryExhaustedCooldownSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.auth_cooldown_seconds", ticketDefaults.AuthCooldownSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.rate_limit_cooldown_seconds", ticketDefaults.RateLimitCooldownSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.respect_retry_after", ticketDefaults.RespectRetryAfter)
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)

@@ -14,12 +14,18 @@ import (
 const (
 	RandomProxyPoolScopeExtraKey = "random_proxy_pool_scope"
 	RandomProxyPoolIDsExtraKey   = "random_proxy_pool_ids"
+	RandomProxyGroupIDExtraKey   = "random_proxy_group_id"
 	RandomProxyPoolAll           = "all"
 	RandomProxyPoolSelected      = "selected"
+	RandomProxyPoolGroup         = "group"
 )
 
 type RandomProxyPoolSelector interface {
 	SelectRandomActiveProxyFromPool(ctx context.Context, ids []int64) (*Proxy, error)
+}
+
+type RandomProxyGroupResolver interface {
+	GetRandomProxyGroupIDs(context.Context, int64) ([]int64, error)
 }
 
 func (a *Account) RandomProxyPoolScope() string {
@@ -27,10 +33,32 @@ func (a *Account) RandomProxyPoolScope() string {
 		return RandomProxyPoolAll
 	}
 	scope, _ := a.Extra[RandomProxyPoolScopeExtraKey].(string)
-	if strings.EqualFold(strings.TrimSpace(scope), RandomProxyPoolSelected) {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case RandomProxyPoolSelected:
 		return RandomProxyPoolSelected
+	case RandomProxyPoolGroup:
+		return RandomProxyPoolGroup
 	}
 	return RandomProxyPoolAll
+}
+
+func (a *Account) RandomProxyGroupID() int64 {
+	if a == nil {
+		return 0
+	}
+	id, _ := parseRandomProxyGroupID(a.Extra[RandomProxyGroupIDExtraKey])
+	return id
+}
+
+func parseRandomProxyGroupID(raw any) (int64, bool) {
+	if raw == nil {
+		return 0, true
+	}
+	ids, valid := parseRandomProxyPoolIDs([]any{raw})
+	if !valid || len(ids) != 1 {
+		return 0, false
+	}
+	return ids[0], true
 }
 
 func (a *Account) RandomProxyPoolIDs() []int64 {
@@ -76,7 +104,7 @@ func ValidateRandomProxyPoolExtra(extra map[string]any) error {
 	scope, exists := extra[RandomProxyPoolScopeExtraKey]
 	if exists && scope != nil {
 		value, ok := scope.(string)
-		if !ok || (strings.TrimSpace(value) != RandomProxyPoolAll && strings.TrimSpace(value) != RandomProxyPoolSelected) {
+		if !ok || (strings.TrimSpace(value) != RandomProxyPoolAll && strings.TrimSpace(value) != RandomProxyPoolSelected && strings.TrimSpace(value) != RandomProxyPoolGroup) {
 			return infraerrors.BadRequest("INVALID_RANDOM_PROXY_SCOPE", "随机代理范围无效")
 		}
 		scope = strings.TrimSpace(value)
@@ -87,6 +115,10 @@ func ValidateRandomProxyPoolExtra(extra map[string]any) error {
 	}
 	if scope == RandomProxyPoolSelected && len(ids) == 0 {
 		return infraerrors.BadRequest("EMPTY_RANDOM_PROXY_POOL", "请至少选择一条代理，或切换为整个代理池")
+	}
+	groupID, valid := parseRandomProxyGroupID(extra[RandomProxyGroupIDExtraKey])
+	if !valid || (scope == RandomProxyPoolGroup && groupID == 0) {
+		return infraerrors.BadRequest("INVALID_RANDOM_PROXY_GROUP", "请选择有效的代理分组")
 	}
 	return nil
 }
@@ -100,30 +132,32 @@ func normalizeRandomProxyPoolExtra(extra map[string]any) {
 			extra[RandomProxyPoolIDsExtraKey] = ids
 		}
 	}
+	if raw, exists := extra[RandomProxyGroupIDExtraKey]; exists && raw != nil {
+		if id, valid := parseRandomProxyGroupID(raw); valid {
+			extra[RandomProxyGroupIDExtraKey] = id
+		}
+	}
 }
 
 func selectAccountRandomProxy(ctx context.Context, a *Account, selector RandomProxySelector) (*Proxy, error) {
+	selection, err := ResolveAccountProxyPoolSelection(ctx, a, selector)
+	if err != nil {
+		return nil, err
+	}
 	if balanced, ok := selector.(BalancedProxySelector); ok {
-		selection := ProxyPoolSelection{
-			AccountID: a.ID, Restricted: a.RandomProxyPoolScope() == RandomProxyPoolSelected,
-			MaxReuseDuration: a.RandomProxyMaxReuseDuration(),
-		}
-		if selection.Restricted {
-			selection.IDs = a.RandomProxyPoolIDs()
-			if len(selection.IDs) == 0 {
-				return nil, nil
-			}
-		}
 		proxy, err := balanced.SelectBalancedProxy(ctx, selection)
+		if err != nil {
+			return nil, err
+		}
 		if selection.Restricted && proxy != nil && !slices.Contains(selection.IDs, proxy.ID) {
 			return nil, nil
 		}
 		return proxy, err
 	}
-	if a.RandomProxyPoolScope() != RandomProxyPoolSelected {
+	if !selection.Restricted {
 		return selector.SelectRandomActiveProxy(ctx)
 	}
-	ids := a.RandomProxyPoolIDs()
+	ids := selection.IDs
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -132,8 +166,33 @@ func selectAccountRandomProxy(ctx context.Context, a *Account, selector RandomPr
 		return nil, nil
 	}
 	proxy, err := scoped.SelectRandomActiveProxyFromPool(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	if proxy != nil && !slices.Contains(ids, proxy.ID) {
 		return nil, nil
 	}
 	return proxy, err
+}
+
+// 组成员每次从数据库解析，组的增删成员会在下一次选路立即生效。
+// 空组及无法解析的组仍为受限空池，不能退化成全局随机。
+func ResolveAccountProxyPoolSelection(ctx context.Context, a *Account, source any) (ProxyPoolSelection, error) {
+	selection := ProxyPoolSelection{AccountID: a.ID, MaxReuseDuration: a.RandomProxyMaxReuseDuration()}
+	switch a.RandomProxyPoolScope() {
+	case RandomProxyPoolSelected:
+		selection.Restricted, selection.IDs = true, a.RandomProxyPoolIDs()
+	case RandomProxyPoolGroup:
+		selection.Restricted = true
+		resolver, ok := source.(RandomProxyGroupResolver)
+		if !ok || a.RandomProxyGroupID() <= 0 {
+			return selection, nil
+		}
+		ids, err := resolver.GetRandomProxyGroupIDs(ctx, a.RandomProxyGroupID())
+		if err != nil {
+			return selection, err
+		}
+		selection.IDs = ids
+	}
+	return selection, nil
 }

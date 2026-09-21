@@ -68,6 +68,7 @@ type TestEvent struct {
 // AccountTestOptions carries optional media for admin connectivity tests.
 // ImageDataURL / AudioDataURL are full data URLs (data:<mime>;base64,...).
 type AccountTestOptions struct {
+	RedactErrors bool
 	ImageDataURL string
 	AudioDataURL string
 }
@@ -334,6 +335,7 @@ func createTestPayload(modelID string) (map[string]any, error) {
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
 	testOpts := firstAccountTestOptions(opts)
+	c.Set("shared_pool_redact_test_errors", testOpts.RedactErrors)
 
 	// Get account
 	account, err := s.accountRepo.GetByID(ctx, accountID)
@@ -3229,6 +3231,9 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 }
 
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
+	if c.GetBool("shared_pool_redact_test_errors") && event.Error != "" {
+		event.Error = "连接测试失败，请检查授权信息和代理，或联系管理员"
+	}
 	if event.Type == "test_complete" {
 		if suppress, ok := c.Get(accountTestSuppressCompletionContextKey); ok {
 			if suppressCompletion, _ := suppress.(bool); suppressCompletion {
@@ -3246,6 +3251,9 @@ func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 
 // sendErrorAndEnd sends an error event and ends the stream
 func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) error {
+	if c.GetBool("shared_pool_redact_test_errors") {
+		errorMsg = "连接测试失败，请检查授权信息和代理，或联系管理员"
+	}
 	log.Printf("Account test error: %s", errorMsg)
 	s.sendEvent(c, TestEvent{Type: "error", Error: errorMsg})
 	return fmt.Errorf("%s", errorMsg)

@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import ProxiesView from '../ProxiesView.vue'
 
-const { listProxies, getAllWithCount } = vi.hoisted(() => ({
+const { listProxies, getAllWithCount, listGroups } = vi.hoisted(() => ({
+  listGroups: vi.fn(),
   listProxies: vi.fn(),
   getAllWithCount: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
-  adminAPI: { proxies: { list: listProxies, getAllWithCount } }
+  adminAPI: { proxies: { list: listProxies, getAllWithCount, listGroups } }
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn() }) }))
 vi.mock('vue-i18n', async () => ({
@@ -49,12 +50,24 @@ let wrapper: ReturnType<typeof mountView>
 beforeEach(() => {
   vi.clearAllMocks()
   getAllWithCount.mockResolvedValue([])
+  listGroups.mockResolvedValue([{ id: 7, name: 'Hong Kong', proxy_count: 2, active_proxy_count: 1 }])
   listProxies.mockResolvedValue({ items: [], total: 100, pages: 5 })
 })
 
 afterEach(() => wrapper?.unmount())
 
 describe('proxy list filter pagination', () => {
+  it.each(['7', '0', ''])('filters the full server result by group %s and resets pagination', async (group) => {
+    wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="page"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="proxy-group-filter"]').setValue(group)
+    await flushPromises()
+    expect(listProxies.mock.lastCall?.[0]).toBe(1)
+    expect(listProxies.mock.lastCall?.[2].group_id).toBe(group === '' ? undefined : Number(group))
+  })
+
   it.each([
     ['protocol', 'admin.proxies.allProtocols', 'socks5', ''],
     ['protocol', 'admin.proxies.allProtocols', '', 'http'],

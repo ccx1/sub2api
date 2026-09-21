@@ -172,11 +172,12 @@ const (
 
 // Redeem type constants
 const (
-	RedeemTypeBalance          = domain.RedeemTypeBalance
-	RedeemTypeConcurrency      = domain.RedeemTypeConcurrency
-	RedeemTypeSubscription     = domain.RedeemTypeSubscription
-	RedeemTypeInvitation       = domain.RedeemTypeInvitation
-	RedeemTypeAffiliateBalance = "affiliate_balance"
+	RedeemTypeBalance            = domain.RedeemTypeBalance
+	RedeemTypeConcurrency        = domain.RedeemTypeConcurrency
+	RedeemTypeSubscription       = domain.RedeemTypeSubscription
+	RedeemTypeInvitation         = domain.RedeemTypeInvitation
+	RedeemTypeAffiliateBalance   = "affiliate_balance"
+	RedeemTypeSharedPoolTransfer = domain.RedeemTypeSharedPoolTransfer
 )
 
 // PromoCode status constants

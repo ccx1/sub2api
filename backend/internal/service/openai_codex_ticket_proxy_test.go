@@ -43,7 +43,7 @@ func TestCodexTicketPoolActuallyUsesSelectedEgress(t *testing.T) {
 	}}
 	svc.accountRepo = repo
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
-	require.Equal(t, []string{"socks5://pool.example:1080"}, upstream.proxies)
+	require.Equal(t, []string{"socks5://pool.example:1080", ""}, upstream.proxies)
 	require.Equal(t, []ProxyPoolSelection{{AccountID: 42}}, repo.selections)
 	require.True(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra").valid(time.Now(), 292))
 	require.Nil(t, account.ProxyID, "打票出口不得覆盖账号业务出口")
@@ -68,7 +68,7 @@ func TestCodexTicketFixedModeKeepsConfiguredProxy(t *testing.T) {
 	repo := &balancedAccountProxyStub{}
 	svc.accountRepo = repo
 	svc.probeOnceOpenAICodexTicket(context.Background(), ticketTestAccount(42), "gpt-6-astra")
-	require.Equal(t, []string{"http://fixed.example:8080"}, upstream.proxies)
+	require.Equal(t, []string{"http://fixed.example:8080", ""}, upstream.proxies)
 	require.Empty(t, repo.selections)
 }
 

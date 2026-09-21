@@ -1653,12 +1653,21 @@
           v-model:enabled="randomProxyEnabled"
           v-model:scope="randomProxyPoolScope"
           v-model:ids="randomProxyPoolIds"
+          v-model:group-id="randomProxyGroupId"
+          v-model:group-error="randomProxyGroupError"
           v-model:policy="randomProxyEmptyPoolPolicy"
           v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
           :proxies="proxies"
           @update:enabled="handleRandomProxyChange"
         />
       </div>
+
+      <CodexTicketProxySettings
+        v-if="supportsCodexTicketProxy(account)"
+        v-model="codexTicketProxy"
+        :proxies="proxies"
+        :disabled="submitting"
+      />
 
       <DailyCooldownSettings v-if="!isSparkShadow" v-model="dailyCooldown" />
 
@@ -2298,10 +2307,12 @@
             </p>
           </div>
           <div class="w-52 flex-shrink-0">
-            <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
+            <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" :disabled="identityManaged" />
           </div>
         </div>
       </div>
+
+      <ProtectionManagedNotice v-if="identityManaged && account" :account-id="account.id" />
 
       <!-- OpenAI 订阅档位手动覆盖（Plus/Pro/Free），仅 OAuth 非影子账号 -->
       <div
@@ -2799,6 +2810,8 @@
             <button
               type="button"
               @click="tlsFingerprintEnabled = !tlsFingerprintEnabled"
+              :disabled="identityManaged"
+              data-testid="edit-tls-fingerprint-toggle"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
                 tlsFingerprintEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
@@ -2814,7 +2827,7 @@
           </div>
           <!-- Profile selector -->
           <div v-if="tlsFingerprintEnabled" class="mt-3">
-            <select v-model="tlsFingerprintProfileId" class="input">
+            <select v-model="tlsFingerprintProfileId" class="input" :disabled="identityManaged">
               <option :value="null">{{ t('admin.accounts.quotaControl.tlsFingerprint.defaultProfile') }}</option>
               <option v-if="tlsFingerprintProfiles.length > 0" :value="-1">{{ t('admin.accounts.quotaControl.tlsFingerprint.randomProfile') }}</option>
               <option v-for="p in tlsFingerprintProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
@@ -3076,14 +3089,18 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import ProtectionManagedNotice from '@/components/account/ProtectionManagedNotice.vue'
+import { isAccountIdentityManaged } from '@/utils/accountProtection'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
+import { readCodexTicketProxy, supportsCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
-import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -3185,9 +3202,12 @@ const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 
 const randomProxyEnabled = ref(false)
+const codexTicketProxy = ref(readCodexTicketProxy())
 const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
 const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
 const randomProxyPoolIds = ref<number[]>([])
+const randomProxyGroupId = ref<number | null>(null)
+const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
 const dailyCooldown = ref(normalizeDailyCooldown())
 
@@ -3563,6 +3583,7 @@ const umqModeOptions = computed(() => [
   { value: 'serialize', label: t('admin.accounts.quotaControl.rpmLimit.umqModeSerialize') },
 ])
 const tlsFingerprintEnabled = ref(false)
+const identityManaged = computed(() => isAccountIdentityManaged(props.account))
 const tlsFingerprintProfileId = ref<number | null>(null)
 const tlsFingerprintProfiles = ref<{ id: number; name: string }[]>([])
 const sessionIdMaskingEnabled = ref(false)
@@ -4025,10 +4046,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.expires_at = newAccount.expires_at ?? null
 
   const extra = newAccount.extra as Record<string, unknown> | undefined
+  codexTicketProxy.value = readCodexTicketProxy(extra)
   randomProxyEnabled.value = extra?.proxy_mode === 'random'
   randomProxyEmptyPoolPolicy.value = normalizeRandomProxyEmptyPoolPolicy(extra?.random_proxy_empty_pool_policy)
   randomProxyPoolScope.value = normalizeRandomProxyPoolScope(extra?.random_proxy_pool_scope)
   randomProxyPoolIds.value = normalizeRandomProxyPoolIds(extra?.random_proxy_pool_ids)
+  randomProxyGroupId.value = normalizeRandomProxyGroupId(extra?.random_proxy_group_id)
   randomProxyMaxReuseMinutes.value = normalizeRandomProxyReuseMinutes(extra?.random_proxy_max_reuse_minutes)
   dailyCooldown.value = normalizeDailyCooldown(extra?.daily_cooldown)
   if (randomProxyEnabled.value) {
@@ -5033,14 +5056,20 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
     (updatePayload.extra as Record<string, unknown> | undefined) ||
     ((props.account?.extra as Record<string, unknown> | undefined) || {})
   const nextExtra: Record<string, unknown> = { ...currentExtra }
+  if (supportsCodexTicketProxy(props.account)) {
+    Object.assign(nextExtra, codexTicketProxyExtra(codexTicketProxy.value))
+  }
   if (randomProxyEnabled.value) {
-    Object.assign(nextExtra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value }))
+    Object.assign(nextExtra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value }))
     updatePayload.proxy_id = 0
   } else {
-    delete nextExtra.proxy_mode
+    // 后端会保留省略的路由键，关闭已有随机模式必须显式提交空值。
+    if (props.account?.extra?.proxy_mode === 'random') nextExtra.proxy_mode = ''
+    else delete nextExtra.proxy_mode
     delete nextExtra.random_proxy_empty_pool_policy
     delete nextExtra.random_proxy_pool_scope
     delete nextExtra.random_proxy_pool_ids
+    delete nextExtra.random_proxy_group_id
     delete nextExtra.random_proxy_max_reuse_minutes
   }
   updatePayload.extra = dailyCooldown.value.enabled || currentExtra.daily_cooldown
@@ -5049,7 +5078,12 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
 }
 
 const handleSubmit = async () => {
-  if (!props.account) return
+  if (!props.account || submitting.value) return
+  const ticketProxyError = supportsCodexTicketProxy(props.account) && codexTicketProxyValidationError(codexTicketProxy.value, props.proxies)
+  if (ticketProxyError) {
+    appStore.showError(t(ticketProxyError))
+    return
+  }
   const cooldownError = !isSparkShadow.value && dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError || (!isSparkShadow.value && randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
     appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
@@ -5057,6 +5091,10 @@ const handleSubmit = async () => {
   }
   if (!isSparkShadow.value && randomProxyEnabled.value && randomProxyPoolScope.value === 'selected' && randomProxyPoolIds.value.length === 0) {
     appStore.showError(t('admin.accounts.randomProxyPoolRequired'))
+    return
+  }
+  if (!isSparkShadow.value && randomProxyEnabled.value && randomProxyPoolScope.value === 'group' && (!normalizeRandomProxyGroupId(randomProxyGroupId.value) || randomProxyGroupError.value)) {
+    appStore.showError(t(randomProxyGroupError.value || 'accountProxyGroups.required'))
     return
   }
   const accountID = props.account.id

@@ -321,6 +321,18 @@ func (f ProxyFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProxyMutation", m)
 }
 
+// The ProxyGroupFunc type is an adapter to allow the use of ordinary
+// function as ProxyGroup mutator.
+type ProxyGroupFunc func(context.Context, *ent.ProxyGroupMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProxyGroupFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProxyGroupMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProxyGroupMutation", m)
+}
+
 // The RedeemCodeFunc type is an adapter to allow the use of ordinary
 // function as RedeemCode mutator.
 type RedeemCodeFunc func(context.Context, *ent.RedeemCodeMutation) (ent.Value, error)
@@ -331,6 +343,18 @@ func (f RedeemCodeFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, 
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.RedeemCodeMutation", m)
+}
+
+// The SecurityPolicyKeywordFunc type is an adapter to allow the use of ordinary
+// function as SecurityPolicyKeyword mutator.
+type SecurityPolicyKeywordFunc func(context.Context, *ent.SecurityPolicyKeywordMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SecurityPolicyKeywordFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.SecurityPolicyKeywordMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.SecurityPolicyKeywordMutation", m)
 }
 
 // The SecuritySecretFunc type is an adapter to allow the use of ordinary

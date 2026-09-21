@@ -5,6 +5,12 @@ vi.mock('@/api/client', () => ({ apiClient: { get } }))
 
 import { getAll, getAllWithCount, list } from '@/api/admin/proxies'
 
+it('requests usage counts for proxy selection without truncating to a paginated page', async () => {
+  get.mockResolvedValueOnce({ data: [] })
+  await getAll()
+  expect(get).toHaveBeenLastCalledWith('/admin/proxies/all', { params: { with_count: 'true' } })
+})
+
 describe.each([
   { name: 'paginated list', load: () => list(), wrap: (items: unknown[]) => ({ items, total: items.length, pages: 1 }) },
   { name: 'account selector', load: getAll, wrap: (items: unknown[]) => items },

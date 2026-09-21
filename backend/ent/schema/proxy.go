@@ -31,6 +31,7 @@ func (Proxy) Mixin() []ent.Mixin {
 
 func (Proxy) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int64("group_id").Optional().Nillable(),
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
@@ -70,6 +71,7 @@ func (Proxy) Fields() []ent.Field {
 // Edges 定义代理实体的关联关系。
 func (Proxy) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("group", ProxyGroup.Type).Ref("proxies").Field("group_id").Unique().Annotations(entsql.OnDelete(entsql.SetNull)),
 		// accounts: 使用此代理的账户（反向边）
 		edge.From("accounts", Account.Type).
 			Ref("proxy"),
@@ -85,6 +87,7 @@ func (Proxy) Edges() []ent.Edge {
 
 func (Proxy) Indexes() []ent.Index {
 	return []ent.Index{
+		index.Fields("group_id"),
 		index.Fields("status"),
 		index.Fields("deleted_at"),
 		index.Fields("expires_at"),

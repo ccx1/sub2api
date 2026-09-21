@@ -680,6 +680,10 @@ func validateDataProxy(item DataProxy) error {
 }
 
 func validateDataAccount(item DataAccount) error {
+	account := &service.Account{Extra: item.Extra}
+	if account.IsRandomProxy() && account.RandomProxyPoolScope() == service.RandomProxyPoolGroup {
+		return errors.New("组内随机账号导入需要在目标实例重新选择代理组，不能复用源实例分组 ID")
+	}
 	if strings.TrimSpace(item.Name) == "" {
 		return errors.New("account name is required")
 	}

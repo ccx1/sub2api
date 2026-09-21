@@ -5,6 +5,11 @@ import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
+import sharedPool from './sharedPool'
+import accountProtection from './accountProtection'
+import codexTicketSettings from './codexTicketSettings'
+import proxyGroups from './proxyGroups'
+import accountProxyGroups from './accountProxyGroups'
 
 export default {
   ...landing,
@@ -14,4 +19,9 @@ export default {
   ...batchImage,
   admin,
   ...misc,
+  sharedPool,
+  accountProtection,
+  codexTicketSettings,
+  proxyGroups,
+  accountProxyGroups,
 }

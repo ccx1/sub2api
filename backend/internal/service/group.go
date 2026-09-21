@@ -28,6 +28,7 @@ type Group struct {
 	PeakEnd                    string
 	PeakRateMultiplier         float64
 	IsExclusive                bool
+	IsSharedPool               bool
 	SecurityPolicyEnabled      bool
 	SecurityPolicyMode         string
 	SecurityPolicyEmailEnabled bool
@@ -142,6 +143,7 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
+	SharedPoolCapacity      *SharedPoolCapacity // 公开共享池的实时汇总，不持久化。
 }
 
 // IsGroupBindableInSimpleMode is the shared policy for groups that may be

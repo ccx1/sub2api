@@ -195,6 +195,20 @@ func (_u *GroupUpdate) SetNillableIsExclusive(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (_u *GroupUpdate) SetIsSharedPool(v bool) *GroupUpdate {
+	_u.mutation.SetIsSharedPool(v)
+	return _u
+}
+
+// SetNillableIsSharedPool sets the "is_shared_pool" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableIsSharedPool(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetIsSharedPool(*v)
+	}
+	return _u
+}
+
 // SetSecurityPolicyEnabled sets the "security_policy_enabled" field.
 func (_u *GroupUpdate) SetSecurityPolicyEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetSecurityPolicyEnabled(v)
@@ -1652,6 +1666,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.IsSharedPool(); ok {
+		_spec.SetField(group.FieldIsSharedPool, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.SecurityPolicyEnabled(); ok {
 		_spec.SetField(group.FieldSecurityPolicyEnabled, field.TypeBool, value)
 	}
@@ -2441,6 +2458,20 @@ func (_u *GroupUpdateOne) SetIsExclusive(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableIsExclusive(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetIsExclusive(*v)
+	}
+	return _u
+}
+
+// SetIsSharedPool sets the "is_shared_pool" field.
+func (_u *GroupUpdateOne) SetIsSharedPool(v bool) *GroupUpdateOne {
+	_u.mutation.SetIsSharedPool(v)
+	return _u
+}
+
+// SetNillableIsSharedPool sets the "is_shared_pool" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableIsSharedPool(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetIsSharedPool(*v)
 	}
 	return _u
 }
@@ -3931,6 +3962,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.IsSharedPool(); ok {
+		_spec.SetField(group.FieldIsSharedPool, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.SecurityPolicyEnabled(); ok {
 		_spec.SetField(group.FieldSecurityPolicyEnabled, field.TypeBool, value)

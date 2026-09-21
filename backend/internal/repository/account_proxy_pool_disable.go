@@ -15,9 +15,9 @@ func (r *accountRepository) disableAccountWhenBalancedPoolUnavailable(ctx contex
 	if current == nil || !current.IsRandomProxy() || current.RandomProxyEmptyPoolPolicy() != service.RandomProxyEmptyPoolPolicyDisable {
 		return nil
 	}
-	selection := service.ProxyPoolSelection{AccountID: id, Restricted: current.RandomProxyPoolScope() == service.RandomProxyPoolSelected}
-	if selection.Restricted {
-		selection.IDs = current.RandomProxyPoolIDs()
+	selection, err := service.ResolveAccountProxyPoolSelection(ctx, current, r)
+	if err != nil {
+		return err
 	}
 	proxy, err := r.proxyPool.Select(ctx, selection)
 	if err != nil || proxy != nil {
@@ -43,6 +43,7 @@ const disableBalancedProxyAccountSQL = `WITH disabled AS (
  AND a.extra->'random_proxy_empty_pool_policy' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_empty_pool_policy'
  AND a.extra->'random_proxy_pool_scope' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_scope'
  AND a.extra->'random_proxy_pool_ids' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_ids'
+ AND a.extra->'random_proxy_group_id' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_group_id'
  RETURNING a.id
 )
 INSERT INTO scheduler_outbox (event_type,account_id,payload)

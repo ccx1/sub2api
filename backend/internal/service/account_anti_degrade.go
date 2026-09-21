@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -40,7 +41,7 @@ const (
 	AntiDegradeModeLowConcurrency AntiDegradeMode = "low_concurrency"
 	// DefaultAntiDegradeMode applies only when selecting a new policy. Existing
 	// persisted policies must keep their original interpretation.
-	DefaultAntiDegradeMode AntiDegradeMode = AntiDegradeModeLegacy
+	DefaultAntiDegradeMode AntiDegradeMode = AntiDegradeMode2
 )
 
 func normalizeAntiDegradeMode(mode AntiDegradeMode) AntiDegradeMode {
@@ -96,11 +97,24 @@ type AntiDegradeService struct {
 	admin         AntiDegradeStore
 	cfg           *config.Config
 	pluginManager *PluginManager
+	settingRepo   SettingRepository
+	accountRepo   AccountRepository
+	settingsMu    sync.Mutex
 }
 
 // NewAntiDegradeService 创建防降智服务。
-func NewAntiDegradeService(admin AntiDegradeStore) *AntiDegradeService {
-	return &AntiDegradeService{admin: admin}
+func NewAntiDegradeService(admin AntiDegradeStore, settings ...SettingRepository) *AntiDegradeService {
+	svc := &AntiDegradeService{admin: admin}
+	if len(settings) > 0 {
+		svc.settingRepo = settings[0]
+	}
+	return svc
+}
+
+func NewAntiDegradeServiceWithSettings(admin AntiDegradeStore, settings SettingRepository, accounts AccountRepository) *AntiDegradeService {
+	svc := NewAntiDegradeService(admin, settings)
+	svc.accountRepo = accounts
+	return svc
 }
 
 func isOpenAIOAuthLike(a *Account) bool {
@@ -151,7 +165,7 @@ func antiDegradeMode(a *Account) AntiDegradeMode {
 
 // PreviewAntiDegrade 计算改动集（不写库）。
 func PreviewAntiDegrade(account *Account) AntiDegradePreview {
-	return PreviewAntiDegradeMode(account, DefaultAntiDegradeMode)
+	return PreviewAntiDegradeMode(account, defaultAccountProtectionMode(account))
 }
 
 // PreviewAntiDegradeMode 计算指定方案的真实改动集（不写库）。
@@ -271,18 +285,18 @@ func PreviewAntiDegradeMode(account *Account, mode AntiDegradeMode) AntiDegradeP
 
 // Preview 获取账号并计算改动预览（不写库，供 handler 用）。
 func (s *AntiDegradeService) Preview(ctx context.Context, id int64) (AntiDegradePreview, error) {
-	return s.PreviewMode(ctx, id, DefaultAntiDegradeMode)
+	return s.PreviewMode(ctx, id, "")
 }
 
 func (s *AntiDegradeService) PreviewMode(ctx context.Context, id int64, mode AntiDegradeMode) (AntiDegradePreview, error) {
 	if s == nil || s.admin == nil {
 		return AntiDegradePreview{}, errors.New("anti-degrade service unavailable")
 	}
-	mode = normalizeAntiDegradeMode(mode)
-	if antiDegradeStrategyProfile(mode).ID == "" {
-		return AntiDegradePreview{}, ErrUnknownAntiDegradeMode
-	}
 	account, err := s.admin.GetAccount(ctx, id)
+	if err != nil {
+		return AntiDegradePreview{}, err
+	}
+	mode, err = s.resolveProtectionMode(ctx, account, mode)
 	if err != nil {
 		return AntiDegradePreview{}, err
 	}
@@ -293,7 +307,7 @@ func (s *AntiDegradeService) PreviewMode(ctx context.Context, id int64, mode Ant
 
 // Apply handler 适配：应用一键防降智。
 func (s *AntiDegradeService) Apply(ctx context.Context, id int64) (*Account, error) {
-	return s.ApplyAntiDegradeMode(ctx, id, DefaultAntiDegradeMode)
+	return s.ApplyAntiDegradeMode(ctx, id, "")
 }
 
 // Revert handler 适配：一键还原。
@@ -303,11 +317,15 @@ func (s *AntiDegradeService) Revert(ctx context.Context, id int64) (*Account, er
 
 // ApplyAntiDegrade 应用一键防降智并快照旧值。
 func (s *AntiDegradeService) ApplyAntiDegrade(ctx context.Context, id int64) (*Account, error) {
-	return s.ApplyAntiDegradeMode(ctx, id, DefaultAntiDegradeMode)
+	return s.ApplyAntiDegradeMode(ctx, id, "")
 }
 
 // ApplyAntiDegradeMode 应用指定方案并快照旧值。
 func (s *AntiDegradeService) ApplyAntiDegradeMode(ctx context.Context, id int64, mode AntiDegradeMode) (*Account, error) {
+	if s != nil && mode == "" {
+		s.settingsMu.Lock()
+		defer s.settingsMu.Unlock()
+	}
 	return s.transition(ctx, id, func(planner *AntiDegradeService) error {
 		_, err := planner.applyAntiDegradeMode(ctx, id, mode)
 		return err
@@ -318,11 +336,11 @@ func (s *AntiDegradeService) applyAntiDegradeMode(ctx context.Context, id int64,
 	if s == nil || s.admin == nil {
 		return nil, errors.New("anti-degrade service unavailable")
 	}
-	mode = normalizeAntiDegradeMode(mode)
-	if antiDegradeStrategyProfile(mode).ID == "" {
-		return nil, ErrUnknownAntiDegradeMode
-	}
 	account, err := s.admin.GetAccount(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	mode, err = s.resolveProtectionMode(ctx, account, mode)
 	if err != nil {
 		return nil, err
 	}

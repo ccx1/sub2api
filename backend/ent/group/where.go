@@ -110,6 +110,11 @@ func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
 }
 
+// IsSharedPool applies equality check predicate on the "is_shared_pool" field. It's identical to IsSharedPoolEQ.
+func IsSharedPool(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldIsSharedPool, v))
+}
+
 // SecurityPolicyEnabled applies equality check predicate on the "security_policy_enabled" field. It's identical to SecurityPolicyEnabledEQ.
 func SecurityPolicyEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldSecurityPolicyEnabled, v))
@@ -858,6 +863,16 @@ func IsExclusiveEQ(v bool) predicate.Group {
 // IsExclusiveNEQ applies the NEQ predicate on the "is_exclusive" field.
 func IsExclusiveNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldIsExclusive, v))
+}
+
+// IsSharedPoolEQ applies the EQ predicate on the "is_shared_pool" field.
+func IsSharedPoolEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldIsSharedPool, v))
+}
+
+// IsSharedPoolNEQ applies the NEQ predicate on the "is_shared_pool" field.
+func IsSharedPoolNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldIsSharedPool, v))
 }
 
 // SecurityPolicyEnabledEQ applies the EQ predicate on the "security_policy_enabled" field.

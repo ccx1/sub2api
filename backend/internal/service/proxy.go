@@ -14,7 +14,11 @@ const (
 )
 
 type Proxy struct {
-	ID             int64
+	ID        int64
+	GroupID   *int64
+	GroupName string
+	// 仅显式修改分组时置位，防止普通更新覆盖并发归组。
+	GroupIDSet     bool `json:"-"`
 	Name           string
 	Protocol       string
 	Host           string

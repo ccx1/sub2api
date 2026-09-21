@@ -37,9 +37,19 @@
           </div>
 
           <!-- Right: All action buttons -->
+          <label class="w-full sm:w-44">
+            <span class="sr-only">{{ t('proxyGroups.title') }}</span>
+            <select v-model="filters.group_id" class="input" data-testid="proxy-group-filter" @change="handleFilterChange">
+              <option value="">{{ t('proxyGroups.all') }}</option>
+              <option :value="0">{{ t('proxyGroups.ungrouped') }}</option>
+              <option v-for="group in proxyGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+            </select>
+          </label>
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button class="btn btn-secondary" :disabled="groupsLoading || !!groupsError" @click="showProxyGroups = true">{{ t('proxyGroups.manage') }}</button>
+            <button class="btn btn-secondary" :disabled="!selectedCount || groupsLoading || !!groupsError" @click="showBatchGroup = true">{{ t('proxyGroups.batch') }}</button>
             <button
-              @click="loadProxies"
+              @click="refreshProxies"
               :disabled="loading"
               class="btn btn-secondary"
               :title="t('common.refresh')"
@@ -84,6 +94,10 @@
               {{ t('admin.proxies.createProxy') }}
             </button>
           </div>
+          <div v-if="groupsError" role="alert" class="flex w-full items-center gap-3 text-sm text-red-600 dark:text-red-400">
+            {{ groupsError }}
+            <button type="button" class="btn btn-secondary" @click="loadProxyGroups">{{ t('common.refresh') }}</button>
+          </div>
         </div>
       </template>
 
@@ -120,6 +134,10 @@
 
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+          </template>
+
+          <template #cell-group_id="{ row }">
+            <span class="badge badge-gray break-all">{{ proxyGroupName(row) }}</span>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -441,6 +459,7 @@
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="createForm.protocol" :options="protocolSelectOptions" />
         </div>
+        <ProxyGroupSelect v-model="createForm.group_id" :groups="proxyGroups" :disabled="groupsLoading || !!groupsError" />
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
@@ -699,6 +718,7 @@
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="editForm.protocol" :options="protocolSelectOptions" />
         </div>
+        <ProxyGroupSelect v-model="editForm.group_id" :groups="proxyGroups" :disabled="groupsLoading || !!groupsError" />
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
@@ -978,6 +998,8 @@
         </div>
       </template>
     </BaseDialog>
+    <ProxyGroupsDialog :show="showProxyGroups" :groups="proxyGroups" @close="showProxyGroups = false" @changed="handleGroupsChanged" />
+    <BatchProxyGroupDialog :show="showBatchGroup" :groups="proxyGroups" :ids="Array.from(selectedProxyIds)" @close="showBatchGroup = false" @changed="handleGroupAssigned" />
   </AppLayout>
 </template>
 
@@ -986,7 +1008,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { Proxy, ProxyGroup, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
 import { parseProxyInputResult, type ProxyInputFormat } from '@/utils/proxyParser'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -997,6 +1019,9 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
+import ProxyGroupSelect from '@/components/admin/proxy/ProxyGroupSelect.vue'
+import ProxyGroupsDialog from '@/components/admin/proxy/ProxyGroupsDialog.vue'
+import BatchProxyGroupDialog from '@/components/admin/proxy/BatchProxyGroupDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1007,6 +1032,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { proxyOptionLabel } from '@/utils/proxyLabel'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1015,6 +1041,7 @@ const { copyToClipboard } = useClipboard()
 const columns = computed<Column[]>(() => [
   { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
+  { key: 'group_id', label: t('proxyGroups.title'), sortable: false },
   { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
   { key: 'address', label: t('admin.proxies.columns.address'), sortable: false },
   { key: 'auth', label: t('admin.proxies.columns.auth'), sortable: false },
@@ -1057,11 +1084,40 @@ const editStatusOptions = computed(() => [
 ])
 
 const proxies = ref<Proxy[]>([])
+const proxyGroups = ref<ProxyGroup[]>([])
+const showProxyGroups = ref(false)
+const showBatchGroup = ref(false)
+const groupsLoading = ref(false)
+const groupsError = ref('')
+const proxyGroupName = (proxy: Proxy) => proxy.group_id
+  ? proxyGroups.value.find(group => group.id === proxy.group_id)?.name || proxy.group_name || t('proxyGroups.unavailable', { id: proxy.group_id })
+  : t('proxyGroups.ungrouped')
+const loadProxyGroups = async () => {
+  groupsLoading.value = true
+  groupsError.value = ''
+  try { proxyGroups.value = await adminAPI.proxies.listGroups() }
+  catch { groupsError.value = t('proxyGroups.loadFailed') }
+  finally { groupsLoading.value = false }
+}
+const handleGroupsChanged = async () => {
+  await loadProxyGroups()
+  if (filters.group_id && !proxyGroups.value.some(group => group.id === filters.group_id)) filters.group_id = ''
+  handleFilterChange()
+}
+const handleGroupAssigned = () => {
+  clearSelectedProxies()
+  void handleGroupsChanged()
+}
+const refreshProxies = () => {
+  void loadProxyGroups()
+  void loadProxies()
+}
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
+  group_id: '' as number | '',
   protocol: '',
   status: ''
 })
@@ -1150,6 +1206,7 @@ const batchParseResult = reactive({
 })
 
 const createForm = reactive({
+  group_id: null as number | null,
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
@@ -1163,6 +1220,7 @@ const createForm = reactive({
 })
 
 const editForm = reactive({
+  group_id: null as number | null,
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
@@ -1183,7 +1241,7 @@ const loadBackupProxyOptions = async () => {
 const backupProxyOptions = (excludeId?: number) =>
   allProxiesForBackup.value
     .filter(p => p.id !== excludeId)
-    .map(p => ({ label: `${p.name} (${p.host}:${p.port})`, value: p.id }))
+    .map(p => ({ label: proxyOptionLabel(p), value: p.id }))
 
 let abortController: AbortController | null = null
 
@@ -1208,6 +1266,7 @@ const toggleSelectAllVisible = (event: Event) => {
 }
 
 const buildProxyQueryFilters = () => ({
+  group_id: filters.group_id === '' ? undefined : filters.group_id,
   protocol: filters.protocol || undefined,
   status: (filters.status || undefined) as 'active' | 'inactive' | 'expired' | undefined,
   search: searchQuery.value || undefined,
@@ -1285,6 +1344,7 @@ const closeCreateModal = () => {
   showCreateModal.value = false
   createMode.value = 'standard'
   createForm.name = ''
+  createForm.group_id = null
   createForm.protocol = 'http'
   createForm.host = ''
   createForm.port = 8080
@@ -1308,6 +1368,7 @@ const closeCreateModal = () => {
 
 const handleDataImported = () => {
   showImportData.value = false
+  void loadProxyGroups()
   loadProxies()
 }
 
@@ -1387,6 +1448,7 @@ const handleCreateProxy = async () => {
   submitting.value = true
   try {
     await adminAPI.proxies.create({
+      group_id: createForm.group_id,
       name: createForm.name.trim(),
       protocol: createForm.protocol,
       host: createForm.host.trim(),
@@ -1399,6 +1461,7 @@ const handleCreateProxy = async () => {
       expiry_warn_days: createForm.expiry_warn_days,
     })
     appStore.showSuccess(t('admin.proxies.proxyCreated'))
+    void loadProxyGroups()
     closeCreateModal()
     loadProxies()
   } catch (error: any) {
@@ -1411,6 +1474,7 @@ const handleCreateProxy = async () => {
 
 const handleEdit = (proxy: Proxy) => {
   editingProxy.value = proxy
+  editForm.group_id = proxy.group_id ?? null
   editForm.name = proxy.name
   editForm.protocol = proxy.protocol
   editForm.host = proxy.host
@@ -1456,21 +1520,25 @@ const handleUpdateProxy = async () => {
       protocol: editForm.protocol,
       host: editForm.host.trim(),
       port: editForm.port,
-      username: editForm.username.trim() || null,
+      username: editForm.username.trim(),
       status: editForm.status,
       expires_at: editForm.expires_at ? Math.floor(new Date(editForm.expires_at).getTime() / 1000) : null,
       fallback_mode: editForm.fallback_mode,
       backup_proxy_id: editForm.fallback_mode === 'proxy' ? editForm.backup_proxy_id : null,
       expiry_warn_days: editForm.expiry_warn_days,
     }
+    if (editForm.group_id !== (editingProxy.value.group_id ?? null)) {
+      updateData.group_id = editForm.group_id
+    }
 
     // Only include password if user actually modified the field
     if (editPasswordDirty.value) {
-      updateData.password = editForm.password.trim() || null
+      updateData.password = editForm.password.trim()
     }
 
     await adminAPI.proxies.update(editingProxy.value.id, updateData)
     appStore.showSuccess(t('admin.proxies.proxyUpdated'))
+    void loadProxyGroups()
     closeEditModal()
     loadProxies()
   } catch (error: any) {
@@ -1809,13 +1877,7 @@ const fetchAllProxiesForBatch = async (): Promise<Proxy[]> => {
     const response = await adminAPI.proxies.list(
       page,
       pageSize,
-      {
-        protocol: filters.protocol || undefined,
-        status: filters.status as any,
-        search: searchQuery.value || undefined,
-        sort_by: sortState.sort_by,
-        sort_order: sortState.sort_order
-      }
+      buildProxyQueryFilters()
     )
     result.push(...response.items)
     totalPages = response.pages || 1
@@ -1968,6 +2030,7 @@ const confirmDelete = async () => {
     showDeleteDialog.value = false
     removeSelectedProxies([deletingProxy.value.id])
     deletingProxy.value = null
+    void loadProxyGroups()
     loadProxies()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToDelete'))
@@ -1995,6 +2058,7 @@ const confirmBatchDelete = async () => {
 
     clearSelectedProxies()
     showBatchDeleteDialog.value = false
+    void loadProxyGroups()
     loadProxies()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.batchDeleteFailed'))
@@ -2071,6 +2135,7 @@ function closeCopyMenu() {
 }
 
 onMounted(() => {
+  void loadProxyGroups()
   loadProxies()
   loadBackupProxyOptions()
   document.addEventListener('click', closeCopyMenu)

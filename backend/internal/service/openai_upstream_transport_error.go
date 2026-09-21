@@ -137,7 +137,8 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
-	if classifyUpstreamTransportError(err).Persistent && !ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err) {
+	var reported *randomProxyReportedTransportError
+	if classifyUpstreamTransportError(err).Persistent && !errors.As(err, &reported) && !ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err) {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
 

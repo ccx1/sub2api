@@ -129,6 +129,10 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
+	if account != nil {
+		account.Extra = copyJSONMap(account.Extra)
+		service.PreserveSharedPoolExtra(nil, account.Extra)
+	}
 	if err := createAccountRecord(ctx, r.client, account); err != nil {
 		return err
 	}
@@ -146,6 +150,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return err
 	}
 	if err := service.ValidateRandomProxyReuseExtra(account.Extra); err != nil {
+		return err
+	}
+	if err := service.ValidateCodexTicketProxyExtra(account.Extra); err != nil {
 		return err
 	}
 
@@ -220,6 +227,8 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	account.Extra = copyJSONMap(account.Extra)
+	service.PreserveSharedPoolExtra(nil, account.Extra)
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return err
@@ -1053,6 +1062,7 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode)
+	q = filterSharedAccounts(ctx, q)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -1082,7 +1092,8 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 }
 
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
-	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).All(ctx)
+	q := filterSharedAccounts(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode))
+	accounts, err := q.All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1823,6 +1834,9 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 		defer func() { _ = tx.Rollback() }()
 		client = tx.Client()
 	}
+	if err := validateSharedAccountGroupBindings(ctx, client, accountID, []int64{groupID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, client, []int64{groupID}); err != nil {
 		return err
 	}
@@ -1881,10 +1895,6 @@ func (r *accountRepository) GetGroups(ctx context.Context, accountID int64) ([]s
 }
 
 func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
-	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
-	if err != nil {
-		return err
-	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -1899,19 +1909,20 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		// 已处于外部事务中（ErrTxStarted），复用当前 client
 		txClient = r.client
 	}
+	if err := validateSharedAccountGroupBindings(ctx, txClient, accountID, groupIDs); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
+		return err
+	}
+	lockedRepo := &accountRepository{client: txClient, sql: txClient}
+	existingGroupIDs, err := lockedRepo.loadAccountGroupIDs(ctx, accountID)
+	if err != nil {
 		return err
 	}
 
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
 		return err
-	}
-
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
 	}
 
 	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
@@ -1923,7 +1934,13 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		)
 	}
 
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
+	}
+	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		return err
 	}
 
@@ -1931,10 +1948,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-	}
-	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+		r.syncSchedulerAccountSnapshot(ctx, accountID)
 	}
 	return nil
 }
@@ -2082,6 +2096,7 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
+			excludeSharedAccount,
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2116,6 +2131,7 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
+			excludeSharedAccount,
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2136,6 +2152,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
+			excludeSharedAccount,
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2160,6 +2177,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 	now := time.Now()
 	accounts, err := r.client.Account.Query().
 		Where(
+			excludeSharedAccount,
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
@@ -2212,6 +2230,7 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 	}
 
 	preds := []dbpredicate.Account{
+		excludeSharedAccount,
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
 		dbaccount.PlatformIn(platforms...),
@@ -2683,6 +2702,14 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if needsCodexTicketProxyTransaction(ctx, updates) {
+		return r.updateCodexTicketProxyExtra(ctx, id, updates)
+	}
+	var err error
+	updates, err = r.prepareCodexTicketProxyUpdate(ctx, []int64{id}, updates)
+	if err != nil {
+		return err
+	}
 	if err := service.ValidateDailyCooldownExtra(updates); err != nil {
 		return err
 	}
@@ -2967,6 +2994,14 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	if needsCodexTicketProxyTransaction(ctx, updates.Extra) {
+		return r.bulkUpdateCodexTicketProxy(ctx, ids, updates)
+	}
+	var err error
+	updates.Extra, err = r.prepareCodexTicketProxyUpdate(ctx, ids, updates.Extra)
+	if err != nil {
+		return 0, err
+	}
 	if err := service.ValidateDailyCooldownExtra(updates.Extra); err != nil {
 		return 0, err
 	}
@@ -3083,7 +3118,8 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			}
 		}
 		if updates.ProxyID != nil && !randomProxyModeUpdate {
-			extraExpression = "(" + extraExpression + ") - '" + service.ProxyModeExtraKey + "' - '" + service.RandomProxyEmptyPoolPolicyExtraKey + "'"
+			extraExpression = "(" + extraExpression + ") - '" + service.ProxyModeExtraKey + "' - '" + service.RandomProxyEmptyPoolPolicyExtraKey +
+				"' - '" + service.RandomProxyGroupIDExtraKey + "' - '" + service.RandomProxyPoolScopeExtraKey + "' - '" + service.RandomProxyPoolIDsExtraKey + "'"
 		}
 		eligibleAccount := "platform IN (" + ollamaCloudUsagePlatformsSQL + ") AND type = 'apikey'"
 		groupIdentityChanged := ""

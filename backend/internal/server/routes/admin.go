@@ -30,6 +30,7 @@ func RegisterAdminRoutes(
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
+	registerAdminSharedPoolRoutes(admin, h.SharedPool)
 	{
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
@@ -387,6 +388,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	{
 		accounts.GET("", h.Admin.Account.List)
 		accounts.GET("/anti-degrade/strategies", h.Admin.AntiDegrade.Strategies)
+		accounts.GET("/protection/settings", h.Admin.AntiDegrade.GetProtectionSettings)
+		accounts.PUT("/protection/settings", h.Admin.AntiDegrade.UpdateProtectionSettings)
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
@@ -402,6 +405,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.PUT("/:id/codex-ticket", h.Admin.Account.SetCodexTicketEnabled)
+		accounts.GET("/:id/codex-ticket/history", h.Admin.Account.GetCodexTicketHistory)
+		accounts.POST("/:id/codex-ticket/retry", h.Admin.Account.RetryCodexTicket)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)
 		accounts.PUT("/:id/upstream-billing-probe", h.Admin.Account.SetUpstreamBillingProbeEnabled)
@@ -540,6 +545,11 @@ func registerCNProviderRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	groups := admin.Group("/proxy-groups")
+	groups.GET("", h.Admin.Proxy.ListGroups)
+	groups.POST("", h.Admin.Proxy.CreateGroup)
+	groups.PUT("/:id", h.Admin.Proxy.UpdateGroup)
+	groups.DELETE("/:id", h.Admin.Proxy.DeleteGroup)
 	proxies := admin.Group("/proxies")
 	{
 		proxies.GET("", h.Admin.Proxy.List)
@@ -556,6 +566,7 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 		proxies.GET("/:id/stats", h.Admin.Proxy.GetStats)
 		proxies.GET("/:id/accounts", h.Admin.Proxy.GetProxyAccounts)
 		proxies.POST("/batch-delete", h.Admin.Proxy.BatchDelete)
+		proxies.POST("/batch-group", h.Admin.Proxy.BatchGroup)
 		proxies.POST("/batch", h.Admin.Proxy.BatchCreate)
 	}
 }
@@ -593,6 +604,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		adminSettings.GET("/codex-tickets", h.Admin.Setting.GetCodexTicketSettings)
+		adminSettings.PUT("/codex-tickets", h.Admin.Setting.UpdateCodexTicketSettings)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)

@@ -430,6 +430,15 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 		}
 		account = resolved
 	}
+	// 随机代理只绑定到本次请求，先解析以免令牌刷新绕过空池策略。
+	requestAccount := *account
+	account = &requestAccount
+	if proxyErr := ResolveRandomProxyFromSource(ctx, account, s.accountRepo); proxyErr != nil {
+		if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, account, s.accountRepo, proxyErr); disableErr != nil {
+			proxyErr = fmt.Errorf("%w; disable random proxy account: %v", proxyErr, disableErr)
+		}
+		return "", "", "", false, infraerrors.New(http.StatusBadGateway, "OPENAI_QUOTA_PROXY_UNAVAILABLE", "account proxy is unavailable").WithCause(proxyErr)
+	}
 
 	chatGPTAccountID = strings.TrimSpace(account.GetCredential("chatgpt_account_id"))
 	if chatGPTAccountID == "" {

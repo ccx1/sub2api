@@ -277,6 +277,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/shared-pool',
+    name: 'SharedPool',
+    component: () => import('@/views/user/SharedPoolView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Shared Account Pool', titleKey: 'sharedPool.title', descriptionKey: 'sharedPool.description' }
+  },
+  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),
@@ -427,6 +433,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/codex-ticket-settings',
+    name: 'AdminCodexTicketSettings',
+    component: () => import('@/views/admin/CodexTicketSettingsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Ticket Configuration',
+      titleKey: 'codexTicketSettings.title',
+      descriptionKey: 'codexTicketSettings.description'
+    }
+  },
+  {
+    path: '/admin/account-protection',
+    name: 'AdminAccountProtection',
+    component: () => import('@/views/admin/ProtectionSettingsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Account Protection',
+      titleKey: 'accountProtection.title',
+      descriptionKey: 'accountProtection.description'
+    }
+  },
+  {
     path: '/admin/spend-guard',
     name: 'AdminSpendGuard',
     component: () => import('@/views/admin/SpendGuardView.vue'),
@@ -548,6 +578,12 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'admin.accounts.title',
       descriptionKey: 'admin.accounts.description'
     }
+  },
+  {
+    path: '/admin/shared-pool',
+    name: 'AdminSharedPool',
+    component: () => import('@/views/admin/SharedPoolView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Shared Pool Management', titleKey: 'sharedPool.adminTitle', descriptionKey: 'sharedPool.adminDescription' }
   },
   {
     path: '/admin/plugins',

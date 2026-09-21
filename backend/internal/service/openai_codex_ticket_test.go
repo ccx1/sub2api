@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -215,27 +216,26 @@ func TestApplyOpenAICodexTicket_AccountDisabledIsFailOpen(t *testing.T) {
 	require.Empty(t, OpenAICodexTicketStatuses(account, svc.openAICodexTicketConfig(), time.Now()))
 }
 
+type codexTicketEgressRecorder struct {
+	*httpUpstreamRecorder
+	proxies []string
+}
+
+func (u *codexTicketEgressRecorder) Do(req *http.Request, proxy string, accountID int64, concurrency int) (*http.Response, error) {
+	u.proxies = append(u.proxies, proxy)
+	return u.httpUpstreamRecorder.Do(req, proxy, accountID, concurrency)
+}
+
 func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 	state312 := fakeCodexTicketState(312)
 	state292 := fakeCodexTicketState(292)
-	header312 := http.Header{}
-	header312.Set(openAICodexTurnStateHeader, state312)
-	header292 := http.Header{}
-	header292.Set(openAICodexTurnStateHeader, state292)
-	upstream := &httpUpstreamRecorder{
+	upstream := &codexTicketEgressRecorder{httpUpstreamRecorder: &httpUpstreamRecorder{
 		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     header312,
-				Body:       io.NopCloser(strings.NewReader("data: {}\n\n")),
-			},
-			{
-				StatusCode: http.StatusOK,
-				Header:     header292,
-				Body:       io.NopCloser(strings.NewReader("data: {}\n\n")),
-			},
+			codexTicketCompletedResponse("gpt-6-astra", state312),
+			codexTicketCompletedResponse("gpt-6-astra", state292),
+			codexTicketCompletedResponse("gpt-6-astra", ""),
 		},
-	}
+	}}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
 		Enabled:                      true,
 		TargetLength:                 292,
@@ -248,6 +248,7 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
+	expireCodexTicketBackoff(t, svc, account, "gpt-6-astra")
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	ticket := svc.lookupOpenAICodexTicket(account, "gpt-6-astra")
 	require.NotNil(t, ticket)
@@ -256,9 +257,11 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 	h.Set(openAICodexTurnStateHeader, "stale")
 	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, "gpt-6-astra", h))
 	require.Equal(t, state292, h.Get(openAICodexTurnStateHeader))
-	require.Equal(t, "socks5h://user:pass@harvest.example:31", upstream.lastProxyURL)
-	require.Len(t, upstream.requests, 2)
+	require.Equal(t, []string{"socks5h://user:pass@harvest.example:31", "socks5h://user:pass@harvest.example:31", ""}, upstream.proxies)
+	require.Len(t, upstream.requests, 3)
 	require.Empty(t, upstream.requests[0].Header.Get(openAICodexTurnStateHeader))
+	require.Empty(t, upstream.requests[1].Header.Get(openAICodexTurnStateHeader))
+	require.Equal(t, state292, upstream.requests[2].Header.Get(openAICodexTurnStateHeader))
 	require.Equal(t, openAICodexAstraMinVersion, upstream.requests[0].Header.Get("version"))
 	require.Equal(t, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileFromContext(upstream.requests[0].Context()))
 	require.True(t, upstream.requests[0].Close)
@@ -267,20 +270,14 @@ func TestHarvestOpenAICodexTicket_StopsAt292AndUsesHarvestProxy(t *testing.T) {
 func TestHarvestOpenAICodexTicket_HTTP503DoesNotAbortHunt(t *testing.T) {
 	state292 := fakeCodexTicketState(292)
 	header503 := http.Header{}
-	header292 := http.Header{}
-	header292.Set(openAICodexTurnStateHeader, state292)
 	responses := make([]*http.Response, 0, 3)
 	responses = append(responses, &http.Response{
 		StatusCode: http.StatusServiceUnavailable,
 		Header:     header503,
 		Body:       io.NopCloser(strings.NewReader(`{"error":"overloaded"}`)),
 	})
-	responses = append(responses, &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     header292,
-		Body:       io.NopCloser(strings.NewReader("data: {}\n\n")),
-	})
-	upstream := &httpUpstreamRecorder{responses: responses}
+	responses = append(responses, codexTicketCompletedResponse("gpt-6-astra", state292), codexTicketCompletedResponse("gpt-6-astra", ""))
+	upstream := &codexTicketEgressRecorder{httpUpstreamRecorder: &httpUpstreamRecorder{responses: responses}}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
 		Enabled:                      true,
 		TargetLength:                 292,
@@ -292,11 +289,13 @@ func TestHarvestOpenAICodexTicket_HTTP503DoesNotAbortHunt(t *testing.T) {
 	account := ticketTestAccount(41)
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
+	expireCodexTicketBackoff(t, svc, account, "gpt-6-astra")
 	svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 	ticket := svc.lookupOpenAICodexTicket(account, "gpt-6-astra")
 	require.NotNil(t, ticket)
 	require.Equal(t, state292, ticket.State)
-	require.Len(t, upstream.requests, 2)
+	require.Len(t, upstream.requests, 3)
+	require.Equal(t, []string{"socks5h://harvest.example:31", "socks5h://harvest.example:31", ""}, upstream.proxies)
 }
 
 func TestLookupOpenAICodexTicket_HydratesFromExtra(t *testing.T) {
@@ -384,9 +383,13 @@ func (u *codexTicketConcurrentUpstream) Do(req *http.Request, _ string, _ int64,
 	case <-req.Context().Done():
 		return nil, req.Context().Err()
 	}
-	h := http.Header{}
-	h.Set(openAICodexTurnStateHeader, fakeCodexTicketState(292))
-	return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("data: {}\n\n"))}, nil
+	var request struct {
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
+		return nil, err
+	}
+	return codexTicketCompletedResponse(request.Model, fakeCodexTicketState(292)), nil
 }
 func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *testing.T) {
 	account := ticketTestAccount(41)
@@ -397,7 +400,7 @@ func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *te
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "socks5h://proxy.example.com:1080"}, upstream)
 	svc.accountRepo = repo
 	svc.refreshOpenAICodexTickets(context.Background())
-	require.Equal(t, int64(2), upstream.started.Load())
+	require.Equal(t, int64(4), upstream.started.Load())
 	require.Equal(t, map[string]any{"existing": true}, account.Extra)
 	require.Len(t, repo.updates, 2)
 	for _, model := range []string{openAICodexTicketDefaultModel, openAICodexTicketDefaultSolModel} {
@@ -407,7 +410,7 @@ func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *te
 	}
 	// Valid tickets do not produce another probe on the next cycle.
 	svc.refreshOpenAICodexTickets(context.Background())
-	require.Equal(t, int64(2), upstream.started.Load())
+	require.Equal(t, int64(4), upstream.started.Load())
 }
 func TestOpenAICodexTicketStatuses_RespectRuntimeConfiguration(t *testing.T) {
 	account := ticketTestAccount(41)
@@ -422,9 +425,7 @@ func TestOpenAICodexTicketStatuses_RespectRuntimeConfiguration(t *testing.T) {
 }
 func TestProbeOpenAICodexTicket_RejectsInvalidState(t *testing.T) {
 	for _, state := range []string{fakeCodexTicketState(312), strings.Repeat("X", 292), ""} {
-		h := http.Header{}
-		h.Set(openAICodexTurnStateHeader, state)
-		upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(""))}}}
+		upstream := &httpUpstreamRecorder{responses: []*http.Response{codexTicketCompletedResponse("gpt-6-astra", state)}}
 		svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://proxy.example.com:8080"}, upstream)
 		account := ticketTestAccount(41)
 		svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
