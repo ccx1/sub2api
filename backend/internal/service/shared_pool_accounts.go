@@ -29,12 +29,12 @@ func SharedPoolSearch(ctx context.Context) string {
 }
 
 type SharedPoolSettings struct {
-	DefaultPriority      int                         `json:"default_priority"`
-	PlatformRateBPS      int                         `json:"platform_rate_bps"`
-	ProxyRateBPS         int                         `json:"proxy_rate_bps"`
-	MaxConcurrency       int                         `json:"max_concurrency"`
-	DefaultGroupIDs      map[string]int64            `json:"default_group_ids"`
-	SubscriptionGroupIDs map[string]map[string]int64 `json:"subscription_group_ids"`
+	DefaultPriority      int                            `json:"default_priority"`
+	PlatformRateBPS      int                            `json:"platform_rate_bps"`
+	ProxyRateBPS         int                            `json:"proxy_rate_bps"`
+	MaxConcurrency       int                            `json:"max_concurrency"`
+	DefaultGroupIDs      SharedPoolDefaultGroupIDs      `json:"default_group_ids"`
+	SubscriptionGroupIDs SharedPoolSubscriptionGroupIDs `json:"subscription_group_ids"`
 	// SubscriptionSettlementMultipliers stores the platform/tier settlement
 	// multiplier configured by an administrator. A user-specific override in
 	// shared_pool_user_rates still takes precedence over this map.
@@ -98,8 +98,8 @@ type SharedPoolAccountState struct {
 	DispatchConsent  *bool
 	SubscriptionTier *string
 	Priority         *int
-	// DefaultGroupID 仅用于首次开启时自动分配，事务内不得覆盖已有分配。
-	DefaultGroupID *int64
+	// DefaultGroupIDs 仅用于首次开启时自动分配，事务内不得覆盖已有分配。
+	DefaultGroupIDs []int64
 }
 
 type SharedPoolAccountView struct {

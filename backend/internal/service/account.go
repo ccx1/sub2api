@@ -63,10 +63,12 @@ type Account struct {
 	ParentAccountID *int64 // non-nil → 影子账号（不持凭据，透传母账号凭据）
 	QuotaDimension  string // 用量维度："" / "global" / "spark"
 
-	Proxy         *Proxy
-	AccountGroups []AccountGroup
-	GroupIDs      []int64
-	Groups        []*Group
+	Proxy *Proxy
+	// 临时故障切换的原配置只存在于请求快照，持久化时不能写回备用出口。
+	fixedProxyOrigin *Proxy
+	AccountGroups    []AccountGroup
+	GroupIDs         []int64
+	Groups           []*Group
 
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string
@@ -106,6 +108,7 @@ func NormalizeProxyModeExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	normalizeRandomProxyPoolExtra(extra)
+	normalizeProxyRegionExtra(extra)
 	raw, ok := extra[ProxyModeExtraKey]
 	if ok {
 		if mode, ok := raw.(string); ok && strings.EqualFold(strings.TrimSpace(mode), ProxyModeRandom) {

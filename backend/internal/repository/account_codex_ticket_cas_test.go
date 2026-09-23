@@ -28,7 +28,7 @@ func newCodexTicketCASRepo(t *testing.T) (*accountRepository, sqlmock.Sqlmock) {
 
 func codexTicketCASAccount() *service.Account {
 	return &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
-		Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{}, Status: service.StatusActive}
+		Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{}, Status: service.StatusActive, Schedulable: true}
 }
 
 func expectCodexTicketCAS(mock sqlmock.Sqlmock) *sqlmock.ExpectedExec {
@@ -38,7 +38,7 @@ func expectCodexTicketCAS(mock sqlmock.Sqlmock) *sqlmock.ExpectedExec {
 		"id = $3", "platform = $4", "type = $5", "credentials = $6::jsonb",
 		"proxy_id IS NOT DISTINCT FROM $7", "COALESCE(extra -> $1, 'null'::jsonb) = $8::jsonb",
 		"NOT EXISTS", "jsonb_each($9::jsonb)", "COALESCE(extra -> expected.key, 'null'::jsonb) <> expected.value",
-		"$2::jsonb = 'null'::jsonb OR $2::jsonb @> '{\"revoked\":true}'::jsonb OR (status = 'active'", "NOT auto_pause_on_expired OR expires_at IS NULL OR expires_at > NOW()",
+		"$2::jsonb = 'null'::jsonb OR $2::jsonb @> '{\"revoked\":true}'::jsonb OR (status = 'active' AND schedulable = true", "NOT auto_pause_on_expired OR expires_at IS NULL OR expires_at > NOW()",
 		"deleted_at IS NULL"}
 	pattern := "(?s)"
 	for _, guard := range guards {
@@ -60,7 +60,7 @@ func (expected codexTicketCASJSON) Match(value driver.Value) bool {
 	return string(gotJSON) == string(wantJSON)
 }
 
-const codexTicketCASDefaultConfig = codexTicketCASJSON(`{"codex_ticket_enabled":null,"codex_ticket_proxy_mode":null,"codex_ticket_proxy_id":null,"proxy_mode":null,"random_proxy_empty_pool_policy":null,"random_proxy_pool_scope":null,"random_proxy_pool_ids":null,"random_proxy_group_id":null,"random_proxy_max_reuse_minutes":null,"daily_cooldown":null,"enable_tls_fingerprint":null,"tls_fingerprint_builtin":null,"tls_fingerprint_profile_id":null,"codex_fingerprint_mode":null,"anti_degrade":null,"anti_degradation":null}`)
+const codexTicketCASDefaultConfig = codexTicketCASJSON(`{"codex_ticket_enabled":null,"codex_ticket_credential_policy":null,"codex_ticket_proxy_mode":null,"codex_ticket_proxy_id":null,"codex_ticket_proxy_strategy":null,"proxy_mode":null,"random_proxy_empty_pool_policy":null,"random_proxy_pool_scope":null,"random_proxy_pool_ids":null,"random_proxy_group_id":null,"random_proxy_max_reuse_minutes":null,"daily_cooldown":null,"enable_tls_fingerprint":null,"tls_fingerprint_builtin":null,"tls_fingerprint_profile_id":null,"codex_fingerprint_mode":null,"anti_degrade":null,"anti_degradation":null,"shared_pool_owner_id":null,"shared_pool_enabled":null,"shared_pool_admin_disabled":null}`)
 
 func TestCompareAndSwapCodexTicketCreateReplaceDeleteAndConflict(t *testing.T) {
 	for _, tc := range []struct {
@@ -107,7 +107,7 @@ func TestCompareAndSwapCodexTicketPreservesRawConfigurationAndRandomProxyIdentit
 	expectCodexTicketCASProxy(mock, "proxy.example")
 	expectCodexTicketCAS(mock).WithArgs("codex_turn_ticket:model", `{"state":"new"}`, int64(41),
 		service.PlatformOpenAI, service.AccountTypeOAuth, `{"access_token":"test"}`, nil, "null",
-		codexTicketCASJSON(`{"codex_ticket_enabled":false,"codex_ticket_proxy_mode":"fixed","codex_ticket_proxy_id":27,"proxy_mode":"random","random_proxy_empty_pool_policy":"reject","random_proxy_pool_scope":"selected","random_proxy_pool_ids":[9,10],"random_proxy_group_id":null,"random_proxy_max_reuse_minutes":15,"daily_cooldown":null,"enable_tls_fingerprint":true,"tls_fingerprint_builtin":"nodejs24","tls_fingerprint_profile_id":7,"codex_fingerprint_mode":"device","anti_degrade":{"enabled":true,"mode":"mode1"},"anti_degradation":true}`)).
+		codexTicketCASJSON(`{"codex_ticket_enabled":false,"codex_ticket_credential_policy":null,"codex_ticket_proxy_mode":"fixed","codex_ticket_proxy_id":27,"codex_ticket_proxy_strategy":null,"proxy_mode":"random","random_proxy_empty_pool_policy":"reject","random_proxy_pool_scope":"selected","random_proxy_pool_ids":[9,10],"random_proxy_group_id":null,"random_proxy_max_reuse_minutes":15,"daily_cooldown":null,"enable_tls_fingerprint":true,"tls_fingerprint_builtin":"nodejs24","tls_fingerprint_profile_id":7,"codex_fingerprint_mode":"device","anti_degrade":{"enabled":true,"mode":"mode1"},"anti_degradation":true,"shared_pool_owner_id":null,"shared_pool_enabled":null,"shared_pool_admin_disabled":null}`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	changed, err := repo.CompareAndSwapCodexTicket(context.Background(), account, "model", map[string]any{"state": "new"})
@@ -233,7 +233,7 @@ func TestCompareAndSwapCodexTicketPublicationEligibilityKeepsRevocationAvailable
 			case "unschedulable":
 				account.Schedulable = false
 			}
-			allowed := reason == "expiry allowed" || reason == "unschedulable"
+			allowed := reason == "expiry allowed"
 			if allowed {
 				expectCodexTicketCAS(mock).WillReturnResult(sqlmock.NewResult(0, 1))
 			}

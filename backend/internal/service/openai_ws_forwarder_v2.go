@@ -38,6 +38,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	ctx, businessDrainCtx, releaseBusiness, holdErr := s.beginCodexTicketBusinessDrainHold(ctx, account)
+	if holdErr != nil {
+		return nil, holdErr
+	}
+	defer releaseBusiness()
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -405,7 +410,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	upstreamReadCtx := ctx
 	upstreamReadDetached := false
 	clientRequestCanceled := func() bool {
-		return ctx != nil && errors.Is(ctx.Err(), context.Canceled)
+		return ctx != nil && errors.Is(ctx.Err(), context.Canceled) && !errors.Is(context.Cause(businessDrainCtx), ErrCodexTicketBusinessHoldLost)
 	}
 	markClientDisconnected := func(cause string) {
 		if clientDisconnected {
@@ -414,7 +419,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		clientDisconnected = true
 		clientDisconnectDrainStartedAt = time.Now()
 		if !upstreamReadDetached {
-			upstreamReadCtx = context.WithoutCancel(ctx)
+			upstreamReadCtx = businessDrainCtx
 			upstreamReadDetached = true
 		}
 		logOpenAIWSModeInfo(
@@ -568,6 +573,10 @@ readLoop:
 					pendingJSONDocuments = append(pendingJSONDocuments, documents[1:]...)
 				}
 			}
+		}
+		if errors.Is(context.Cause(businessDrainCtx), ErrCodexTicketBusinessHoldLost) {
+			lease.MarkBroken()
+			return nil, ErrCodexTicketBusinessHoldLost
 		}
 		markClientRequestCanceled()
 		if readErr == nil && !json.Valid(message) {

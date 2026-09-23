@@ -79,6 +79,52 @@ func TestCodexTicketHarvestVerifiesBusinessEgressBeforePublishing(t *testing.T) 
 	}
 }
 
+func TestCodexTicketQualityProbePinsTicketStateAndHarvestProxy(t *testing.T) {
+	for _, mismatchRound := range []int{0, 3} {
+		t.Run(fmt.Sprintf("mismatch_%d", mismatchRound), func(t *testing.T) {
+			state := fakeCodexTicketState(292)
+			u := &codexTicketVerificationUpstream{respond: func(call int) *http.Response {
+				model := "gpt-6-astra"
+				if call == mismatchRound {
+					model = "gpt-5.6-luna"
+				}
+				return codexTicketCompletedResponse(model, state)
+			}}
+			cfg := config.OpenAICodexTicketConfig{Enabled: true, BusinessVerificationRounds: 3, TargetLength: 292, TTLSeconds: 3600, Models: []string{"gpt-6-astra"}, HarvestProxyURL: "http://quality.example:8080"}
+			svc, account := ticketTestService(t, cfg, u), ticketTestAccount(41)
+			proxyID := int64(7)
+			account.ProxyID = &proxyID
+			account.Proxy = &Proxy{ID: 7, Protocol: "http", Host: "business.example", Port: 8080}
+			svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
+			expectedCalls := 5
+			if mismatchRound > 0 {
+				expectedCalls = mismatchRound
+			}
+			require.Len(t, u.requests, expectedCalls)
+			for i, req := range u.requests {
+				if i == 0 {
+					require.Empty(t, req.Header.Get(openAICodexTurnStateHeader))
+					continue
+				}
+				require.Equal(t, state, req.Header.Get(openAICodexTurnStateHeader))
+			}
+			require.Len(t, u.proxies, expectedCalls)
+			for i, proxy := range u.proxies {
+				if i == 4 {
+					require.Equal(t, "http://business.example:8080", proxy)
+				} else {
+					require.Equal(t, "http://quality.example:8080", proxy)
+				}
+			}
+			if mismatchRound > 0 {
+				require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
+			} else {
+				require.NotNil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
+			}
+		})
+	}
+}
+
 func TestCodexTicketRenewalPersistenceFailureKeepsPreviousTicket(t *testing.T) {
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, nil)
 	account := ticketTestAccount(41)

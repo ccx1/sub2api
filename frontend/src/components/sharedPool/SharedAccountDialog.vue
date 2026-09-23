@@ -49,15 +49,12 @@
         </div>
         <SharedRevenueSplit :config="config" :use-random-proxy="account && !changeProxy ? account.proxy_mode === 'random' : !form.proxy_url?.trim()" inline />
         <SharedSettlementNotice v-if="!account" :config="config" :platform="form.platform" />
+        <p v-if="!account" class="input-hint">{{ t('sharedPool.autoDispatchHint') }}</p>
         <div class="space-y-2">
           <DailyCooldownSettings v-model="dailyCooldown" :disabled="saving" @update:model-value="dailyCooldownChanged = true" />
           <p class="input-hint">{{ t('sharedPool.dailyCooldownHint') }}</p>
         </div>
-        <div v-if="!account" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-            <Toggle v-model="form.enabled" :disabled="saving || !canConsent" :aria-label="t('sharedPool.sharing')" class="mt-1" />
-            <span><span class="block text-sm font-medium">{{ t('sharedPool.sharing') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('sharedPool.sharingHint') }}</span></span>
-          </label>
+        <div v-if="!account">
           <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
             <input v-model="form.protection_enabled" type="checkbox" class="mt-1 h-4 w-4 rounded text-primary-600" />
             <span><span class="block text-sm font-medium">{{ t('sharedPool.protection') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('sharedPool.protectionHint') }}</span></span>
@@ -109,12 +106,11 @@ const platformColors: Record<SharedPlatform, string> = {
 const form = reactive<SharedAccountInput>({
   name: props.account?.name || '', platform: props.account?.platform || props.config.platforms[0] || 'openai',
   type: props.account?.type || 'oauth', concurrency: props.account?.concurrency || 1, proxy_url: '',
-  enabled: props.account?.enabled ?? false, protection_enabled: props.account?.protection_enabled ?? true
+  enabled: props.account?.enabled ?? true, protection_enabled: props.account?.protection_enabled ?? true
 })
 const accountTypes = computed<SharedAccountInput['type'][]>(() => form.platform === 'antigravity' ? ['oauth'] : ['oauth', 'apikey'])
 const supportsCodexTicket = computed(() => form.platform === 'openai' && form.type === 'oauth')
 const canConsent = computed(() => hasSettlementPolicy(props.config))
-watch(canConsent, value => { if (!value && !props.account) form.enabled = false })
 const codexTicketEnabled = ref(true)
 const dailyCooldown = ref(normalizeDailyCooldown(props.account?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
@@ -140,13 +136,13 @@ function validateCooldown() {
 function openImport() {
   if (saving.value || authorizing.value) return
   error.value = ''
-  if (validateCooldown()) emit('import', { ...form, dispatch_consent: form.enabled, codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, ...cooldownInput() })
+  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, ...cooldownInput() })
 }
 function submit() {
   if (saving.value || authorizing.value) return
   error.value = ''
   if (!validateCooldown()) return
-  if (!props.account && form.enabled && !canConsent.value) { error.value = t('sharedPool.settlementRequired'); return }
+  if (!props.account && !canConsent.value) { error.value = t('sharedPool.settlementRequired'); return }
   if (!props.account && (!credentialsValid.value || !credentials.value)) { error.value = t('sharedPool.credentialsRequired'); return }
   void save()
 }
@@ -162,7 +158,7 @@ async function save() {
       }
       await sharedPoolAPI.update(props.account.id, input)
     } else {
-      await sharedPoolAPI.create({ ...form, dispatch_consent: form.enabled, ...cooldownInput(), name: form.name.trim(), credentials: credentials.value, confirm_disable: false,
+      await sharedPoolAPI.create({ ...form, enabled: true, dispatch_consent: true, ...cooldownInput(), name: form.name.trim(), credentials: credentials.value, confirm_disable: false,
         ...(supportsCodexTicket.value ? { codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value } : {}) })
     }
     emit('saved')

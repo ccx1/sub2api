@@ -8,7 +8,7 @@ import (
 )
 
 func validateSharedStateActor(state service.SharedPoolAccountState) error {
-	if state.OwnerID < 0 || (state.OwnerID == 0 && state.DispatchConsent != nil) || (state.OwnerID > 0 && (state.AdminDisabled != nil || state.SubscriptionTier != nil || state.DefaultGroupID != nil || state.Priority != nil)) {
+	if state.OwnerID < 0 || (state.OwnerID == 0 && state.DispatchConsent != nil) || (state.OwnerID > 0 && (state.AdminDisabled != nil || state.SubscriptionTier != nil || state.DefaultGroupIDs != nil || state.Priority != nil)) {
 		return infraerrors.Forbidden("SHARED_STATE_FORBIDDEN", "无权修改此账号授权状态")
 	}
 	if state.Priority != nil && (*state.Priority < 0 || *state.Priority > 100) {

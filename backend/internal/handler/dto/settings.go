@@ -221,6 +221,7 @@ type SystemSettings struct {
 	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
 	OpenAICodexTicketHarvestProxyMode       string `json:"openai_codex_ticket_harvest_proxy_mode"`
+	OpenAICodexTicketHarvestProxyID         int64  `json:"openai_codex_ticket_harvest_proxy_id"`
 	ProxyPoolMaxAccounts                    int    `json:"proxy_pool_max_accounts"`
 	ClaudeCodeClientVersion                 string `json:"claude_code_client_version"`
 	ClaudeCodeClientVersionSynced           string `json:"claude_code_client_version_synced"`

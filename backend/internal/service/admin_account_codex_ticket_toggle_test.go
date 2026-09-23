@@ -31,6 +31,7 @@ func TestUpdateAccountExtraCodexTicketTogglePreservesSavedTicket(t *testing.T) {
 				require.NoError(t, err)
 				wantExtra[OpenAICodexTicketEnabledExtraKey] = enabled
 				require.Equal(t, wantExtra, updated.Extra)
+				require.Equal(t, wantTicket, updated.Extra[openAICodexTicketExtraKey(wantTicket.Model)])
 				stored := parseOpenAICodexTicketFromAny(account.ID, wantTicket.Model, updated.Extra[openAICodexTicketExtraKey(wantTicket.Model)])
 				require.Equal(t, wantTicket, stored)
 				require.Equal(t, wantCredentials, updated.Credentials)

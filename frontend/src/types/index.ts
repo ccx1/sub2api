@@ -1287,6 +1287,22 @@ export interface Account {
     remaining_seconds: number
     blocked: boolean
     expires_at?: string
+    credential_state?: 'available' | 'revalidation_required' | 'expired' | 'revoked' | 'missing'
+    revalidate_at?: string
+    revalidation_required?: boolean
+    primary_present?: boolean
+    primary_ready?: boolean
+    primary_remaining_seconds?: number
+    primary_expires_at?: string
+    primary_reason?: string
+    standby_ready?: boolean
+    standby_expires_at?: string
+    using_standby?: boolean
+    available_count?: number
+    capacity?: number
+    reserve_count?: number
+    expiring_count?: number
+    next_expires_at?: string
   }>
   codex_ticket_global_enabled?: boolean
   codex_ticket_enabled?: boolean
@@ -1764,6 +1780,7 @@ export interface AdminDataImportResult {
   proxy_failed: number
   account_created: number
   account_failed: number
+  account_ids?: number[]
   errors?: AdminDataImportError[]
 }
 

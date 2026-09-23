@@ -27,6 +27,11 @@ func (h *AccountHandler) GetCodexTicketHistory(c *gin.Context) {
 		response.BadRequest(c, "Invalid pagination")
 		return
 	}
+	filter, err := service.ParseCodexTicketHistoryFilter(c.Request.URL.Query())
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	account, err := h.adminService.GetAccount(c.Request.Context(), id)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -36,7 +41,7 @@ func (h *AccountHandler) GetCodexTicketHistory(c *gin.Context) {
 		response.BadRequest(c, "Codex ticket history is only supported for non-shadow OpenAI OAuth accounts")
 		return
 	}
-	history, err := service.GetCodexTicketHistory(account, page, size)
+	history, err := service.GetCodexTicketHistory(account, page, size, filter)
 	if err != nil {
 		response.InternalError(c, "Unable to read Codex ticket history")
 		return
@@ -44,8 +49,8 @@ func (h *AccountHandler) GetCodexTicketHistory(c *gin.Context) {
 	response.Success(c, history)
 }
 
-// RetryCodexTicket starts a bounded, one-shot retry for missing or expiring
-// tickets. Healthy tickets are skipped by the gateway service.
+// RetryCodexTicket starts one forced probe for every configured Codex model.
+// The gateway still serializes concurrent work and preserves proxy health rules.
 func (h *AccountHandler) RetryCodexTicket(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {

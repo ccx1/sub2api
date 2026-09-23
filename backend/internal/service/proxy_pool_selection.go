@@ -8,6 +8,7 @@ import (
 // ProxyPoolSelection 的关联仅用于运行时均衡，不写入账号的固定 proxy_id。
 type ProxyPoolSelection struct {
 	AccountID        int64
+	CountryCode      string
 	IDs              []int64
 	Restricted       bool
 	MaxReuseDuration time.Duration

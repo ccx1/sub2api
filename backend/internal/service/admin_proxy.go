@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -147,13 +148,6 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if input.Name != "" {
 		proxy.Name = input.Name
 	}
-	if input.CountryCode != nil || input.ClearCountryCode {
-		if input.CountryCode == nil {
-			proxy.CountryCode = ""
-		} else {
-			proxy.CountryCode = *input.CountryCode
-		}
-	}
 	proxy.GroupIDSet = input.GroupID != nil || input.ClearGroupID
 	if proxy.GroupIDSet {
 		proxy.GroupID = input.GroupID
@@ -252,13 +246,15 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 		return nil, err
 	}
 
+	proxyIdentity := ProxyProbeIdentity(proxy)
 	proxyURL := proxy.URL()
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
-			Success:   false,
-			Message:   err.Error(),
-			UpdatedAt: time.Now(),
+			ProxyIdentity: proxyIdentity,
+			Success:       false,
+			Message:       err.Error(),
+			UpdatedAt:     time.Now(),
 		})
 		return &ProxyTestResult{
 			Success: false,
@@ -268,15 +264,16 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 
 	latency := latencyMs
 	s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
-		Success:     true,
-		LatencyMs:   &latency,
-		Message:     "Proxy is accessible",
-		IPAddress:   exitInfo.IP,
-		Country:     exitInfo.Country,
-		CountryCode: exitInfo.CountryCode,
-		Region:      exitInfo.Region,
-		City:        exitInfo.City,
-		UpdatedAt:   time.Now(),
+		ProxyIdentity: proxyIdentity,
+		Success:       true,
+		LatencyMs:     &latency,
+		Message:       "Proxy is accessible",
+		IPAddress:     exitInfo.IP,
+		Country:       exitInfo.Country,
+		CountryCode:   exitInfo.CountryCode,
+		Region:        exitInfo.Region,
+		City:          exitInfo.City,
+		UpdatedAt:     time.Now(),
 	})
 	return &ProxyTestResult{
 		Success:     true,
@@ -295,6 +292,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	if err != nil {
 		return nil, err
 	}
+	probe := *proxy
 
 	result := &ProxyQualityCheckResult{
 		ProxyID:   id,
@@ -313,7 +311,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		s.saveProxyQualitySnapshot(ctx, id, result, nil)
+		s.saveProxyQualitySnapshot(ctx, &probe, result, nil)
 		return result, nil
 	}
 
@@ -327,7 +325,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		s.saveProxyQualitySnapshot(ctx, id, result, nil)
+		s.saveProxyQualitySnapshot(ctx, &probe, result, nil)
 		return result, nil
 	}
 
@@ -356,7 +354,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
+		s.saveProxyQualitySnapshot(ctx, &probe, result, exitInfo)
 		return result, nil
 	}
 
@@ -376,7 +374,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	}
 
 	finalizeProxyQualityResult(result)
-	s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
+	s.saveProxyQualitySnapshot(ctx, &probe, result, exitInfo)
 	return result, nil
 }
 
@@ -524,13 +522,14 @@ func proxyQualityBaseConnectivityPass(result *ProxyQualityCheckResult) bool {
 	return false
 }
 
-func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID int64, result *ProxyQualityCheckResult, exitInfo *ProxyExitInfo) {
+func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxy *Proxy, result *ProxyQualityCheckResult, exitInfo *ProxyExitInfo) {
 	if result == nil {
 		return
 	}
 	score := result.Score
 	checkedAt := result.CheckedAt
 	info := &ProxyLatencyInfo{
+		ProxyIdentity:    ProxyProbeIdentity(proxy),
 		Success:          proxyQualityBaseConnectivityPass(result),
 		Message:          result.Summary,
 		QualityStatus:    proxyQualityOverallStatus(result),
@@ -552,34 +551,37 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 		info.Region = exitInfo.Region
 		info.City = exitInfo.City
 	}
-	s.saveProxyLatency(ctx, proxyID, info)
+	s.saveProxyLatency(ctx, proxy.ID, info)
 }
 
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {
 	if s.proxyProber == nil || proxy == nil {
 		return
 	}
+	proxyIdentity := ProxyProbeIdentity(proxy)
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxy.URL())
 	if err != nil {
 		s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
-			Success:   false,
-			Message:   err.Error(),
-			UpdatedAt: time.Now(),
+			ProxyIdentity: proxyIdentity,
+			Success:       false,
+			Message:       err.Error(),
+			UpdatedAt:     time.Now(),
 		})
 		return
 	}
 
 	latency := latencyMs
 	s.saveProxyLatency(ctx, proxy.ID, &ProxyLatencyInfo{
-		Success:     true,
-		LatencyMs:   &latency,
-		Message:     "Proxy is accessible",
-		IPAddress:   exitInfo.IP,
-		Country:     exitInfo.Country,
-		CountryCode: exitInfo.CountryCode,
-		Region:      exitInfo.Region,
-		City:        exitInfo.City,
-		UpdatedAt:   time.Now(),
+		ProxyIdentity: proxyIdentity,
+		Success:       true,
+		LatencyMs:     &latency,
+		Message:       "Proxy is accessible",
+		IPAddress:     exitInfo.IP,
+		Country:       exitInfo.Country,
+		CountryCode:   exitInfo.CountryCode,
+		Region:        exitInfo.Region,
+		City:          exitInfo.City,
+		UpdatedAt:     time.Now(),
 	})
 }
 
@@ -600,8 +602,9 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 	}
 
 	for i := range proxies {
+		proxies[i].CountryCode = proxies[i].Proxy.CountryCode
 		info := latencies[proxies[i].ID]
-		if info == nil {
+		if !ProxyLatencyMatchesProxy(info, &proxies[i].Proxy) {
 			continue
 		}
 		if info.Success {
@@ -613,7 +616,9 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 		proxies[i].LatencyMessage = info.Message
 		proxies[i].IPAddress = info.IPAddress
 		proxies[i].Country = info.Country
-		proxies[i].CountryCode = info.CountryCode
+		if strings.TrimSpace(info.CountryCode) != "" {
+			proxies[i].CountryCode = info.CountryCode
+		}
 		proxies[i].Region = info.Region
 		proxies[i].City = info.City
 		proxies[i].QualityStatus = info.QualityStatus
@@ -631,7 +636,7 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 
 	merged := *info
 	if latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID}); err == nil {
-		if existing := latencies[proxyID]; existing != nil {
+		if existing := latencies[proxyID]; existing != nil && existing.ProxyIdentity == merged.ProxyIdentity {
 			if merged.QualityCheckedAt == nil &&
 				merged.QualityScore == nil &&
 				merged.QualityGrade == "" &&

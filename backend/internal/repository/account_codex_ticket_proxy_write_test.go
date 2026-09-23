@@ -59,8 +59,8 @@ func TestTicketProxyFullUpdateUsesExplicitIntentAndLatestLockedConfiguration(t *
 func expectTicketProxyFullUpdateLocks(mock sqlmock.Sqlmock, current string) {
 	mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
 		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeOAuth, `{"access_token":"test"}`, nil).
-		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "current_extra"}).
-			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, []byte(current)))
+		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "current_extra", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot"}).
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, []byte(current), false, nil, nil))
 	mock.ExpectQuery(`SELECT extra FROM accounts WHERE id = \$1 AND deleted_at IS NULL`).WithArgs(int64(27)).
 		WillReturnRows(sqlmock.NewRows([]string{"extra"}).AddRow([]byte(current)))
 }

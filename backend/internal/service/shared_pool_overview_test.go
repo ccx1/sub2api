@@ -43,15 +43,17 @@ func TestSharedPoolOverviewTierClassification(t *testing.T) {
 
 func TestSharedPoolOverviewDeduplicatesAndRetainsUnavailableTiers(t *testing.T) {
 	accounts := []SharedPoolOverviewAccount{
-		{AccountID: 1, Platform: PlatformOpenAI, Tier: "plus", Available: true, Concurrency: 3},
-		{AccountID: 1, Platform: PlatformOpenAI, Tier: "plus", Available: true, Concurrency: 3},
-		{AccountID: 2, Platform: PlatformOpenAI, Tier: "plus", Concurrency: 100},
+		{AccountID: 1, Platform: PlatformOpenAI, Tier: "plus", Valid: true, Available: true, Concurrency: 3},
+		{AccountID: 1, Platform: PlatformOpenAI, Tier: "plus", Valid: true, Available: true, Concurrency: 3},
+		{AccountID: 2, Platform: PlatformOpenAI, Tier: "plus", Valid: true, Concurrency: 100},
 		{AccountID: 3, Platform: PlatformOpenAI, Tier: "free"},
-		{AccountID: 4, Platform: PlatformAnthropic, Tier: "api_key", Available: true, Concurrency: 5},
+		{AccountID: 4, Platform: PlatformAnthropic, Tier: "api_key", Valid: true, Available: true, Concurrency: 5},
 		{AccountID: 5, Platform: PlatformGemini},
 	}
 	got := buildSharedPoolOverview(accounts, config.OpenAICodexTicketConfig{}, sharedTicketProgressNow)
 	require.EqualValues(t, 5, got.TotalAccounts)
+	require.EqualValues(t, 3, got.AvailableAccounts)
+	require.EqualValues(t, 2, got.ParticipatingAccounts)
 	require.EqualValues(t, 2, got.SchedulableAccounts)
 	require.EqualValues(t, 8, got.ConcurrencyCapacity)
 	require.Nil(t, got.CurrentConcurrency)
@@ -72,7 +74,7 @@ func TestSharedPoolOverviewTicketGatingDoesNotHideSupply(t *testing.T) {
 	account := sharedTicketProgressAccount()
 	account.Extra[openAICodexTicketExtraKey("gpt-5.5")] = sharedTicketProgressRaw(291, sharedTicketProgressNow.Add(time.Hour))
 	accounts := []SharedPoolOverviewAccount{{AccountID: account.ID, Platform: PlatformOpenAI, Tier: "pro",
-		Available: true, Participating: true, Concurrency: 0, UntrackedConcurrency: true, Ticket: NewSharedPoolTicketAccountSnapshot(account, sharedTicketProgressNow)}}
+		Available: true, Valid: true, TicketRequired: true, Concurrency: 0, UntrackedConcurrency: true, Ticket: NewSharedPoolTicketAccountSnapshot(account, sharedTicketProgressNow)}}
 	cfg := config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true, TargetLength: 292, Models: []string{"gpt-5.5"}}
 	got := buildSharedPoolOverview(accounts, cfg, sharedTicketProgressNow)
 	require.EqualValues(t, 1, got.TotalAccounts)
@@ -80,12 +82,16 @@ func TestSharedPoolOverviewTicketGatingDoesNotHideSupply(t *testing.T) {
 	require.False(t, got.ConcurrencyUnlimited)
 	require.False(t, got.Tiers[0].Available)
 	require.Nil(t, got.CurrentConcurrency)
-	require.EqualValues(t, 1, got.ParticipatingAccounts)
-	require.True(t, got.ParticipatingConcurrencyUnlimited)
+	require.EqualValues(t, 1, got.AvailableAccounts)
+	require.Zero(t, got.ParticipatingAccounts)
+	require.False(t, got.ParticipatingConcurrencyUnlimited)
 	account.Extra[openAICodexTicketExtraKey("gpt-5.5")] = sharedTicketProgressRaw(292, sharedTicketProgressNow.Add(time.Hour))
 	accounts[0].Ticket = NewSharedPoolTicketAccountSnapshot(account, sharedTicketProgressNow)
 	got = buildSharedPoolOverview(accounts, cfg, sharedTicketProgressNow)
 	require.EqualValues(t, 1, got.SchedulableAccounts)
+	require.EqualValues(t, 1, got.ParticipatingAccounts)
+	require.True(t, got.ParticipatingConcurrencyUnlimited)
+	require.True(t, got.Tiers[0].Available)
 	require.True(t, got.ConcurrencyUnlimited)
 	require.Nil(t, got.CurrentConcurrency)
 }
@@ -198,14 +204,14 @@ func TestSharedPoolOverviewSerializationContainsOnlyPublicFields(t *testing.T) {
 	require.NoError(t, err)
 	var public map[string]any
 	require.NoError(t, json.Unmarshal(raw, &public))
-	require.Len(t, public, 13)
-	for _, key := range []string{"total_accounts", "schedulable_accounts", "concurrency_capacity", "concurrency_unlimited",
+	require.Len(t, public, 14)
+	for _, key := range []string{"total_accounts", "available_accounts", "schedulable_accounts", "concurrency_capacity", "concurrency_unlimited",
 		"current_concurrency", "settlement_multiplier", "platform_rate_bps", "proxy_rate_bps", "updated_at", "tiers",
 		"participating_accounts", "participating_concurrency", "participating_concurrency_unlimited"} {
 		require.Contains(t, public, key)
 	}
 	tier := public["tiers"].([]any)[0].(map[string]any)
-	require.Len(t, tier, 11)
+	require.Len(t, tier, 12)
 	for _, forbidden := range []string{"987654321", "credential-sentinel", "account_id", "owner", "email", "group", "tickets", "state"} {
 		require.NotContains(t, string(raw), forbidden)
 	}

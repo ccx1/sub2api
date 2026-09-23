@@ -1648,7 +1648,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :disabled="randomProxyEnabled" />
+        <ProxySelector v-model="form.proxy_id" :proxies="filterProxiesByRegion(proxies, resolveAccountProxyRegion(proxyRegion, account.credentials).country, form.proxy_id)" :disabled="randomProxyEnabled" />
         <RandomProxySettings
           v-model:enabled="randomProxyEnabled"
           v-model:scope="randomProxyPoolScope"
@@ -1663,10 +1663,29 @@
         />
       </div>
 
+      <AccountProxyRegionSettings
+        v-if="!isSparkShadow"
+        v-model="proxyRegion"
+        :credentials="account.credentials"
+        :proxies="proxies"
+        :proxy-id="form.proxy_id"
+        :random-enabled="randomProxyEnabled"
+        :empty-pool-policy="randomProxyEmptyPoolPolicy"
+        :disabled="submitting"
+      />
+
       <CodexTicketProxySettings
         v-if="supportsCodexTicketProxy(account)"
         v-model="codexTicketProxy"
+        :region-enabled="proxyRegion.mode !== 'off'"
+        :region-country="resolveAccountProxyRegion(proxyRegion, account.credentials).country"
         :proxies="proxies"
+        :disabled="submitting"
+      />
+
+      <CodexTicketCredentialSettings
+        v-if="supportsCodexTicketProxy(account)"
+        v-model="codexTicketCredential"
         :disabled="submitting"
       />
 
@@ -3184,13 +3203,16 @@ import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import AccountProxyRegionSettings from '@/components/account/AccountProxyRegionSettings.vue'
+import { accountProxyRegionExtra, accountProxyRegionValidationError, filterProxiesByRegion, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
+import CodexTicketCredentialSettings from '@/components/account/CodexTicketCredentialSettings.vue'
+import { readCodexTicketCredential, codexTicketCredentialExtra, codexTicketCredentialValidationError } from '@/utils/codexTicketCredential'
 import { readCodexTicketProxy, supportsCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
-import { resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -3292,7 +3314,13 @@ const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 
 const randomProxyEnabled = ref(false)
+const proxyRegionSelection = ref<ReturnType<typeof readAccountProxyRegion> | null>(null)
+const proxyRegion = computed({
+  get: () => proxyRegionSelection.value ?? readAccountProxyRegion({ proxy_region_mode: props.account?.type === 'oauth' ? 'billing' : 'off' }),
+  set: value => { proxyRegionSelection.value = value }
+})
 const codexTicketProxy = ref(readCodexTicketProxy())
+const codexTicketCredential = ref(readCodexTicketCredential())
 const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
 const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
 const randomProxyPoolIds = ref<number[]>([])
@@ -3301,8 +3329,7 @@ const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
 const dailyCooldown = ref(normalizeDailyCooldown())
 const randomProxyRegionCountry = computed(() => {
-  if (props.account?.type !== 'oauth') return undefined
-  return resolveAccountProxyRegion({ mode: 'billing', country: '' }, props.account.credentials).country || undefined
+  return resolveAccountProxyRegion(proxyRegion.value, props.account?.credentials).country || undefined
 })
 
 const handleRandomProxyChange = (enabled: boolean) => {
@@ -4222,7 +4249,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.expires_at = newAccount.expires_at ?? null
 
   const extra = newAccount.extra as Record<string, unknown> | undefined
+  proxyRegionSelection.value = extra?.proxy_region_mode !== undefined ? readAccountProxyRegion(extra) : null
   codexTicketProxy.value = readCodexTicketProxy(extra)
+  codexTicketCredential.value = readCodexTicketCredential(extra)
   randomProxyEnabled.value = extra?.proxy_mode === 'random'
   randomProxyEmptyPoolPolicy.value = normalizeRandomProxyEmptyPoolPolicy(extra?.random_proxy_empty_pool_policy)
   randomProxyPoolScope.value = normalizeRandomProxyPoolScope(extra?.random_proxy_pool_scope)
@@ -5232,8 +5261,12 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
     (updatePayload.extra as Record<string, unknown> | undefined) ||
     ((props.account?.extra as Record<string, unknown> | undefined) || {})
   const nextExtra: Record<string, unknown> = { ...currentExtra }
+  if (proxyRegionSelection.value !== null) {
+    Object.assign(nextExtra, accountProxyRegionExtra(proxyRegion.value))
+  }
   if (supportsCodexTicketProxy(props.account)) {
     Object.assign(nextExtra, codexTicketProxyExtra(codexTicketProxy.value))
+    Object.assign(nextExtra, codexTicketCredentialExtra(codexTicketCredential.value))
   }
   if (randomProxyEnabled.value) {
     Object.assign(nextExtra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value }))
@@ -5255,7 +5288,13 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
 
 const handleSubmit = async () => {
   if (!props.account || submitting.value) return
-  const ticketProxyError = supportsCodexTicketProxy(props.account) && codexTicketProxyValidationError(codexTicketProxy.value, props.proxies)
+  const regionError = !isSparkShadow.value && accountProxyRegionValidationError(proxyRegion.value)
+  if (regionError) {
+    appStore.showError(t(regionError))
+    return
+  }
+  const ticketProxyError = supportsCodexTicketProxy(props.account) &&
+    (codexTicketProxyValidationError(codexTicketProxy.value, props.proxies) || codexTicketCredentialValidationError(codexTicketCredential.value))
   if (ticketProxyError) {
     appStore.showError(t(ticketProxyError))
     return

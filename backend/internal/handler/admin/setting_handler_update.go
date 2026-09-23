@@ -260,6 +260,7 @@ type UpdateSettingsRequest struct {
 	OpenAICodexTicketEnabled               *bool   `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL       string  `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketHarvestProxyMode      string  `json:"openai_codex_ticket_harvest_proxy_mode"`
+	OpenAICodexTicketHarvestProxyID        int64   `json:"openai_codex_ticket_harvest_proxy_id"`
 	ProxyPoolMaxAccounts                   int     `json:"proxy_pool_max_accounts"`
 	ClaudeCodeClientVersion                *string `json:"claude_code_client_version"`
 	ClaudeCodeVersionAutoSyncEnabled       *bool   `json:"claude_code_version_auto_sync_enabled"`
@@ -503,7 +504,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
 	if _, sent := sentFields[service.SettingKeyOpenAICodexTicketHarvestProxyMode]; sent && strings.TrimSpace(req.OpenAICodexTicketHarvestProxyMode) == "" {
-		response.BadRequest(c, "openai_codex_ticket_harvest_proxy_mode must be fixed or pool")
+		response.BadRequest(c, "openai_codex_ticket_harvest_proxy_mode must be account, inherit, random, or fixed")
 		return
 	}
 	if raw, sent := sentFields[service.SettingKeyProxyPoolMaxAccounts]; sent && strings.TrimSpace(string(raw)) == "null" {
@@ -1810,6 +1811,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexTicketHarvestProxyMode
 		}(),
+		OpenAICodexTicketHarvestProxyID: func() int64 {
+			if _, sent := sentFields[service.SettingKeyOpenAICodexTicketHarvestProxyID]; sent {
+				return req.OpenAICodexTicketHarvestProxyID
+			}
+			return previousSettings.OpenAICodexTicketHarvestProxyID
+		}(),
 		ProxyPoolMaxAccounts: func() int {
 			if _, sent := sentFields[service.SettingKeyProxyPoolMaxAccounts]; sent {
 				return req.ProxyPoolMaxAccounts
@@ -2205,6 +2212,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		updatedPaymentCfg = &service.PaymentConfig{}
 	}
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
+	harvestProxyURL, harvestProxyMode, harvestProxyID := h.codexTicketHarvestProxyView(c.Request.Context(), updatedSettings)
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
@@ -2374,9 +2382,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexClientVersionSynced:                         updatedSettings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                      updatedSettings.OpenAICodexVersionAutoSyncEnabled,
 		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
-		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
-		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
-		OpenAICodexTicketHarvestProxyMode:                      updatedSettings.OpenAICodexTicketHarvestProxyMode,
+		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(harvestProxyURL),
+		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(harvestProxyURL) != "" || harvestProxyID > 0,
+		OpenAICodexTicketHarvestProxyMode:                      harvestProxyMode,
+		OpenAICodexTicketHarvestProxyID:                        harvestProxyID,
 		ProxyPoolMaxAccounts:                                   updatedSettings.ProxyPoolMaxAccounts,
 		ClaudeCodeClientVersion:                                updatedSettings.ClaudeCodeClientVersion,
 		ClaudeCodeClientVersionSynced:                          updatedSettings.ClaudeCodeClientVersionSynced,

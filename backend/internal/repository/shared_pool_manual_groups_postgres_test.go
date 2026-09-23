@@ -151,7 +151,7 @@ func TestSharedManualGroupsPostgresAutomaticAssignmentRemainsStrict(t *testing.T
 		a = f.account(name)
 		a.Extra[service.SharedPoolDispatchConsentKey] = true
 		require.NoError(t, f.repo.CreateSharedAccount(ctx, a, f.owner, name+"-pending"))
-		require.Error(t, f.repo.SetSharedAccountState(ctx, a.ID, service.SharedPoolAccountState{DefaultGroupID: &id, Enabled: new(true)}))
+		require.Error(t, f.repo.SetSharedAccountState(ctx, a.ID, service.SharedPoolAccountState{DefaultGroupIDs: []int64{id}, Enabled: new(true)}))
 		ids := []int64{id}
 		require.Error(t, f.repo.SetSharedAccountState(ctx, a.ID, service.SharedPoolAccountState{OwnerID: f.owner, GroupIDs: &ids, Enabled: new(true)}))
 		require.Empty(t, sharedManualBindings(t, f, a.ID))

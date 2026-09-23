@@ -105,8 +105,8 @@ func TestSharedPoolSettlementSettingsPostgresInvalidGlobalRollsBackAllFields(t *
 		changed := sharedSubscriptionSettings(f)
 		changed.SettlementMultiplier = value
 		changed.PlatformRateBPS, changed.ProxyRateBPS, changed.MaxConcurrency = 900, 150, 20
-		changed.DefaultGroupIDs[service.PlatformOpenAI] = f.b
-		changed.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = f.a
+		changed.DefaultGroupIDs[service.PlatformOpenAI] = []int64{f.b}
+		changed.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = []int64{f.a}
 		require.Error(t, f.repo.SaveSharedSettings(ctx, changed))
 		saved, err := f.repo.SharedSettings(ctx)
 		require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestSharedPoolSettlementSettingsPostgresLaterWriteFailureRollsBackMultiplie
 	changed := sharedSubscriptionSettings(f)
 	changed.SettlementMultiplier = 2.5
 	changed.MaxConcurrency = 0
-	changed.DefaultGroupIDs[service.PlatformOpenAI] = f.b
+	changed.DefaultGroupIDs[service.PlatformOpenAI] = []int64{f.b}
 	// 结算倍率 UPDATE 在其它配置 UPDATE 之前，后者违反约束时前者也必须回滚。
 	require.Error(t, f.repo.SaveSharedSettings(ctx, changed))
 	saved, err := f.repo.SharedSettings(ctx)

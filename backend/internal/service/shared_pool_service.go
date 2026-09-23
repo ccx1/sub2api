@@ -194,7 +194,7 @@ func (s *SharedPoolService) AdminSetAccountState(ctx context.Context, id int64, 
 	if state.Priority != nil && (*state.Priority < 0 || *state.Priority > 100) {
 		return infraerrors.BadRequest("INVALID_SHARED_PRIORITY", "共享账号优先级须为0至100")
 	}
-	if state.OwnerID != 0 || state.DispatchConsent != nil || state.DefaultGroupID != nil {
+	if state.OwnerID != 0 || state.DispatchConsent != nil || state.DefaultGroupIDs != nil {
 		return infraerrors.Forbidden("SHARED_STATE_FORBIDDEN", "管理员不能代替账号所有者授权")
 	}
 	if state.SubscriptionTier == nil && (state.Enabled == nil || !*state.Enabled) {
@@ -231,13 +231,11 @@ func (s *SharedPoolService) AdminSetAccountState(ctx context.Context, id int64, 
 		if err != nil {
 			return err
 		}
-		groupID, err := s.initialSharedGroup(ctx, settings, account)
+		groupIDs, err := s.initialSharedGroups(ctx, settings, account)
 		if err != nil {
 			return err
 		}
-		if groupID > 0 {
-			state.DefaultGroupID = &groupID
-		}
+		state.DefaultGroupIDs = groupIDs
 	}
 	return s.repo.SetSharedAccountState(ctx, id, state)
 }

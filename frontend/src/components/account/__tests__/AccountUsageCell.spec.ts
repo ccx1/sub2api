@@ -155,6 +155,8 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('42m00s')
     expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketPaused')
     expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketMissing')
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.codexTurnTicketStandbyReady')
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.codexTurnTicketUsingStandby')
     if (type === 'setup-token') {
       expect(getUsage).not.toHaveBeenCalled()
       expect(wrapper.find('[data-test="quota-reset"]').exists()).toBe(false)
@@ -162,6 +164,38 @@ describe('AccountUsageCell', () => {
     await wrapper.setProps({ account: { ...wrapper.props('account'), codex_turn_tickets: [] } })
     expect(wrapper.text()).not.toContain('codexTurnTicket')
     expect(wrapper.text()).not.toContain('42m00s')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { ready: true, standby_ready: true, using_standby: false, primary: true, standby: true, using: false },
+    { ready: true, standby_ready: false, using_standby: true, primary: false, standby: false, using: true },
+    { ready: true, standby_ready: true, using_standby: true, primary: false, standby: false, using: true },
+    { ready: true, standby_ready: false, using_standby: false, primary: true, standby: false, using: false },
+    { ready: false, standby_ready: false, using_standby: false, primary: false, standby: false, using: false },
+  ])('shows primary and standby inventory accurately: %j', async (state) => {
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({
+        id: 9710,
+        platform: 'openai',
+        type: 'setup-token',
+        codex_turn_tickets: [{
+          model: 'gpt-6-astra', ready: state.ready, remaining_seconds: state.ready ? 1800 : 0,
+          blocked: false, standby_ready: state.standby_ready, using_standby: state.using_standby,
+          standby_expires_at: state.standby_ready ? '2026-09-22T12:00:00Z' : undefined,
+        }],
+      }) },
+      global: { stubs: { UsageProgressBar: true, AccountQuotaInfo: true } },
+    })
+    await flushPromises()
+    for (const [suffix, expected] of [
+      ['Primary', state.primary], ['StandbyReady', state.standby], ['UsingStandby', state.using],
+    ] as const) {
+      expect(wrapper.text().includes(`admin.accounts.openai.codexTurnTicket${suffix}`)).toBe(expected)
+    }
+    expect(wrapper.text().includes('30m00s')).toBe(state.ready)
+    await wrapper.setProps({ account: { ...wrapper.props('account'), codex_turn_tickets: [] } })
+    expect(wrapper.text()).not.toContain('codexTurnTicket')
     wrapper.unmount()
   })
 

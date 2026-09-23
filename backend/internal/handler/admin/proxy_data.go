@@ -69,8 +69,14 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 		if p.BackupProxyID != nil {
 			backupProxyName = proxyNameByID[*p.BackupProxyID]
 		}
+		var countryCode *string
+		if p.CountryCode != "" {
+			countryCode = &p.CountryCode
+		}
 		dataProxies = append(dataProxies, DataProxy{
 			ProxyKey:        key,
+			GroupID:         p.GroupID,
+			CountryCode:     countryCode,
 			Name:            p.Name,
 			Protocol:        p.Protocol,
 			Host:            p.Host,
@@ -154,40 +160,10 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		normalizedStatus := normalizeProxyStatus(item.Status)
 		if existing, ok := proxyByKey[key]; ok {
 			result.ProxyReused++
-			if normalizedStatus != "" && normalizedStatus != existing.Status {
+			if (normalizedStatus != "" && normalizedStatus != existing.Status) || item.CountryCode != nil || item.GroupID != nil {
 				// 已存在代理同步 status 时，同时保留/覆盖导入 item 的完整字段，
 				// 避免 UpdateProxy 零值覆盖有效期/fallback 配置。
-				var existingExpiresAt *time.Time
-				if item.ExpiresAt != nil {
-					t := time.Unix(*item.ExpiresAt, 0).UTC()
-					existingExpiresAt = &t
-				}
-				existingFallbackMode := item.FallbackMode
-				if existingFallbackMode == "" {
-					existingFallbackMode = service.FallbackModeNone
-				}
-				var existingBackupProxyID *int64
-				if item.BackupProxyName != "" {
-					if bid, ok := proxyNameToID[item.BackupProxyName]; ok {
-						existingBackupProxyID = &bid
-					}
-				}
-				updateInput := &service.UpdateProxyInput{
-					Status:         normalizedStatus,
-					ExpiresAt:      existingExpiresAt,
-					ClearExpiresAt: existingExpiresAt == nil,
-					FallbackMode:   existingFallbackMode,
-					BackupProxyID:  existingBackupProxyID,
-					ClearBackupID:  existingBackupProxyID == nil,
-					ExpiryWarnDays: &item.ExpiryWarnDays,
-					// 保留已存在代理的网络配置字段
-					Name:     existing.Name,
-					Protocol: existing.Protocol,
-					Host:     existing.Host,
-					Port:     existing.Port,
-					Username: &existing.Username,
-					Password: &existing.Password,
-				}
+				updateInput := importedProxyUpdateInput(item, &existing, normalizedStatus, proxyNameToID)
 				if _, err := h.adminService.UpdateProxy(ctx, existing.ID, updateInput); err != nil {
 					result.Errors = append(result.Errors, DataImportError{
 						Kind:     "proxy",
@@ -227,6 +203,8 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		}
 
 		created, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
+			GroupID:        proxyImportGroupID(item.GroupID),
+			CountryCode:    optionalStringValue(item.CountryCode),
 			Name:           defaultProxyName(item.Name),
 			Protocol:       item.Protocol,
 			Host:           item.Host,

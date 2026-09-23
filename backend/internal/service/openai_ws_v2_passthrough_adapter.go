@@ -685,6 +685,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	ctx, cancelBusiness := context.WithCancel(ctx)
+	businessHold := &codexTicketBusinessTurnHold{ctx: ctx, cancel: cancelBusiness, service: s, account: account}
+	defer businessHold.close()
+	if err := businessHold.begin(); err != nil {
+		return err
+	}
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
@@ -1142,6 +1148,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     覆盖（Store(nil)），因为 OpenAI 上游对该帧实际不传
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
+				if err := businessHold.begin(); err != nil {
+					return payload, nil, err
+				}
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
@@ -1286,8 +1295,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 					markOpenAIWSClientVisibleFailure(c, eventType, payload)
 				}
-				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
-					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+				if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && openAIWSPassthroughIsTerminalOutput(payload) {
+					businessHold.finish()
+					if msgType == coderws.MessageText {
+						turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+					}
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {

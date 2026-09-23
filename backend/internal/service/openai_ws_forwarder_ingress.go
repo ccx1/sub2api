@@ -870,6 +870,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	agentTaskRecoveryTried := false
 	var activeTicketReceipt *openAICodexTicketWSReceipt
+	var ticketObservationDisabled bool
 	ticketHandshakeModel := firstRoutingFields[0].String()
 	var acquireTurnLease func(int, string, bool, bool) (*openAIWSConnLease, error)
 	acquireTurnLease = func(turn int, preferred string, forcePreferredConn bool, forceNewConn bool) (*openAIWSConnLease, error) {
@@ -944,6 +945,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		connID := strings.TrimSpace(lease.ConnID())
 		activeTicketReceipt = confirmedOpenAICodexTicketWSReceipt(ticketReceipt, lease)
+		ticketObservationDisabled = false
 		activeTicketReceipt.observeHandshake(ctx, s, lease.HandshakeHeaders())
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			turnState = handshakeTurnState
@@ -975,6 +977,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+		ctx, releaseBusiness, holdErr := s.beginCodexTicketBusinessHold(ctx, account)
+		if holdErr != nil {
+			return nil, holdErr
+		}
+		defer releaseBusiness()
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
@@ -1038,6 +1045,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		ticketWatchdog := activeTicketReceipt.watch(ctx, s, mappedModel)
+		if ticketObservationDisabled {
+			ticketWatchdog = nil
+		}
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
@@ -1676,6 +1686,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return fmt.Errorf("refresh websocket ticket: %w", err)
 		}
 		ticketChanged := sessionLease != nil && activeTicketReceipt.identity() != baseAcquireReq.CodexTicketReceipt.identity()
+		if ticketChanged && codexTicketWSCookieTransition(activeTicketReceipt, baseAcquireReq.CodexTicketReceipt) {
+			// 仅显式允许无票放行时保留现有 Cookie 会话。
+			ticketChanged, ticketObservationDisabled = false, true
+		}
 		if sessionLease == nil {
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, turnRetry > 0)
 			if acquireErr != nil {

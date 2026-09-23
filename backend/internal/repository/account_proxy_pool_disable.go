@@ -27,8 +27,15 @@ func (r *accountRepository) disableAccountWhenBalancedPoolUnavailable(ctx contex
 	if err != nil {
 		return err
 	}
+	billing, err := json.Marshal(map[string]any{
+		"billing_currency": current.Credentials["billing_currency"],
+		"price_country":    current.Credentials["price_country"],
+	})
+	if err != nil {
+		return err
+	}
 	// 健康度和容量在分配器复核，写入时防止并发编辑后的新策略被旧请求禁用。
-	_, err = r.sql.ExecContext(ctx, disableBalancedProxyAccountSQL, id, service.SchedulerOutboxEventAccountChanged, string(payload))
+	_, err = r.sql.ExecContext(ctx, disableBalancedProxyAccountSQL, id, service.SchedulerOutboxEventAccountChanged, string(payload), string(billing))
 	if err == nil {
 		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
@@ -44,6 +51,11 @@ const disableBalancedProxyAccountSQL = `WITH disabled AS (
  AND a.extra->'random_proxy_pool_scope' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_scope'
  AND a.extra->'random_proxy_pool_ids' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_ids'
  AND a.extra->'random_proxy_group_id' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_group_id'
+ AND a.extra->'proxy_region_mode' IS NOT DISTINCT FROM $3::jsonb->'proxy_region_mode'
+ AND a.extra->'proxy_region_country' IS NOT DISTINCT FROM $3::jsonb->'proxy_region_country'
+ AND (COALESCE(btrim(a.extra->>'proxy_region_mode'), 'off') <> 'billing' OR (
+  a.credentials->>'billing_currency' IS NOT DISTINCT FROM $4::jsonb->>'billing_currency'
+  AND a.credentials->>'price_country' IS NOT DISTINCT FROM $4::jsonb->>'price_country'))
  RETURNING a.id
 )
 INSERT INTO scheduler_outbox (event_type,account_id,payload)

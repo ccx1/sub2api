@@ -29,9 +29,9 @@ func (s *SharedPoolService) prepareSharedDispatch(ctx context.Context, cfg *Shar
 	if enabled, _ := a.Extra[SharedPoolEnabledKey].(bool); !enabled {
 		return nil
 	}
-	id, err := s.initialSharedGroup(ctx, cfg, a)
-	if err == nil && id > 0 {
-		a.GroupIDs = []int64{id}
+	ids, err := s.initialSharedGroups(ctx, cfg, a)
+	if err == nil {
+		a.GroupIDs = ids
 	}
 	return err
 }
@@ -68,13 +68,12 @@ func (s *SharedPoolService) setSharedEnabled(ctx context.Context, userID, id int
 			a = &copy
 		}
 		if len(a.GroupIDs) == 0 && !record.Assigned {
-			groupID, err := s.initialSharedGroup(ctx, cfg, a)
+			groupIDs, err := s.initialSharedGroups(ctx, cfg, a)
 			if err != nil {
 				return err
 			}
-			if groupID > 0 {
-				ids := []int64{groupID}
-				state.GroupIDs = &ids
+			if len(groupIDs) > 0 {
+				state.GroupIDs = &groupIDs
 			}
 		}
 	}

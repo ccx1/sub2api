@@ -25,41 +25,54 @@ type CodexTicketProxySnapshot struct {
 }
 
 type CodexTicketAttempt struct {
-	canceled             bool
-	ID                   string                    `json:"id"`
-	StartedAt            time.Time                 `json:"started_at"`
-	FinishedAt           time.Time                 `json:"finished_at"`
-	Model                string                    `json:"model"`
-	Success              bool                      `json:"success"`
-	Reason               string                    `json:"reason"`
-	HarvestProxy         *CodexTicketProxySnapshot `json:"harvest_proxy"`
-	BusinessProxy        *CodexTicketProxySnapshot `json:"business_proxy"`
-	LengthMode           string                    `json:"length_mode,omitempty"`
-	TargetLength         *int                      `json:"target_length,omitempty"`
-	RejectedLengths      []int                     `json:"rejected_lengths,omitempty"`
-	HarvestTicketLength  *int                      `json:"harvest_ticket_length,omitempty"`
-	BusinessTicketLength *int                      `json:"business_ticket_length,omitempty"`
-	HarvestHTTPStatus    *int                      `json:"harvest_http_status,omitempty"`
-	BusinessHTTPStatus   *int                      `json:"business_http_status,omitempty"`
-	HarvestExchange      *CodexTicketExchange      `json:"harvest_exchange,omitempty"`
-	BusinessExchange     *CodexTicketExchange      `json:"business_exchange,omitempty"`
+	canceled                   bool
+	protectionLengthHit        bool
+	Outcome                    string                    `json:"outcome,omitempty"`
+	Protection                 *CodexTicketRuntimeStatus `json:"protection,omitempty"`
+	ID                         string                    `json:"id"`
+	StartedAt                  time.Time                 `json:"started_at"`
+	FinishedAt                 time.Time                 `json:"finished_at"`
+	Model                      string                    `json:"model"`
+	Success                    bool                      `json:"success"`
+	Reason                     string                    `json:"reason"`
+	HarvestProxy               *CodexTicketProxySnapshot `json:"harvest_proxy"`
+	BusinessProxy              *CodexTicketProxySnapshot `json:"business_proxy"`
+	LengthMode                 string                    `json:"length_mode,omitempty"`
+	TargetLength               *int                      `json:"target_length,omitempty"`
+	RejectedLengths            []int                     `json:"rejected_lengths,omitempty"`
+	HarvestTicketLength        *int                      `json:"harvest_ticket_length,omitempty"`
+	BusinessTicketLength       *int                      `json:"business_ticket_length,omitempty"`
+	HarvestHTTPStatus          *int                      `json:"harvest_http_status,omitempty"`
+	BusinessHTTPStatus         *int                      `json:"business_http_status,omitempty"`
+	BusinessVerificationRounds int                       `json:"business_verification_rounds,omitempty"`
+	BusinessVerificationPassed int                       `json:"business_verification_passed,omitempty"`
+	BusinessVerificationModels []string                  `json:"business_verification_models,omitempty"`
+	HarvestExchange            *CodexTicketExchange      `json:"harvest_exchange,omitempty"`
+	BusinessExchange           *CodexTicketExchange      `json:"business_exchange,omitempty"`
+	TicketCapturedAt           *time.Time                `json:"ticket_captured_at,omitempty"`
+	TicketExpiresAt            *time.Time                `json:"ticket_expires_at,omitempty"`
+	TicketStatus               string                    `json:"ticket_status,omitempty"`
+	Invalidation               *CodexTicketInvalidation  `json:"invalidation,omitempty"`
 }
 
 type CodexTicketAttemptSummary struct {
-	Total         int64      `json:"total"`
-	Success       int64      `json:"success"`
-	Failed        int64      `json:"failed"`
-	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
+	OutcomeCounts           map[string]int64 `json:"outcome_counts,omitempty"`
+	ClassificationStartedAt *time.Time       `json:"classification_started_at,omitempty"`
+	Total                   int64            `json:"total"`
+	Success                 int64            `json:"success"`
+	Failed                  int64            `json:"failed"`
+	LastAttemptAt           *time.Time       `json:"last_attempt_at,omitempty"`
 }
 
 type CodexTicketHistory struct {
-	Summary               CodexTicketAttemptSummary `json:"summary"`
-	Items                 []CodexTicketAttempt      `json:"items"`
-	Total                 int                       `json:"total"`
-	Page                  int                       `json:"page"`
-	PageSize              int                       `json:"page_size"`
-	RetainedLimit         int                       `json:"retained_limit"`
-	ExchangeRetainedLimit int                       `json:"exchange_retained_limit"`
+	Summary               CodexTicketAttemptSummary       `json:"summary"`
+	Items                 []CodexTicketAttempt            `json:"items"`
+	Total                 int                             `json:"total"`
+	Page                  int                             `json:"page"`
+	PageSize              int                             `json:"page_size"`
+	RetainedLimit         int                             `json:"retained_limit"`
+	ExchangeRetainedLimit int                             `json:"exchange_retained_limit"`
+	FilterOptions         CodexTicketHistoryFilterOptions `json:"filter_options"`
 }
 
 type codexTicketAttemptRecorder interface {
@@ -80,6 +93,16 @@ func DecodeCodexTicketHistory(raw any) (CodexTicketHistory, error) {
 
 // 调用者必须在同一账号的数据库行锁内读取和追加，避免多模型/多实例丢计数。
 func (h *CodexTicketHistory) Append(attempt CodexTicketAttempt) {
+	if attempt.Outcome != "" {
+		if h.Summary.OutcomeCounts == nil {
+			h.Summary.OutcomeCounts = make(map[string]int64)
+		}
+		h.Summary.OutcomeCounts[attempt.Outcome]++
+		if h.Summary.ClassificationStartedAt == nil {
+			started := attempt.StartedAt
+			h.Summary.ClassificationStartedAt = &started
+		}
+	}
 	h.Summary.Total++
 	if attempt.Success {
 		h.Summary.Success++
@@ -107,10 +130,23 @@ func (h *CodexTicketHistory) Append(attempt CodexTicketAttempt) {
 	}
 }
 
-func GetCodexTicketHistory(account *Account, page, size int) (CodexTicketHistory, error) {
+func GetCodexTicketHistory(account *Account, page, size int, filters ...CodexTicketHistoryFilter) (CodexTicketHistory, error) {
 	history, err := DecodeCodexTicketHistory(account.Extra[OpenAICodexTicketHistoryKey])
 	if err != nil {
 		return history, err
+	}
+	if err := projectCodexTicketHistory(&history, account, time.Now()); err != nil {
+		return CodexTicketHistory{}, err
+	}
+	history.FilterOptions = codexTicketHistoryFilterOptions(history.Items)
+	if len(filters) > 0 {
+		items := make([]CodexTicketAttempt, 0, len(history.Items))
+		for _, item := range history.Items {
+			if filters[0].matches(item) {
+				items = append(items, item)
+			}
+		}
+		history.Items = items
 	}
 	history.Page, history.PageSize = max(1, page), max(1, min(100, size))
 	history.RetainedLimit = OpenAICodexTicketHistoryLimit

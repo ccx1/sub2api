@@ -6,13 +6,15 @@ import SharedAccountImportDialog from '@/components/sharedPool/SharedAccountImpo
 import SharedAccountCard from '@/components/sharedPool/SharedAccountCard.vue'
 import SharedPoolCatalog from '@/components/sharedPool/SharedPoolCatalog.vue'
 import SharedDispatchConsentDialog from '@/components/sharedPool/SharedDispatchConsentDialog.vue'
+import SharedAutoTransferSettings from '@/components/sharedPool/SharedAutoTransferSettings.vue'
 
-const { config, overview, pools, summary, transfer, refreshUser, showError, showSuccess, showWarning, accounts, importAccounts, codexTicket, enable } = vi.hoisted(() => ({
-  config: vi.fn(), overview: vi.fn(), pools: vi.fn(), summary: vi.fn(), transfer: vi.fn(), refreshUser: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(), showWarning: vi.fn(), accounts: vi.fn(), importAccounts: vi.fn(), codexTicket: vi.fn(), enable: vi.fn()
+const { config, overview, pools, summary, transfer, refreshUser, showError, showSuccess, showWarning, accounts, importAccounts, codexTicket, enable, autoTransferSettings } = vi.hoisted(() => ({
+  config: vi.fn(), overview: vi.fn(), pools: vi.fn(), summary: vi.fn(), transfer: vi.fn(), refreshUser: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(), showWarning: vi.fn(), accounts: vi.fn(), importAccounts: vi.fn(), codexTicket: vi.fn(), enable: vi.fn(),
+  autoTransferSettings: vi.fn(async () => ({ enabled: false, threshold: 1, daily_time: '00:00', timezone: 'Asia/Shanghai' }))
 }))
 vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: {
   overview, pools, config,
-  accounts, importAccounts, summary, transfer, codexTicket, enable
+  accounts, importAccounts, summary, transfer, codexTicket, enable, autoTransferSettings
 } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ refreshUser }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError, showSuccess, showWarning }) }))
@@ -51,18 +53,29 @@ describe('shared earnings transfer', () => {
     wrapper.unmount()
   })
 
-  it('requires the dedicated authorization confirmation and keeps ordinary enable unchanged', async () => {
+  it('keeps manual transfers and account actions available when automatic settings fail to load', async () => {
+    autoTransferSettings.mockRejectedValueOnce(new Error('Settings offline'))
+    const wrapper = await render()
+    await flushPromises()
+    expect(wrapper.getComponent(SharedAutoTransferSettings).text()).toContain('sharedPool.autoTransferLoadFailed')
+    expect(wrapper.findAll('button').find(button => button.text() === 'sharedPool.transfer')!.attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('button').find(button => button.text() === 'sharedPool.create')!.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('$10.0000')
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('requires the dedicated authorization confirmation for legacy accounts', async () => {
     const account = { id: 7, name: 'Legacy account', platform: 'openai', dispatch_consent: false, enabled: false }
     accounts.mockResolvedValue({ items: [account], total: 1 }); enable.mockResolvedValue({})
     const wrapper = await render()
     const card = wrapper.getComponent(SharedAccountCard)
-    card.vm.$emit('enable', true); await flushPromises()
-    expect(enable).toHaveBeenLastCalledWith(7, true)
+    expect(card.vm.$attrs.onEnable).toBeUndefined()
     card.vm.$emit('authorize'); await flushPromises()
-    expect(enable).toHaveBeenCalledTimes(1)
+    expect(enable).not.toHaveBeenCalled()
     expect(wrapper.getComponent(SharedDispatchConsentDialog).text()).toContain('sharedPool.dispatchConsentHint')
     wrapper.getComponent(SharedDispatchConsentDialog).vm.$emit('close'); await flushPromises()
-    expect(enable).toHaveBeenCalledTimes(1)
+    expect(enable).not.toHaveBeenCalled()
     card.vm.$emit('authorize'); await flushPromises()
     wrapper.getComponent(SharedDispatchConsentDialog).vm.$emit('confirm'); await flushPromises()
     expect(enable).toHaveBeenLastCalledWith(7, true, true)

@@ -1231,17 +1231,23 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 }
 
 // OpenAICodexTicketConfig 控制 ChatGPT OAuth 的 x-codex-turn-state 门票。
-// 采集代理使用固定地址或代理池，候选票通过账号业务出口复验后才发布。
+// 采集代理使用固定地址或代理池，候选票默认通过账号业务出口复验后才发布。
 // 后台设置优先于启动配置；随机代理账号持续复用未过期的合格票据。
 type OpenAICodexTicketConfig struct {
+	Protection                    *CodexTicketProtectionConfig `mapstructure:"protection" json:"protection,omitempty"`
 	Enabled                       bool                         `mapstructure:"enabled" json:"enabled"`
-	Protection                    *CodexTicketProtectionConfig `mapstructure:"protection" json:"protection"`
-	CredentialMode                string                       `mapstructure:"credential_mode" json:"credential_mode"`
+	CredentialMode                string                       `mapstructure:"credential_mode" json:"credential_mode,omitempty"`
+	CookieTTLSeconds              int                          `mapstructure:"cookie_ttl_seconds" json:"cookie_ttl_seconds,omitempty"`
+	CookieRefreshBeforeSeconds    *int                         `mapstructure:"cookie_refresh_before_seconds" json:"cookie_refresh_before_seconds,omitempty"`
+	VerifyBusiness                *bool                        `mapstructure:"verify_business" json:"verify_business,omitempty"`
+	BusinessVerificationRounds    int                          `mapstructure:"business_verification_rounds" json:"business_verification_rounds,omitempty"`
+	SessionMode                   string                       `mapstructure:"session_mode" json:"session_mode,omitempty"`
+	RefreshStrategy               string                       `mapstructure:"refresh_strategy" json:"refresh_strategy,omitempty"`
+	ProxyFailureThreshold         int                          `mapstructure:"proxy_failure_threshold" json:"proxy_failure_threshold,omitempty"`
 	LengthMode                    string                       `mapstructure:"length_mode" json:"length_mode"`
 	TargetLength                  int                          `mapstructure:"target_length" json:"target_length"`
 	TTLSeconds                    int                          `mapstructure:"ttl_seconds" json:"ttl_seconds"`
-	CookieTTLSeconds              int                          `mapstructure:"cookie_ttl_seconds" json:"cookie_ttl_seconds"`
-	CookieRefreshBeforeSeconds    *int                         `mapstructure:"cookie_refresh_before_seconds" json:"cookie_refresh_before_seconds"`
+	PoolCapacity                  int                          `mapstructure:"pool_capacity" json:"pool_capacity,omitempty"`
 	RefreshBeforeSeconds          int                          `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
 	HarvestProxyURL               string                       `mapstructure:"harvest_proxy_url" json:"-"`
 	HarvestProbeIntervalSeconds   int                          `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
@@ -2431,14 +2437,23 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
+	viper.SetDefault("gateway.openai_codex_ticket.credential_mode", CodexTicketCredentialState)
+	viper.SetDefault("gateway.openai_codex_ticket.cookie_ttl_seconds", DefaultCodexTicketCookieTTLSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.cookie_refresh_before_seconds", DefaultCodexTicketCookieRefreshBeforeSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.verify_business", true)
+	viper.SetDefault("gateway.openai_codex_ticket.business_verification_rounds", 1)
 	viper.SetDefault("gateway.openai_codex_ticket.length_mode", CodexTicketLengthStrict)
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
 	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
+	viper.SetDefault("gateway.openai_codex_ticket.pool_capacity", DefaultCodexTicketPoolCapacity)
 	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_proxy_url", "")
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_probe_interval_seconds", 6)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 25)
 	viper.SetDefault("gateway.openai_codex_ticket.fail_closed", true)
+	viper.SetDefault("gateway.openai_codex_ticket.session_mode", CodexTicketSessionRandom)
+	viper.SetDefault("gateway.openai_codex_ticket.refresh_strategy", CodexTicketRefreshRevalidate)
+	viper.SetDefault("gateway.openai_codex_ticket.proxy_failure_threshold", 3)
 	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
 	ticketDefaults := NormalizeOpenAICodexTicketConfig(OpenAICodexTicketConfig{})
 	viper.SetDefault("gateway.openai_codex_ticket.tier_rules", ticketDefaults.TierRules)
@@ -2720,6 +2735,12 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := ValidateCodexTicketCredentialConfig(&c.Gateway.OpenAICodexTicket); err != nil {
+		return fmt.Errorf("gateway.openai_codex_ticket: %w", err)
+	}
+	if err := ValidateCodexTicketRefreshStrategy(&c.Gateway.OpenAICodexTicket); err != nil {
+		return fmt.Errorf("gateway.openai_codex_ticket: %w", err)
+	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

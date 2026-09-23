@@ -557,8 +557,19 @@ export default {
         codexTicketEnabledDesc:
           '在打票配置页面统一管理总开关、订阅档次规则、重试和冷却参数。',
         codexTicketHarvestProxy: '全局默认打票代理',
-        codexTicketHarvestProxyFixed: '固定代理 URL',
+        codexTicketHarvestProxyAccount: '跟随账号出口代理',
+        codexTicketHarvestProxyInherit: '继承启动配置',
+        codexTicketHarvestProxyRandom: '随机代理池',
+        codexTicketHarvestProxyFixed: '固定托管代理',
         codexTicketHarvestProxyPool: '从代理池均衡选择',
+        codexTicketHarvestProxyAccountDesc:
+          '所有未单独配置的账号都使用自己的业务出口；账号固定、随机和直连策略保持一致。',
+        codexTicketHarvestProxyInheritDesc:
+          '沿用启动配置中的旧版打票代理 URL；未配置 URL 时回退到随机代理池。',
+        codexTicketHarvestProxyRandomDesc:
+          '从托管代理池均衡选择打票出口；账号管理中的单独配置优先于此规则。',
+        codexTicketHarvestProxyFixedDesc:
+          '仅使用下方选择的托管代理；代理失效时停止打票，不会自动直连或切换。',
         codexTicketHarvestProxyPoolDesc:
           '适用于未单独配置打票代理的账号；可在账号管理中单独选择固定或随机打票代理。跟随全局时，业务随机账号沿用其代理范围，其他账号使用整个代理池。持续复用健康代理，持续失败或质量下降时才更换；重新选择优先占用较低、质量较好的代理。没有可用容量时跳过打票，不回退直连。',
         codexTicketHarvestProxyDesc:

@@ -25,9 +25,9 @@ type sharedImportRepositoryStub struct {
 }
 
 func (r *sharedImportRepositoryStub) SharedSettings(context.Context) (*service.SharedPoolSettings, error) {
-	return &service.SharedPoolSettings{MaxConcurrency: 10, DefaultPriority: 17, DefaultGroupIDs: map[string]int64{"gemini": 8},
+	return &service.SharedPoolSettings{MaxConcurrency: 10, DefaultPriority: 17, DefaultGroupIDs: service.SharedPoolDefaultGroupIDs{"gemini": {8, 10}},
 		SettlementMultiplier: 1,
-		SubscriptionGroupIDs: map[string]map[string]int64{"gemini": {"gcp_enterprise": 9}}}, nil
+		SubscriptionGroupIDs: service.SharedPoolSubscriptionGroupIDs{"gemini": {"gcp_enterprise": {9}}}}, nil
 }
 func (r *sharedImportRepositoryStub) SharedUserRates(context.Context) ([]service.SharedPoolUserRate, error) {
 	return nil, nil
@@ -84,7 +84,7 @@ func TestSharedImportUsesSharedServiceBoundaryAndDoesNotUpdateDuplicates(t *test
 	account := r.accounts[1]
 	require.Equal(t, int64(901), r.owners[1])
 	require.Equal(t, int64(901), account.Extra[service.SharedPoolOwnerKey])
-	require.Equal(t, []int64{8}, account.GroupIDs)
+	require.Equal(t, []int64{8, 10}, account.GroupIDs)
 	require.Equal(t, 17, account.Priority, "使用平台配置的优先级，不能接受用户导入的覆盖值")
 	require.Nil(t, account.RateMultiplier)
 	require.Nil(t, account.ProxyID)

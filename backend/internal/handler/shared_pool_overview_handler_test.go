@@ -28,7 +28,11 @@ func (*sharedOverviewHandlerRepo) SharedUserRates(context.Context) ([]service.Sh
 }
 
 func (r *sharedOverviewHandlerRepo) SharedPoolOverviewAccounts(context.Context) ([]service.SharedPoolOverviewAccount, error) {
-	return []service.SharedPoolOverviewAccount{{AccountID: 42, Platform: "openai", Tier: "pro", Available: true, Participating: true, Concurrency: 3}}, r.err
+	return []service.SharedPoolOverviewAccount{
+		{AccountID: 42, Platform: "openai", Tier: "pro", Valid: true, Available: true, TicketRequired: true, Concurrency: 3},
+		{AccountID: 43, Platform: "openai", Tier: "pro", Valid: true, TicketRequired: true, Concurrency: 3},
+		{AccountID: 44, Platform: "openai", Tier: "pro", TicketRequired: true, Concurrency: 3},
+	}, r.err
 }
 
 func TestSharedPoolOverviewUsesAuthenticatedUserAndOnlyExposesAggregateFields(t *testing.T) {
@@ -44,14 +48,16 @@ func TestSharedPoolOverviewUsesAuthenticatedUserAndOnlyExposesAggregateFields(t 
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
 	data := envelope.Data
 	require.Equal(t, 0.5, data["settlement_multiplier"])
-	require.Equal(t, float64(1), data["total_accounts"])
+	require.Equal(t, float64(3), data["total_accounts"])
+	require.Equal(t, float64(2), data["available_accounts"])
 	require.Equal(t, float64(1), data["schedulable_accounts"])
 	require.Nil(t, data["current_concurrency"], "无并发统计依赖时不能伪造零占用")
-	require.Len(t, data, 13, "公开字段白名单不包含内部容量和身份")
-	require.Equal(t, float64(1), data["participating_accounts"])
-	require.Equal(t, float64(3), data["participating_concurrency"])
+	require.Len(t, data, 14, "公开字段白名单不包含内部容量和身份")
+	require.Equal(t, float64(0), data["participating_accounts"])
+	require.Equal(t, float64(0), data["participating_concurrency"])
 	tier := data["tiers"].([]any)[0].(map[string]any)
-	require.Len(t, tier, 11)
+	require.Len(t, tier, 12)
+	require.Equal(t, false, tier["available"])
 	require.Equal(t, "pro", tier["tier"])
 	for _, field := range []string{"account_id", "owner_user_id", "credentials", "group_ids", "capacity", "email"} {
 		require.NotContains(t, w.Body.String(), `"`+field+`"`)

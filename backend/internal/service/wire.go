@@ -848,8 +848,16 @@ func ProvideAPIKeyService(
 }
 
 // ProviderSet is the Wire provider set for all services
+func ProvideSharedPoolAutoTransferService(repo SharedPoolAutoTransferRepository, auth APIKeyAuthCacheInvalidator,
+	billing *BillingCacheService, leader LeaderLockCache, db *sql.DB) *SharedPoolAutoTransferService {
+	svc := NewSharedPoolAutoTransferService(repo, auth, billing, leader, db)
+	svc.Start()
+	return svc
+}
+
 var ProviderSet = wire.NewSet(
 	NewSharedPoolService,
+	ProvideSharedPoolAutoTransferService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -956,8 +964,6 @@ var ProviderSet = wire.NewSet(
 	NewTotpService,
 	NewErrorPassthroughService,
 	ProvideTLSFingerprintProfileService,
-	NewPluginManager,
-	NewTLSFingerprintProfileService,
 	ProvidePluginManager,
 	NewDigestSessionStore,
 	ProvideIdempotencyCoordinator,

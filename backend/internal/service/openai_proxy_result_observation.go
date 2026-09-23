@@ -31,11 +31,14 @@ type randomProxyReportedTransportError struct{ error }
 func (e *randomProxyReportedTransportError) Unwrap() error { return e.error }
 
 func observeRandomProxyHTTPResult(req *http.Request, account *Account, source any, resp *http.Response, err error) bool {
-	if account == nil || !account.IsRandomProxy() {
+	if account == nil {
 		return false
 	}
 	if err != nil || resp == nil {
 		return ReportRandomProxyTransportFailure(req.Context(), account, source, err)
+	}
+	if !account.IsRandomProxy() {
+		return false
 	}
 	RecordRandomProxyUsage(req.Context(), account, source)
 	// 认证、限流和业务参数错误不是出口故障，不改变代理亲和。

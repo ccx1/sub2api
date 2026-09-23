@@ -281,11 +281,46 @@ export interface CodexTicketHTTPMessage {
 }
 
 export interface CodexTicketExchange {
+  capture_mode?: 'raw' | 'redacted'
   requested_model: string
   reported_models?: string[]
   models_truncated?: boolean
   request?: CodexTicketHTTPMessage | null
   response?: CodexTicketHTTPMessage | null
+  network?: import('./codexTicketDiagnostics').CodexTicketNetwork
+  model_declaration?: import('./codexTicketDiagnostics').CodexTicketModelDeclaration
+  upstream_error?: import('./codexTicketDiagnostics').CodexTicketUpstreamError
+  signals?: import('./codexTicketDiagnostics').CodexTicketSignals
+}
+
+export type CodexTicketStatus = 'not_issued' | 'issued' | 'invalidated' | 'ttl_elapsed' | 'unknown'
+
+export interface CodexTicketInvalidation {
+  attempt_id: string
+  model: string
+  captured_at: string
+  invalidated_at: string
+  reason: 'response_model_mismatch' | 'response_ticket_rejected' | 'unknown'
+  source: 'http' | 'websocket' | 'websocket_handshake' | 'websocket_prewarm' | 'unknown'
+  reported_models?: string[]
+  returned_ticket_length?: number
+  signals?: import('./codexTicketDiagnostics').CodexTicketSignals
+}
+
+export interface CodexTicketHistoryFilters {
+  result?: 'success' | 'failed'
+  outcome?: string
+  ticket_status?: CodexTicketStatus
+  model?: string
+  reason?: string
+  started_from?: string
+  started_to?: string
+}
+
+export interface CodexTicketHistoryFilterOptions {
+  models: string[]
+  reasons: string[]
+  outcomes?: string[]
 }
 
 export interface CodexTicketHistoryAttempt {
@@ -295,6 +330,12 @@ export interface CodexTicketHistoryAttempt {
   model: string
   success: boolean
   reason: string
+  ticket_captured_at?: string
+  outcome?: string
+  protection?: import('./codexTicketDiagnostics').CodexTicketRuntimeStatus
+  ticket_expires_at?: string
+  ticket_status?: CodexTicketStatus
+  invalidation?: CodexTicketInvalidation | null
   harvest_proxy?: CodexTicketHistoryProxy | null
   business_proxy?: CodexTicketHistoryProxy | null
   length_mode?: 'auto' | 'strict'
@@ -304,23 +345,27 @@ export interface CodexTicketHistoryAttempt {
   business_ticket_length?: number | null
   harvest_http_status?: number | null
   business_http_status?: number | null
+  business_verification_rounds?: number
+  business_verification_passed?: number
+  business_verification_models?: string[]
   harvest_exchange?: CodexTicketExchange | null
   business_exchange?: CodexTicketExchange | null
 }
 
 export interface CodexTicketHistory {
-  summary: { total: number; success: number; failed: number; last_attempt_at?: string }
+  summary: { total: number; success: number; failed: number; last_attempt_at?: string; outcome_counts?: Record<string, number>; classification_started_at?: string }
   items: CodexTicketHistoryAttempt[]
   total: number
   page: number
   page_size: number
   retained_limit: number
   exchange_retained_limit?: number
+  filter_options?: CodexTicketHistoryFilterOptions
 }
 
 export async function getCodexTicketHistory(
   id: number,
-  params: { page: number; page_size: number }
+  params: { page: number; page_size: number } & CodexTicketHistoryFilters
 ): Promise<CodexTicketHistory> {
   const { data } = await apiClient.get<CodexTicketHistory>(
     `/admin/accounts/${id}/codex-ticket/history`, { params }
@@ -591,16 +636,19 @@ export async function exchangeCode(
  * @param accounts - Array of account data
  * @returns Results of batch creation
  */
-export async function batchCreate(accounts: CreateAccountRequest[]): Promise<{
+export async function batchCreate(accounts: CreateAccountRequest[], options?: {
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
+}): Promise<{
   success: number
   failed: number
-  results: Array<{ success: boolean; account?: Account; error?: string }>
+  results: Array<{ success: boolean; id?: number; name?: string; account?: Account; error?: string }>
 }> {
   const { data } = await apiClient.post<{
     success: number
     failed: number
-    results: Array<{ success: boolean; account?: Account; error?: string }>
-  }>('/admin/accounts/batch', { accounts })
+    results: Array<{ success: boolean; id?: number; name?: string; account?: Account; error?: string }>
+  }>('/admin/accounts/batch', { accounts, ...options })
   return data
 }
 
@@ -858,10 +906,14 @@ export async function exportData(options?: {
 export async function importData(payload: {
   data: AdminDataPayload
   skip_default_group_bind?: boolean
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
 }): Promise<AdminDataImportResult> {
   const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
     data: payload.data,
-    skip_default_group_bind: payload.skip_default_group_bind
+    skip_default_group_bind: payload.skip_default_group_bind,
+    protection_enabled: payload.protection_enabled,
+    codex_ticket_enabled: payload.codex_ticket_enabled
   })
   return data
 }

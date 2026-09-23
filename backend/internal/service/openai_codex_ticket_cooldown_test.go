@@ -93,7 +93,7 @@ func TestCodexTicketCooldownRetainsSavedTicketAndCleansExpiredEntries(t *testing
 	account.Extra = map[string]any{openAICodexTicketExtraKey(ticket.Model): ticket}
 	svc.openaiCodexTickets.Store(key, ticket)
 	svc.coolOpenAICodexTicket(account, "token", &openAICodexTicketProbeRejected{Status: 429})
-	require.Same(t, ticket, svc.lookupOpenAICodexTicket(account, ticket.Model))
+	require.Equal(t, ticket, svc.lookupOpenAICodexTicket(account, ticket.Model))
 	require.Same(t, ticket, account.Extra[openAICodexTicketExtraKey(ticket.Model)])
 	cooldownKey := openAICodexTicketCooldownKey(account, "token")
 	expiredKey := openAICodexTicketCooldownKey(ticketTestAccount(42), "old")
@@ -103,7 +103,7 @@ func TestCodexTicketCooldownRetainsSavedTicketAndCleansExpiredEntries(t *testing
 	require.False(t, svc.openAICodexTicketCooling(account, "token"))
 	_, remains := svc.openaiCodexTicketCooldown.Load(expiredKey)
 	require.False(t, remains)
-	require.Same(t, ticket, svc.lookupOpenAICodexTicket(account, ticket.Model))
+	require.Equal(t, ticket, svc.lookupOpenAICodexTicket(account, ticket.Model))
 }
 
 func TestCodexTicketCooldownConcurrentUpdatesKeepLatestDeadline(t *testing.T) {

@@ -4,11 +4,22 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestSharedSubscriptionGroupIDsDecodeLegacyAndArrays(t *testing.T) {
+	var groups SharedPoolSubscriptionGroupIDs
+	require.NoError(t, json.Unmarshal([]byte(`{"openai":{"plus":11,"pro":[12,13,12]}}`), &groups))
+	require.Equal(t, []int64{11}, groups[PlatformOpenAI]["plus"])
+	require.Equal(t, []int64{12, 13, 12}, groups[PlatformOpenAI]["pro"])
+	normalized, err := NormalizeSharedSubscriptionGroupIDs(groups)
+	require.NoError(t, err)
+	require.Equal(t, []int64{12, 13}, normalized[PlatformOpenAI]["pro"])
+}
 
 type sharedTierGroups struct {
 	GroupRepository
@@ -88,47 +99,61 @@ func TestSharedSubscriptionGroupFallback(t *testing.T) {
 				groups.items[11] = target
 			}
 			s := &SharedPoolService{groups: groups}
-			cfg := &SharedPoolSettings{DefaultGroupIDs: map[string]int64{PlatformOpenAI: 10}, SubscriptionGroupIDs: map[string]map[string]int64{PlatformOpenAI: {"plus": 11}}}
+			cfg := &SharedPoolSettings{DefaultGroupIDs: SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}}, SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"plus": {11}}}}
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "plus"}}
-			id, err := s.initialSharedGroup(context.Background(), cfg, a)
+			ids, err := s.initialSharedGroups(context.Background(), cfg, a)
 			require.NoError(t, err)
 			want := int64(10)
 			if tc.name == "matched" {
 				want = 11
 			}
-			require.Equal(t, want, id)
+			require.Equal(t, []int64{want}, ids)
 		})
 	}
+}
+
+func TestSharedSubscriptionGroupMatchesAllConfiguredTargets(t *testing.T) {
+	s := &SharedPoolService{groups: sharedTierGroups{items: map[int64]*Group{
+		10: sharedTierGroup(10, PlatformOpenAI), 11: sharedTierGroup(11, PlatformOpenAI), 12: sharedTierGroup(12, PlatformOpenAI),
+	}}}
+	cfg := &SharedPoolSettings{
+		DefaultGroupIDs:      SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}},
+		SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"plus": {11, 12, 11}}},
+	}
+	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "plus"}}
+	ids, err := s.initialSharedGroups(context.Background(), cfg, a)
+	require.NoError(t, err)
+	require.Equal(t, []int64{11, 12}, ids, "initial assignment preserves configured target order and removes duplicate IDs")
 }
 
 func TestSharedSubscriptionDefaultsAndErrors(t *testing.T) {
 	groups := sharedTierGroups{items: map[int64]*Group{10: sharedTierGroup(10, PlatformOpenAI), 11: sharedTierGroup(11, PlatformOpenAI)}}
 	s := &SharedPoolService{groups: groups}
-	cfg := &SharedPoolSettings{DefaultGroupIDs: map[string]int64{PlatformOpenAI: 10}, SubscriptionGroupIDs: map[string]map[string]int64{PlatformAntigravity: {"pro": 11}}}
+	cfg := &SharedPoolSettings{DefaultGroupIDs: SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}}, SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformAntigravity: {"pro": {11}}}}
 	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "pro"}}
-	id, err := s.initialSharedGroup(context.Background(), cfg, a)
+	ids, err := s.initialSharedGroups(context.Background(), cfg, a)
 	require.NoError(t, err)
-	require.Equal(t, int64(10), id, "不能命中其它平台同名档位")
-	cfg.SubscriptionGroupIDs[PlatformOpenAI] = map[string]int64{"pro": 11}
+	require.Equal(t, []int64{10}, ids, "不能命中其它平台同名档位")
+	cfg.SubscriptionGroupIDs[PlatformOpenAI] = map[string][]int64{"pro": {11}}
 	a.Credentials["plan_type"] = "unknown"
-	id, err = s.initialSharedGroup(context.Background(), cfg, a)
+	ids, err = s.initialSharedGroups(context.Background(), cfg, a)
 	require.NoError(t, err)
-	require.Equal(t, int64(10), id)
+	require.Equal(t, []int64{10}, ids)
 	a.Credentials["plan_type"] = "pro"
 	a.Type = AccountTypeAPIKey
-	id, err = s.initialSharedGroup(context.Background(), cfg, a)
+	ids, err = s.initialSharedGroups(context.Background(), cfg, a)
 	require.NoError(t, err)
-	require.Equal(t, int64(10), id, "API Key 不匹配订阅规则")
+	require.Equal(t, []int64{10}, ids, "API Key 不匹配订阅规则")
 	groups.items[10].RequireOAuthOnly = true
-	_, err = s.initialSharedGroup(context.Background(), cfg, a)
+	_, err = s.initialSharedGroups(context.Background(), cfg, a)
 	require.Error(t, err)
 	delete(groups.items, 10)
-	_, err = s.initialSharedGroup(context.Background(), cfg, a)
+	_, err = s.initialSharedGroups(context.Background(), cfg, a)
 	require.Error(t, err)
 	dbErr := errors.New("database unavailable")
 	s.groups = sharedTierGroups{err: dbErr}
 	a.Type = AccountTypeOAuth
-	_, err = s.initialSharedGroup(context.Background(), cfg, a)
+	_, err = s.initialSharedGroups(context.Background(), cfg, a)
 	require.ErrorIs(t, err, dbErr)
 }
 
@@ -167,7 +192,7 @@ func TestSharedSubscriptionAssignmentOnCreateAndFirstEnable(t *testing.T) {
 		t.Run(map[bool]string{true: "create enabled", false: "first enable"}[enabled], func(t *testing.T) {
 			r := &sharedTierSettingsRepo{cfg: &SharedPoolSettings{MaxConcurrency: 10, DefaultPriority: 17,
 				SettlementMultiplier: 1,
-				DefaultGroupIDs:      map[string]int64{PlatformGemini: 10}, SubscriptionGroupIDs: map[string]map[string]int64{PlatformGemini: {"gcp_enterprise": 11}}}}
+				DefaultGroupIDs:      SharedPoolDefaultGroupIDs{PlatformGemini: {10}}, SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformGemini: {"gcp_enterprise": {11}}}}}
 			s := &SharedPoolService{repo: r, accounts: sharedTierCreatedAccounts{repo: r}, earnings: sharedPoolTotalsStub{}, groups: sharedTierGroups{items: map[int64]*Group{
 				10: sharedTierGroup(10, PlatformGemini), 11: sharedTierGroup(11, PlatformGemini),
 			}}}
@@ -189,21 +214,21 @@ func TestSharedSubscriptionAssignmentOnCreateAndFirstEnable(t *testing.T) {
 func TestSharedSubscriptionSettingsValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
-		rules                map[string]map[string]int64
+		rules                SharedPoolSubscriptionGroupIDs
 		noDefault, wantError bool
 	}{
-		{name: "canonical alias", rules: map[string]map[string]int64{PlatformOpenAI: {"ChatGPT_Pro": 11}}},
-		{name: "duplicate alias", rules: map[string]map[string]int64{PlatformOpenAI: {"pro": 11, "chatgpt_pro": 11}}, wantError: true},
-		{name: "unknown tier", rules: map[string]map[string]int64{PlatformOpenAI: {"unknown": 11}}, wantError: true},
-		{name: "unknown target", rules: map[string]map[string]int64{PlatformOpenAI: {"plus": 99}}, wantError: true},
-		{name: "missing default", rules: map[string]map[string]int64{PlatformOpenAI: {"plus": 11}}, noDefault: true, wantError: true},
+		{name: "canonical alias", rules: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"ChatGPT_Pro": {11}}}},
+		{name: "duplicate alias", rules: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"pro": {11}, "chatgpt_pro": {11}}}, wantError: true},
+		{name: "unknown tier", rules: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"unknown": {11}}}, wantError: true},
+		{name: "unknown target", rules: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"plus": {99}}}, wantError: true},
+		{name: "missing default", rules: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"plus": {11}}}, noDefault: true, wantError: true},
 		{name: "legacy omitted"},
-		{name: "clear rules", rules: map[string]map[string]int64{}},
+		{name: "clear rules", rules: SharedPoolSubscriptionGroupIDs{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &sharedTierSettingsRepo{}
 			s := &SharedPoolService{repo: r, groups: sharedTierGroups{items: map[int64]*Group{10: sharedTierGroup(10, PlatformOpenAI), 11: sharedTierGroup(11, PlatformOpenAI)}}}
-			cfg := &SharedPoolSettings{MaxConcurrency: 5, DefaultGroupIDs: map[string]int64{PlatformOpenAI: 10}, SubscriptionGroupIDs: tc.rules}
+			cfg := &SharedPoolSettings{MaxConcurrency: 5, DefaultGroupIDs: SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}}, SubscriptionGroupIDs: tc.rules}
 			if tc.noDefault {
 				cfg.DefaultGroupIDs = nil
 			}
@@ -216,7 +241,7 @@ func TestSharedSubscriptionSettingsValidation(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, r.saved)
 			if tc.name == "canonical alias" {
-				require.Equal(t, int64(11), r.cfg.SubscriptionGroupIDs[PlatformOpenAI]["pro"])
+				require.Equal(t, []int64{11}, r.cfg.SubscriptionGroupIDs[PlatformOpenAI]["pro"])
 			}
 			if tc.name == "legacy omitted" {
 				require.Nil(t, r.cfg.SubscriptionGroupIDs)

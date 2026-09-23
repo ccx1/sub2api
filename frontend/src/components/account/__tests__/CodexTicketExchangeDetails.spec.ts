@@ -38,6 +38,36 @@ beforeEach(() => { copyToClipboard.mockReset(); copyToClipboard.mockResolvedValu
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
 describe('CodexTicketExchangeDetails', () => {
+  it('displays and copies raw bodies and header values unchanged, while keeping HTML inert', async () => {
+    const rawBody = '  {"ticket":"test-ticket-value","html":"<img src=x onerror=alert(1)>"}\r\n\t'
+    const data = attempt()
+    Object.assign(data.harvest_exchange!, { capture_mode: 'raw' })
+    Object.assign(data.harvest_exchange!.request!, {
+      headers: { Authorization: ['Bearer test-credential'], Cookie: ['test-session=sample'], 'X-Ticket': ['test-ticket-value'] },
+      body: rawBody
+    })
+    const wrapper = mountDetails(data)
+    const request = wrapper.get('[data-testid="harvest-request"]')
+    expect(request.text()).toContain('原始请求')
+    expect(request.text()).toContain('Bearer test-credential')
+    expect(request.findAll('pre')[1]!.element.textContent).toBe(rawBody)
+    expect(wrapper.find('img').exists()).toBe(false)
+    await request.get('button').trigger('click')
+    await flushPromises()
+    const copied = copyToClipboard.mock.calls[0]![0] as string
+    expect(copied).toBe('POST https://example.test/responses\nAuthorization: Bearer test-credential\nCookie: test-session=sample\nX-Ticket: test-ticket-value\n\n' + rawBody)
+    expect(wrapper.get('[role="status"]').text()).toBe('已复制原始报文')
+    expect(wrapper.get('[data-testid="harvest-exchange"]').text()).not.toContain('已脱敏')
+  })
+
+  it('treats missing capture_mode as old redacted data and supports mixed-stage capture modes', () => {
+    const data = attempt({ business_exchange: { capture_mode: 'raw', requested_model: 'requested-model', response: { status_code: 200, body: 'test-ticket-value', body_bytes: 17 } } })
+    const wrapper = mountDetails(data)
+    expect(wrapper.get('[data-testid="harvest-request"]').text()).toContain('脱敏请求（旧记录）')
+    expect(wrapper.get('[data-testid="business-response"]').text()).toContain('原始响应')
+    expect(wrapper.get('[data-testid="business-exchange"]').text()).not.toContain('已脱敏')
+  })
+
   it('explains unavailable messages for legacy attempts without inventing observed models', () => {
     const wrapper = mountDetails(attempt({ harvest_exchange: undefined }))
     expect(wrapper.findAll('[data-testid="exchange-unavailable"]')).toHaveLength(2)

@@ -635,13 +635,15 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		Host:           m.Host,
 		Port:           m.Port,
 		Status:         m.Status,
-		CountryCode:    m.CountryCode,
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,
 		ExpiresAt:      m.ExpiresAt,
 		FallbackMode:   m.FallbackMode,
 		BackupProxyID:  m.BackupProxyID,
 		ExpiryWarnDays: m.ExpiryWarnDays,
+	}
+	if m.CountryCode != nil {
+		out.CountryCode = *m.CountryCode
 	}
 	if m.Username != nil {
 		out.Username = *m.Username

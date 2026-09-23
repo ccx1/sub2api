@@ -4,11 +4,37 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSharedAdminSettingsDefaultGroupsAcceptLegacyAndMultiple(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want []int64
+	}{
+		{`{"default_group_ids":{"openai":4}}`, []int64{4}},
+		{`{"default_group_ids":{"openai":[4,5,4]}}`, []int64{4, 5}},
+		{`{"default_group_ids":{"openai":[]}}`, nil},
+	} {
+		repo := &sharedDispatchSettingsRepo{current: service.SharedPoolSettings{MaxConcurrency: 10, SettlementMultiplier: 1}}
+		h := &SharedPoolHandler{pool: service.NewSharedPoolService(repo, nil, sharedAdminSettingsGroups{}, nil, nil, nil, nil)}
+		c, w := sharedTestContext(7, tc.body)
+		h.AdminSaveSettings(c)
+		require.Equal(t, 200, w.Code, w.Body.String())
+		require.Equal(t, tc.want, repo.saved.DefaultGroupIDs["openai"])
+		var response struct {
+			Data struct {
+				DefaultGroupIDs map[string][]int64 `json:"default_group_ids"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		require.Equal(t, tc.want, response.Data.DefaultGroupIDs["openai"])
+	}
+}
 
 type sharedDispatchSettingsRepo struct {
 	service.SharedPoolRepository
@@ -33,7 +59,7 @@ func TestSharedDispatchSettingsLegacySavePreservesMultiplierAndExplicitZero(t *t
 		{`{"platform_rate_bps":500,"proxy_rate_bps":100,"max_concurrency":10,"default_group_ids":{},"subscription_group_ids":{}}`, 2.5},
 		{`{"platform_rate_bps":500,"proxy_rate_bps":100,"max_concurrency":10,"default_group_ids":{},"subscription_group_ids":{},"settlement_multiplier":0}`, 0},
 	} {
-		repo := &sharedDispatchSettingsRepo{current: service.SharedPoolSettings{SettlementMultiplier: 2.5, DefaultGroupIDs: map[string]int64{"openai": 4}}}
+		repo := &sharedDispatchSettingsRepo{current: service.SharedPoolSettings{SettlementMultiplier: 2.5, DefaultGroupIDs: service.SharedPoolDefaultGroupIDs{"openai": {4}}}}
 		h := &SharedPoolHandler{pool: service.NewSharedPoolService(repo, nil, nil, nil, nil, nil, nil)}
 		c, w := sharedTestContext(7, tc.body)
 		h.AdminSaveSettings(c)
@@ -81,8 +107,8 @@ func TestSharedAdminSettingsPartialPreservesPriorityAndExplicitEmptyClearsMaps(t
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &sharedDispatchSettingsRepo{current: service.SharedPoolSettings{PlatformRateBPS: 500, ProxyRateBPS: 100, MaxConcurrency: 10,
-				DefaultPriority: 17, SettlementMultiplier: 1, DefaultGroupIDs: map[string]int64{"openai": 4},
-				SubscriptionGroupIDs: map[string]map[string]int64{"openai": {"pro": 4}}, SubscriptionSettlementMultipliers: map[string]map[string]float64{"openai": {"pro": 2}}}}
+				DefaultPriority: 17, SettlementMultiplier: 1, DefaultGroupIDs: service.SharedPoolDefaultGroupIDs{"openai": {4}},
+				SubscriptionGroupIDs: service.SharedPoolSubscriptionGroupIDs{"openai": {"pro": {4}}}, SubscriptionSettlementMultipliers: map[string]map[string]float64{"openai": {"pro": 2}}}}
 			h := &SharedPoolHandler{pool: service.NewSharedPoolService(repo, nil, sharedAdminSettingsGroups{}, nil, nil, nil, nil)}
 			c, w := sharedTestContext(7, tc.body)
 			h.AdminSaveSettings(c)
@@ -97,7 +123,7 @@ func TestSharedAdminSettingsPartialPreservesPriorityAndExplicitEmptyClearsMaps(t
 				require.Equal(t, repo.current.SubscriptionGroupIDs, repo.saved.SubscriptionGroupIDs)
 				require.Equal(t, repo.current.SubscriptionSettlementMultipliers, repo.saved.SubscriptionSettlementMultipliers)
 			}
-			require.Equal(t, int64(4), repo.current.DefaultGroupIDs["openai"], "decoding must not mutate the loaded settings")
+			require.Equal(t, []int64{4}, repo.current.DefaultGroupIDs["openai"], "decoding must not mutate the loaded settings")
 		})
 	}
 }

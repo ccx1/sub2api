@@ -85,7 +85,7 @@ func TestSharedAdminStateDefaultCannotOverwriteConcurrentAssignment(t *testing.T
 		mock.ExpectExec("UPDATE accounts a SET extra=").WithArgs(int64(41), `{}`).WillReturnResult(sqlmock.NewResult(0, 1))
 		expectSharedAdminStateOutbox(mock).WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
-		require.NoError(t, repo.SetSharedAccountState(context.Background(), 41, service.SharedPoolAccountState{Enabled: new(true), DefaultGroupID: new(int64(9))}))
+		require.NoError(t, repo.SetSharedAccountState(context.Background(), 41, service.SharedPoolAccountState{Enabled: new(true), DefaultGroupIDs: []int64{9, 10}}))
 	}
 }
 
@@ -103,7 +103,7 @@ func TestSharedAdminStateLegacyEnableRemainsWithinSharedBindings(t *testing.T) {
 			expectSharedAdminStateOutbox(mock).WillReturnResult(sqlmock.NewResult(1, 1))
 			mock.ExpectCommit()
 		}
-		err := repo.SetSharedAccountState(context.Background(), 41, service.SharedPoolAccountState{Enabled: new(true), DefaultGroupID: new(int64(9))})
+		err := repo.SetSharedAccountState(context.Background(), 41, service.SharedPoolAccountState{Enabled: new(true), DefaultGroupIDs: []int64{9, 10}})
 		if count == 0 {
 			require.Error(t, err)
 		} else {

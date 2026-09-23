@@ -39,7 +39,7 @@ func TestBalancedProxySelectionPreservesEmptyPoolPolicies(t *testing.T) {
 		t.Run(policy, func(t *testing.T) {
 			repo := &balancedAccountProxyStub{pluginDirectoryProxyRepo: pluginDirectoryProxyRepo{account: pluginDirectoryAccount(policy)}}
 			svc := &OpenAIGatewayService{accountRepo: repo}
-			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), 42)
+			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), 42)
 			if policy == RandomProxyEmptyPoolPolicyDirect {
 				require.NoError(t, err)
 				require.Empty(t, identity.ProxyURL)

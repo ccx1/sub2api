@@ -2362,17 +2362,15 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				decision.StickySessionHit = true
 				decision.SelectedAccountID = selection.Account.ID
 				decision.SelectedAccountType = selection.Account.Type
-				if selection.Account.IsRandomProxy() {
-					if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
-						if selection.ReleaseFunc != nil {
-							selection.ReleaseFunc()
-							selection.ReleaseFunc = nil
-						}
-						if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, selection.Account, s.accountRepo, hydrateErr); disableErr != nil {
-							return nil, decision, fmt.Errorf("%w; disable random proxy account: %v", hydrateErr, disableErr)
-						}
-						return nil, decision, hydrateErr
+				if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
+					if selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+						selection.ReleaseFunc = nil
 					}
+					if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, selection.Account, s.accountRepo, hydrateErr); disableErr != nil {
+						return nil, decision, fmt.Errorf("%w; disable random proxy account: %v", hydrateErr, disableErr)
+					}
+					return nil, decision, hydrateErr
 				}
 				return selection, decision, nil
 			}
@@ -2479,17 +2477,15 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if err != nil || selection == nil || selection.Account == nil {
 		return selection, decision, err
 	}
-	if selection.Account.IsRandomProxy() {
-		if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-				selection.ReleaseFunc = nil
-			}
-			if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, selection.Account, s.accountRepo, hydrateErr); disableErr != nil {
-				return nil, decision, fmt.Errorf("%w; disable random proxy account: %v", hydrateErr, disableErr)
-			}
-			return nil, decision, hydrateErr
+	if hydrateErr := ResolveRandomProxyFromSource(ctx, selection.Account, s.accountRepo); hydrateErr != nil {
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+			selection.ReleaseFunc = nil
 		}
+		if disableErr := DisableRandomProxyAccountOnUnavailable(ctx, selection.Account, s.accountRepo, hydrateErr); disableErr != nil {
+			return nil, decision, fmt.Errorf("%w; disable random proxy account: %v", hydrateErr, disableErr)
+		}
+		return nil, decision, hydrateErr
 	}
 	return selection, decision, nil
 }

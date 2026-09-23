@@ -9,6 +9,7 @@ import type { Account } from '@/types'
 
 const { getHistory, retryTicket } = vi.hoisted(() => ({ getHistory: vi.fn(), retryTicket: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getCodexTicketHistory: getHistory, retryCodexTicket: retryTicket } } }))
+vi.mock('@/api/admin/codexTicketDiagnostics', () => ({ getCodexTicketRuntimeStatus: vi.fn().mockResolvedValue({ state: 'idle', attempts_used: 0, max_attempts: 6, round: 0, max_rounds: 2, half_open: false, generation: 0 }), previewCodexTicketRequest: vi.fn() }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: ref('zh'), t: translate, te: (key: string) => translate(key) !== key }) }))
@@ -47,7 +48,7 @@ function response(overrides: Partial<CodexTicketHistory> = {}): CodexTicketHisto
 const wrappers: Array<{ unmount: () => void }> = []
 function mountModal(props = { show: true, account: account as typeof account | null }) {
   const wrapper = mount(CodexTicketHistoryModal, {
-    props, global: { stubs: { BaseDialog, Pagination } }
+    props, global: { stubs: { BaseDialog, Pagination, Teleport: true } }
   })
   wrappers.push(wrapper)
   return wrapper
@@ -64,7 +65,21 @@ beforeEach(() => { getHistory.mockReset(); retryTicket.mockReset() })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
 describe('CodexTicketHistoryModal', () => {
-  it('compares requested and both response models, then expands only the chosen attempt', async () => {
+  it('labels deferred attempts separately while explaining legacy totals', async () => {
+    const data = response()
+    Object.assign(data.items[0]!, { outcome: 'verification_deferred', reason: 'verification_deferred' })
+    data.summary.outcome_counts = { verification_deferred: 1 }
+    data.summary.classification_started_at = '2026-09-22T08:00:00Z'
+    getHistory.mockResolvedValue(data)
+    const wrapper = mountModal()
+    await flushPromises()
+    const row = wrapper.get('[data-testid="ticket-history-row-attempt-1"]')
+    expect(row.text()).toContain('已采集，复验暂缓')
+    expect(row.find('.bg-red-50').exists()).toBe(false)
+    expect(wrapper.text()).toContain('不能作为上游失败率')
+    expect(wrapper.text()).toContain('2026-09-22T08:00:00Z')
+  })
+  it('compares requested and both response models, then opens the chosen attempt in a dialog', async () => {
     const data = response()
     Object.assign(data.items[0]!, {
       reason: 'business_model_mismatch',
@@ -79,9 +94,9 @@ describe('CodexTicketHistoryModal', () => {
     expect(row.get('[data-testid="business_exchange-models"]').text()).toBe('gpt-5.6-sol')
     expect(wrapper.find('[data-testid="ticket-exchange-details"]').exists()).toBe(false)
     await row.get('[data-testid="view-exchange"]').trigger('click')
-    expect(row.get('[data-testid="view-exchange"]').attributes('aria-expanded')).toBe('true')
+    expect(row.get('[data-testid="view-exchange"]').attributes('aria-haspopup')).toBe('dialog')
     expect(wrapper.get('[data-testid="ticket-exchange-details"]').text()).toContain('超出保留范围的详情已清理')
-    await row.get('[data-testid="view-exchange"]').trigger('click')
+    await wrapper.get('[data-testid="ticket-exchange-dialog"] button').trigger('click')
     expect(wrapper.find('[data-testid="ticket-exchange-details"]').exists()).toBe(false)
   })
 
@@ -96,6 +111,50 @@ describe('CodexTicketHistoryModal', () => {
     await wrapper.get('[data-testid="next-page"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="ticket-exchange-details"]').exists()).toBe(false)
+  })
+
+  it('shows quality round progress and failed response models after raw exchanges are pruned', async () => {
+    const data = response()
+    Object.assign(data.items[0]!, {
+      reason: 'business_model_mismatch', business_verification_rounds: 5,
+      business_verification_passed: 2, business_verification_models: ['gpt-6-astra', 'gpt-5.6-luna']
+    })
+    getHistory.mockResolvedValue(data)
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="business-verification-progress"]').text()).toBe('质量探测通过轮次:2/5')
+    expect(wrapper.get('[data-testid="business-verification-models"]').text()).toBe('探测实际返回模型:gpt-6-astra, gpt-5.6-luna')
+    expect(wrapper.get('[data-testid="business_exchange-models"]').text()).toBe('未记录/阶段未开始')
+  })
+
+  it('keeps quality progress separate from an additional business egress failure', async () => {
+    const data = response()
+    Object.assign(data.items[0]!, {
+      model: 'gpt-5.6-sol', reason: 'business_model_mismatch', business_verification_rounds: 3,
+      business_verification_passed: 3, business_verification_models: ['gpt-5.6-sol'],
+      business_exchange: { requested_model: 'gpt-5.6-sol', reported_models: ['gpt-5.6-luna'] }
+    })
+    getHistory.mockResolvedValue(data)
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="business-verification-progress"]').text()).toContain('3/3')
+    expect(wrapper.get('[data-testid="business-verification-models"]').text()).toContain('gpt-5.6-sol')
+    expect(wrapper.get('[data-testid="business_exchange-models"]').text()).toBe('gpt-5.6-luna')
+    expect(wrapper.get('[data-testid="attempt-details"]').text()).toContain('业务复验响应模型不匹配')
+  })
+
+  it('shows zero passed quality rounds and leaves legacy attempts without invented progress', async () => {
+    const data = response()
+    data.items = [
+      { ...data.items[0]!, business_verification_rounds: 5, business_verification_models: ['gpt-5.6-luna'] },
+      { ...data.items[0]!, id: 'legacy' },
+      { ...data.items[0]!, id: 'single', business_verification_rounds: 1 }
+    ]
+    getHistory.mockResolvedValue(data)
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="business-verification-progress"]').text()).toContain('0/5')
+    expect(wrapper.findAll('[data-testid="business-verification-progress"]')).toHaveLength(1)
   })
 
   it('explains a strict mismatch using the recorded length and historical requirement', async () => {
@@ -248,12 +307,12 @@ describe('CodexTicketHistoryModal', () => {
     expect(wrapper.findComponent(Pagination).props('page')).toBe(2)
   })
 
-  it('starts a one-shot retry for only missing or expiring models', async () => {
+  it('starts a forced one-shot retry for configured models', async () => {
     getHistory.mockResolvedValue(response())
     retryTicket.mockResolvedValue({ scheduled: 1, skipped: 1, models: ['gpt-6-astra'] })
     const wrapper = mountModal()
     await flushPromises()
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-testid="retry-tickets"]').trigger('click')
     await flushPromises()
     expect(retryTicket).toHaveBeenCalledWith(1)
     expect(wrapper.text()).toContain('已发起 1 个模型的重新打票：gpt-6-astra')
@@ -266,22 +325,22 @@ describe('CodexTicketHistoryModal', () => {
     retryTicket.mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise)
     const wrapper = mountModal()
     await flushPromises()
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-testid="retry-tickets"]').trigger('click')
     await wrapper.setProps({ account: { id: 2, name: 'Second account' } })
     await flushPromises()
-    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
-    await wrapper.get('button').trigger('click')
+    expect(wrapper.get('[data-testid="retry-tickets"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="retry-tickets"]').trigger('click')
     expect(retryTicket).toHaveBeenLastCalledWith(2)
     if (outcome === 'success') previous.resolve({ scheduled: 1, skipped: 0, models: ['gpt-6-astra'] })
     else previous.reject(new Error('unavailable'))
     await flushPromises()
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="retry-tickets"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
     expect(getHistory).toHaveBeenCalledTimes(2)
     current.resolve({ scheduled: 1, skipped: 0, models: ['gpt-5.6-sol'] })
     await flushPromises()
     expect(wrapper.text()).toContain('已发起 1 个模型的重新打票：gpt-5.6-sol')
-    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="retry-tickets"]').attributes('disabled')).toBeUndefined()
   })
 
   it('discards retry results after closing and reopening the same account', async () => {
@@ -290,14 +349,14 @@ describe('CodexTicketHistoryModal', () => {
     retryTicket.mockReturnValueOnce(previous.promise)
     const wrapper = mountModal()
     await flushPromises()
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-testid="retry-tickets"]').trigger('click')
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })
     await flushPromises()
     previous.resolve({ scheduled: 1, skipped: 0, models: ['gpt-6-astra'] })
     await flushPromises()
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
-    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="retry-tickets"]').attributes('disabled')).toBeUndefined()
     expect(getHistory).toHaveBeenCalledTimes(2)
   })
 

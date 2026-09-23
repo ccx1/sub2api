@@ -33,6 +33,15 @@ import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { adminAPI } from '@/api/admin'
 
 describe('useOpenAIOAuth.buildCredentials', () => {
+  it('clears stale country only after billing metadata was checked', () => {
+    const oauth = useOpenAIOAuth()
+    expect(oauth.buildCredentials({ billing_metadata_checked: true, billing_currency: 'JPY' }))
+      .toMatchObject({ billing_currency: 'JPY', price_country: '' })
+    const unchecked = oauth.buildCredentials({ billing_currency: 'USD', price_country: 'US' })
+    expect(unchecked).not.toHaveProperty('billing_currency')
+    expect(unchecked).not.toHaveProperty('price_country')
+  })
+
   it('should keep client_id when token response contains it', () => {
     const oauth = useOpenAIOAuth()
     const creds = oauth.buildCredentials({

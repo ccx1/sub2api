@@ -83,6 +83,38 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('only applies region fields when explicitly enabled and leaves proxy settings untouched', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-proxy-region-enabled').setValue(true)
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('manual')
+    await wrapper.get('[data-testid="proxy-region-country"]').setValue('JP')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { proxy_region_mode: 'manual', proxy_region_country: 'JP' } })
+    wrapper.unmount()
+  })
+
+  it('does not submit an unchecked region field', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-proxy-region-enabled').setValue(true)
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('billing')
+    await wrapper.get('#bulk-edit-proxy-region-enabled').setValue(false)
+    await wrapper.get('#bulk-edit-concurrency-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { concurrency: 1 })
+    wrapper.unmount()
+  })
+
+  it('explicitly clears region restrictions in bulk', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('#bulk-edit-proxy-region-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { proxy_region_mode: 'off', proxy_region_country: '' } })
+    wrapper.unmount()
+  })
+
   it('only applies account outbound inheritance after the ticket proxy field is enabled', async () => {
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
     expect(wrapper.get<HTMLInputElement>('#bulk-edit-codex-ticket-proxy-enabled').element.checked).toBe(false)
@@ -92,7 +124,7 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      extra: { codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0 }
+      extra: { codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0, codex_ticket_proxy_strategy: 'affinity' }
     })
     wrapper.unmount()
   })
@@ -104,7 +136,7 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      extra: { codex_ticket_proxy_mode: 'random', codex_ticket_proxy_id: 0 }
+      extra: { codex_ticket_proxy_mode: 'random', codex_ticket_proxy_id: 0, codex_ticket_proxy_strategy: 'affinity' }
     })
     wrapper.unmount()
   })

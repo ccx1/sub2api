@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/google/uuid"
 )
 
 const openAICodexTicketProbeResponseLimit = 4 << 20
@@ -26,6 +25,25 @@ type openAICodexTicketProbeInput struct {
 	Config                        *config.OpenAICodexTicketConfig
 	SubscriptionTier              string
 	HarvestProxyPolicy            *codexTicketProxyPolicy
+	HeaderSources                 *[]CodexTicketHeaderSource
+	SessionEpoch                  *string
+	SessionID                     *string
+	CookieJar                     http.CookieJar
+	// CookieCandidate receives a cloned jar when the upstream response sends a
+	// changed Cookie. The candidate is intentionally separate from CookieJar:
+	// callers must business-verify it before replacing the published snapshot.
+	CookieCandidate      *openAICodexTicketCookieCandidate
+	BusinessVerification bool
+	// BusinessCredentialSnapshot freezes the credentials for a multi-round
+	// quality probe. It is never persisted and is replaced only between probe
+	// attempts, so a response cannot silently rotate the cookie used by later
+	// rounds.
+	BusinessCredentialSnapshot *openAICodexTicket
+	SkipSchedulerAdmission     bool
+	QualityVerification        bool
+	FreezeCredentials          bool
+	HarvestProxy               *openAICodexTicketProxy
+	Revalidation               bool
 }
 
 func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, account *Account, token, model, proxyURL string, attemptTimeout time.Duration) (string, int, error) {
@@ -43,8 +61,27 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 		return "", 0, err
 	}
 	diagnostic := startCodexTicketExchange(in, req)
+	redactOpenAICodexTicketCookies(diagnostic)
+	sentCookies := codexTicketBusinessCookieSnapshotForProbe(in)
 	resp, err := s.doOpenAICodexTicketProbe(req, in)
+	var originalHeaders http.Header
+	if resp != nil {
+		originalHeaders = resp.Header.Clone()
+	}
+	// 初次采集没有已发布快照，可以把响应 Cookie 放入采集 jar；业务复验
+	// 必须保留原 jar，并把变化写入候选 jar，等待下一次复验后再发布。
+	cookieChanged := false
+	if in.FreezeCredentials {
+		// 连续探测只验证采集时的凭据；响应中的新 Cookie 留待下一次采集。
+	} else if sentCookies == nil {
+		storeOpenAICodexTicketCookies(in.CookieJar, req, resp)
+	} else if candidate, changed := candidateOpenAICodexTicketCookies(in.CookieJar, req, resp,
+		probeCookieTTL(in)); changed && in.CookieCandidate != nil {
+		cookieChanged = true
+		*in.CookieCandidate = *candidate
+	}
 	diagnostic.captureResponse(resp)
+	redactOpenAICodexTicketCookies(diagnostic)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
 	}
@@ -56,10 +93,16 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	}
 	if resp.StatusCode != http.StatusOK {
 		// 非 200 也采集有界错误正文，便于区分鉴权、限流和代理拒绝。
-		if resp.Body != nil && diagnostic != nil {
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, (64<<10)+1))
+		var payload []byte
+		if resp.Body != nil {
+			payload, _ = io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 		}
-		return "", resp.StatusCode, &openAICodexTicketProbeRejected{Status: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
+		detail := classifyCodexTicketUpstreamError(payload, resp.StatusCode, resp.Header.Get("Retry-After"))
+		if diagnostic != nil {
+			diagnostic.exchange.UpstreamError = detail
+		}
+		rejected := &openAICodexTicketProbeRejected{Status: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
+		return "", resp.StatusCode, &codexTicketProbeClassifiedError{err: rejected, detail: detail}
 	}
 	if resp.Body == nil {
 		return "", resp.StatusCode, &codexTicketProbeResponseError{reason: "response_incomplete"}
@@ -67,10 +110,20 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	if err := readOpenAICodexTicketProbeResponseWithDiagnostic(resp.Body, in.Model, diagnostic); err != nil {
 		return "", resp.StatusCode, err
 	}
-	return extractOpenAICodexTurnState(resp.Header), resp.StatusCode, nil
+	if !in.FreezeCredentials && sentCookies != nil && sentCookies.cookieResponseChanged(originalHeaders) && !cookieChanged {
+		return "", resp.StatusCode, &codexTicketProbeResponseError{reason: "ticket_rejected"}
+	}
+	return extractOpenAICodexTurnState(originalHeaders), resp.StatusCode, nil
 }
 
 func (s *OpenAIGatewayService) buildOpenAICodexTicketProbeRequest(ctx context.Context, in openAICodexTicketProbeInput) (*http.Request, error) {
+	sessionID, err := s.openAICodexTicketProbeSessionID(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if in.SessionID != nil {
+		*in.SessionID = sessionID
+	}
 	body := []byte(`{"model":` + jsonString(in.Model) + `,"store":false,"stream":true,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}]}`)
 	ctx = WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAIHarvest)
 	ctx = WithHTTPUpstreamRedirectsDisabled(ctx)
@@ -83,14 +136,34 @@ func (s *OpenAIGatewayService) buildOpenAICodexTicketProbeRequest(ctx context.Co
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("session_id", uuid.NewString())
+	req.Header.Set("session_id", sessionID)
+	recordCodexTicketHeaderSources(in.HeaderSources, nil, req.Header, "probe_defaults", "Synthetic probe defaults; preview uses placeholder authorization")
+	before := codexTicketPreviewHeaderSnapshot(in, req.Header)
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, in.Account); err != nil {
 		return nil, errors.New("codex ticket probe identity unavailable")
 	}
-	applyOpenAICodexTicketHarvestIdentity(req.Header, in.Model)
+	recordCodexTicketHeaderSources(in.HeaderSources, before, req.Header, "account_identity", "Account identity and FedRAMP policy; private ID replaced in preview")
+	before = codexTicketPreviewHeaderSnapshot(in, req.Header)
+	s.applyOpenAICodexTicketHarvestIdentity(req.Header, in.Account, in.Model)
+	recordCodexTicketHeaderSources(in.HeaderSources, before, req.Header, "codex_identity", "Shared Codex identity policy and account User-Agent override")
+	before = codexTicketPreviewHeaderSnapshot(in, req.Header)
+	// 与业务请求保持相同的模型路由和能力声明，身份构造后清理旧实验头。
+	stripOpenAILegacyResponsesBeta(req.Header)
+	applyOpenAICodexBetaFeatures(nil, in.Account, req.Header)
+	recordCodexTicketHeaderSources(in.HeaderSources, before, req.Header, "capability_policy", "Remove legacy experiment and declare current Codex capabilities")
+	before = codexTicketPreviewHeaderSnapshot(in, req.Header)
+	setOpenAICodexRoutingHintFromBody(req.Header, in.Account, body)
+	recordCodexTicketHeaderSources(in.HeaderSources, before, req.Header, "routing_policy", "Routing hint derived from the final synthetic request body")
 	if in.State != "" {
 		req.Header.Set(openAICodexTurnStateHeader, in.State)
+	}
+	if cookies := codexTicketBusinessCookieSnapshotForProbe(in); cookies != nil {
+		if !cookies.cookieUsable(time.Now(), *in.Config) {
+			return nil, &codexTicketProbeResponseError{reason: "ticket_rejected"}
+		}
+		cookies.applyHeaders(req.Header)
+	} else {
+		applyOpenAICodexTicketCookies(in.CookieJar, req)
 	}
 	return req, nil
 }
@@ -104,14 +177,27 @@ func (s *OpenAIGatewayService) doOpenAICodexTicketProbe(req *http.Request, in op
 	if req.Context().Err() != nil || in.CheckControls && (!s.openAICodexTicketProbeAllowed(req.Context(), in.Account, in.Token) || !s.openAICodexTicketProbeConfigCurrent(req.Context(), in) || !s.codexTicketProxyPolicyCurrent(req.Context(), in)) {
 		return nil, errOpenAICodexTicketControlsChanged
 	}
+	if err := s.admitCodexTicketProbe(req.Context(), in); err != nil {
+		return nil, err
+	} else if schedule := codexTicketScheduleFrom(req.Context()); schedule != nil {
+		if err := schedule.scheduler.ValidateCodexTicket(req.Context(), schedule.reservation); err != nil {
+			return nil, errOpenAICodexTicketControlsChanged
+		}
+	}
+	// 等待代理或调度资源期间账号可能已被停用，发送前读取最新状态。
+	if (in.CheckControls || in.FreezeCredentials) && !s.codexTicketAccountCurrentBeforePublish(req.Context(), in) {
+		return nil, errOpenAICodexTicketControlsChanged
+	}
 	if in.Attempt != nil {
 		if in.Attempt.StartedAt.IsZero() {
 			in.Attempt.StartedAt = time.Now()
 		}
-		if in.State != "" {
+		if codexTicketProbeBusiness(in) {
 			var id int64
 			var name string
-			if in.Account.Proxy != nil {
+			if in.QualityVerification && in.HarvestProxy != nil {
+				id, name = in.HarvestProxy.proxyID, in.HarvestProxy.proxyName
+			} else if in.Account.Proxy != nil {
 				id, name = in.Account.Proxy.ID, in.Account.Proxy.Name
 			}
 			in.Attempt.BusinessProxy = codexTicketProxySnapshot(in.ProxyURL, id, name)
@@ -124,7 +210,9 @@ func (s *OpenAIGatewayService) doOpenAICodexTicketProbe(req *http.Request, in op
 		resp, err = s.httpUpstream.Do(req, in.ProxyURL, in.Account.ID, in.Account.Mode1EffectiveConcurrency())
 	}
 	recordCodexTicketProbeResponse(in, resp)
+	recordCodexTicketProtectionResponse(in, resp)
 	if err != nil {
+		s.reportCodexProbeConnectionFailure(req.Context(), in, err)
 		return resp, &codexTicketTransportError{&openAICodexTicketProbeIOError{cause: err}}
 	}
 	return resp, nil
@@ -134,9 +222,18 @@ func readOpenAICodexTicketProbeResponse(body io.Reader, model string) error {
 	return readOpenAICodexTicketProbeResponseWithDiagnostic(body, model, nil)
 }
 
-func readOpenAICodexTicketProbeResponseWithDiagnostic(body io.Reader, model string, diagnostic *codexTicketExchangeCapture) error {
+func readOpenAICodexTicketProbeResponseWithDiagnostic(body io.Reader, model string, diagnostic *codexTicketExchangeCapture) (result error) {
 	observer := newOpenAICodexTicketResponseObserver(model)
-	defer func() { diagnostic.setReportedModels(observer.reportedModels, observer.modelsTruncated) }()
+	observer.diagnostics = &codexTicketResponseDiagnostics{wireStatus: http.StatusOK}
+	if diagnostic != nil {
+		observer.diagnostics.signals = diagnostic.exchange.Signals
+	}
+	defer func() {
+		diagnostic.captureObserver(observer)
+		if result != nil && observer.diagnostics.upstreamError != nil {
+			result = &codexTicketProbeClassifiedError{err: result, detail: observer.diagnostics.upstreamError}
+		}
+	}()
 	reader := io.LimitReader(body, openAICodexTicketProbeResponseLimit+1)
 	buffer := make([]byte, 16<<10)
 	total, emptyReads := 0, 0
@@ -144,6 +241,7 @@ func readOpenAICodexTicketProbeResponseWithDiagnostic(body io.Reader, model stri
 		n, err := reader.Read(buffer)
 		total += n
 		if total > openAICodexTicketProbeResponseLimit {
+			observer.diagnostics.declaration.Truncated = true
 			return &codexTicketProbeResponseError{reason: "response_incomplete"}
 		}
 		observer.Observe(buffer[:n])
@@ -151,6 +249,7 @@ func readOpenAICodexTicketProbeResponseWithDiagnostic(body io.Reader, model stri
 			break
 		}
 		if err != nil {
+			observer.diagnostics.declaration.Truncated = true
 			return &codexTicketTransportError{&openAICodexTicketProbeIOError{cause: err}}
 		}
 		if n > 0 {

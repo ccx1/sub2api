@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -24,6 +25,14 @@ func (*codexTicketRetryCompletionRepo) UpdateExtra(context.Context, int64, map[s
 func (r *codexTicketRetryCompletionRepo) RecordCodexTicketAttempt(_ context.Context, _ int64, attempt CodexTicketAttempt) error {
 	r.completed <- attempt
 	return nil
+}
+
+type codexTicketRetryPersistFailureRepo struct {
+	codexTicketRetryCompletionRepo
+}
+
+func (*codexTicketRetryPersistFailureRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return errors.New("persist failed")
 }
 
 func codexTicketRetryCompletionFixture(t *testing.T, fail bool) (*OpenAIGatewayService, *codexTicketRetryCompletionRepo, *codexTicketVerificationUpstream) {
@@ -58,9 +67,9 @@ func TestCodexTicketRetryRunsOnlyMissingModelAndRestoresBackoffOnFailure(t *test
 			svc, repo, upstream := codexTicketRetryCompletionFixture(t, fail)
 			account := repo.account
 			sol := *svc.lookupOpenAICodexTicket(account, "gpt-5.6-sol")
-			result, err := svc.RetryOpenAICodexTicket(context.Background(), account.ID, "")
+			result, err := svc.RetryOpenAICodexTicket(context.Background(), account.ID, "gpt-6-astra")
 			require.NoError(t, err)
-			require.Equal(t, CodexTicketRetryResult{Scheduled: 1, Skipped: 1, Models: []string{"gpt-6-astra"}}, result)
+			require.Equal(t, CodexTicketRetryResult{Scheduled: 1, Skipped: 0, Models: []string{"gpt-6-astra"}}, result)
 			select {
 			case attempt := <-repo.completed:
 				require.Equal(t, !fail, attempt.Success)
@@ -92,4 +101,35 @@ func TestCodexTicketRetryRunsOnlyMissingModelAndRestoresBackoffOnFailure(t *test
 			}
 		})
 	}
+}
+
+func TestCodexTicketManualRetryPersistenceFailureIsReportedAsFailure(t *testing.T) {
+	upstream := &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+		return codexTicketCompletedResponse("gpt-6-astra", fakeCodexTicketState(292)), nil
+	}}
+	verificationDisabled := false
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
+		Enabled: true, Models: []string{"gpt-6-astra"}, VerifyBusiness: &verificationDisabled,
+		HarvestProxyURL: "http://harvest.example:8080",
+	}, upstream)
+	account := ticketTestAccount(41)
+	account.Status = StatusActive
+	repo := &codexTicketRetryPersistFailureRepo{codexTicketRetryCompletionRepo: codexTicketRetryCompletionRepo{
+		codexTicketRetryRepo: codexTicketRetryRepo{account: account}, completed: make(chan CodexTicketAttempt, 1),
+	}}
+	svc.accountRepo = repo
+
+	result, err := svc.RetryOpenAICodexTicket(context.Background(), account.ID, "gpt-6-astra")
+	require.NoError(t, err)
+	require.Equal(t, CodexTicketRetryResult{Scheduled: 1, Skipped: 0, Models: []string{"gpt-6-astra"}}, result)
+
+	select {
+	case attempt := <-repo.completed:
+		require.False(t, attempt.Success)
+		require.Equal(t, "publish_failed", attempt.Reason)
+		require.Equal(t, "failed", attempt.Outcome)
+	case <-time.After(3 * time.Second):
+		t.Fatal("manual retry did not record the failed publication")
+	}
+	require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"), "failed persistence must not publish a local ticket")
 }

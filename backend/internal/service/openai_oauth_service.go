@@ -112,21 +112,24 @@ type OpenAIExchangeCodeInput struct {
 
 // OpenAITokenInfo represents the token information for OpenAI
 type OpenAITokenInfo struct {
-	AccessToken           string `json:"access_token"`
-	RefreshToken          string `json:"refresh_token"`
-	IDToken               string `json:"id_token,omitempty"`
-	ExpiresIn             int64  `json:"expires_in"`
-	ExpiresAt             int64  `json:"expires_at"`
-	ClientID              string `json:"client_id,omitempty"`
-	AuthMode              string `json:"auth_mode,omitempty"`
-	Email                 string `json:"email,omitempty"`
-	ChatGPTAccountID      string `json:"chatgpt_account_id,omitempty"`
-	ChatGPTUserID         string `json:"chatgpt_user_id,omitempty"`
-	ChatGPTAccountFedRAMP bool   `json:"chatgpt_account_is_fedramp,omitempty"`
-	OrganizationID        string `json:"organization_id,omitempty"`
-	PlanType              string `json:"plan_type,omitempty"`
-	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
-	PrivacyMode           string `json:"privacy_mode,omitempty"`
+	AccessToken            string `json:"access_token"`
+	RefreshToken           string `json:"refresh_token"`
+	IDToken                string `json:"id_token,omitempty"`
+	ExpiresIn              int64  `json:"expires_in"`
+	ExpiresAt              int64  `json:"expires_at"`
+	ClientID               string `json:"client_id,omitempty"`
+	AuthMode               string `json:"auth_mode,omitempty"`
+	Email                  string `json:"email,omitempty"`
+	ChatGPTAccountID       string `json:"chatgpt_account_id,omitempty"`
+	ChatGPTUserID          string `json:"chatgpt_user_id,omitempty"`
+	ChatGPTAccountFedRAMP  bool   `json:"chatgpt_account_is_fedramp,omitempty"`
+	OrganizationID         string `json:"organization_id,omitempty"`
+	PlanType               string `json:"plan_type,omitempty"`
+	SubscriptionExpiresAt  string `json:"subscription_expires_at,omitempty"`
+	BillingCurrency        string `json:"billing_currency,omitempty"`
+	PriceCountry           string `json:"price_country,omitempty"`
+	BillingMetadataChecked bool   `json:"billing_metadata_checked,omitempty"`
+	PrivacyMode            string `json:"privacy_mode,omitempty"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
@@ -297,10 +300,11 @@ func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *Ope
 			tokenInfo.Email = info.Email
 		}
 	}
-	if forcePersonalSubscriptionLookup || strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) == "" {
-		if expiresAt := fetchChatGPTSubscriptionExpiresAt(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, resolveChatGPTSubscriptionAccountID(tokenInfo, orgID)); expiresAt != "" {
-			tokenInfo.SubscriptionExpiresAt = expiresAt
-		}
+	// 账单地区只取个人订阅响应，不能借用 poid 工作区的计费资料。
+	subscription := fetchChatGPTSubscriptionInfo(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, resolveChatGPTSubscriptionAccountID(tokenInfo, orgID))
+	applyChatGPTBillingMetadata(tokenInfo, subscription)
+	if subscription != nil && (forcePersonalSubscriptionLookup || strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) == "") && subscription.ActiveUntil != "" {
+		tokenInfo.SubscriptionExpiresAt = subscription.ActiveUntil
 	}
 
 	// 尝试设置隐私（关闭训练数据共享），best-effort
@@ -422,6 +426,10 @@ func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo)
 	}
 	if tokenInfo.SubscriptionExpiresAt != "" {
 		creds["subscription_expires_at"] = tokenInfo.SubscriptionExpiresAt
+	}
+	if tokenInfo.BillingMetadataChecked {
+		creds["billing_currency"] = tokenInfo.BillingCurrency
+		creds["price_country"] = tokenInfo.PriceCountry
 	}
 	if strings.TrimSpace(tokenInfo.ClientID) != "" {
 		creds["client_id"] = strings.TrimSpace(tokenInfo.ClientID)

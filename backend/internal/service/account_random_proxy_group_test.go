@@ -54,7 +54,7 @@ func TestRandomProxyGroupPluginEmptyPoliciesNeverUseGlobalProxy(t *testing.T) {
 			repo.account = randomProxyGroupAccount(policy)
 			repo.proxy = &Proxy{ID: 99, Status: StatusActive}
 			svc := &OpenAIGatewayService{accountRepo: repo}
-			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), repo.account.ID)
+			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), repo.account.ID)
 			if policy == RandomProxyEmptyPoolPolicyDirect {
 				require.NoError(t, err)
 				require.Empty(t, identity.ProxyURL)

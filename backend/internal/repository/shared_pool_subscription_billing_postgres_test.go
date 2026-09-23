@@ -55,7 +55,7 @@ func TestSharedPoolSubscriptionPostgresSettlementAndConcurrentReplay(t *testing.
 	entry := page.Items[0]
 	require.Equal(t, 10.0, entry.BillingAmount)
 	require.Equal(t, 4.7, entry.OwnerAmount)
-	require.Equal(t, 5.3, entry.PlatformAmount)
+	require.Equal(t, 0.3, entry.PlatformAmount)
 	require.Equal(t, 5.0, *entry.SettlementAmount)
 	require.Equal(t, 5.0, *entry.SpreadAmount)
 	require.Equal(t, "available", entry.Status)

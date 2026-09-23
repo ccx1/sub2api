@@ -31,4 +31,16 @@ describe('administrator shared account tiers', () => {
     expect(wrapper.get('[data-test="admin-account-tier"]').text()).toContain('sharedPool.subscriptionTierManual')
     expect(wrapper.get('[data-test="admin-account-multiplier"]').text()).toContain('0.5x')
   })
+
+  it('keeps long group lists compact and exposes all names on hover', () => {
+    const groups = [1, 2, 3, 4, 5].map(id => ({ id, name: `Shared ${id}` }))
+    const wrapper = mount(SharedPoolAdminAccountsTable, { props: { accounts: [{ ...base, group_ids: groups.map(group => group.id), groups }] } })
+    const more = wrapper.get('[data-test="admin-account-groups-more"]')
+    expect(wrapper.text()).toContain('Shared 1')
+    expect(wrapper.text()).toContain('Shared 3')
+    expect(wrapper.text()).not.toContain('Shared 4')
+    expect(more.text()).toBe('+2')
+    expect(more.attributes('title')).toBe('Shared 1\nShared 2\nShared 3\nShared 4\nShared 5')
+    expect(more.attributes('aria-label')).toContain('Shared 5')
+  })
 })

@@ -417,6 +417,8 @@ type CreateAccountInput struct {
 	ExpiresAt          *int64
 	AutoPauseOnExpired *bool
 	ProbeEnabled       *bool
+	ProtectionEnabled  *bool
+	CodexTicketEnabled *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
@@ -548,23 +550,23 @@ type CreateProxyInput struct {
 // UpdateProxyInput preserves omitted expiry/backup values; Clear flags explicitly
 // remove them. A nil ExpiryWarnDays preserves the current warning period.
 type UpdateProxyInput struct {
-	GroupID        *int64
-	ClearGroupID   bool
-	CountryCode    *string
+	GroupID          *int64
+	ClearGroupID     bool
+	CountryCode      *string
 	ClearCountryCode bool
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       *string
-	Password       *string
-	Status         string
-	ExpiresAt      *time.Time
-	ClearExpiresAt bool
-	FallbackMode   string
-	BackupProxyID  *int64
-	ClearBackupID  bool
-	ExpiryWarnDays *int
+	Name             string
+	Protocol         string
+	Host             string
+	Port             int
+	Username         *string
+	Password         *string
+	Status           string
+	ExpiresAt        *time.Time
+	ClearExpiresAt   bool
+	FallbackMode     string
+	BackupProxyID    *int64
+	ClearBackupID    bool
+	ExpiryWarnDays   *int
 }
 
 type GenerateRedeemCodesInput struct {

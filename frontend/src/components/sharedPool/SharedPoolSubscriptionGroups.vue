@@ -21,11 +21,10 @@
               <Select :key="`tier-${disabled}`" :id="`subscription-tier-${row.id}`" :model-value="row.tier" :options="tierSelectOptions(platform, row)" :disabled="disabled" :error="Boolean(row.tier && !knownTier(platform, row.tier))" :aria-label="`${platformNames[platform]} ${t('sharedPool.subscriptionTier')}`" class="min-w-0" data-tier-select @update:model-value="updateTier(row, $event)" />
             </div>
             <div class="min-w-0">
-              <label :for="`subscription-group-${row.id}`" class="input-label">{{ t('sharedPool.subscriptionTargetGroup') }}</label>
-              <Select :key="`group-${disabled}`" :id="`subscription-group-${row.id}`" :model-value="row.groupId" :options="groupSelectOptions(platform, row)" :disabled="disabled" :error="Boolean(row.groupId && !validGroup(platform, row.groupId))" :aria-label="`${platformNames[platform]} ${t('sharedPool.subscriptionTargetGroup')}`" class="min-w-0" data-group-select @update:model-value="updateGroup(row, $event)" />
+              <CodexTicketTagSelect data-group-select :model-value="row.groupIds.map(String)" :options="groupSelectOptions(platform, row)" :label="`${platformNames[platform]} ${t('sharedPool.subscriptionTargetGroup')}`" :placeholder="t('sharedPool.subscriptionSelectGroup')" :disabled="disabled" :max="Math.min(50, groupsFor(platform).length + row.groupIds.length)" @update:model-value="updateGroups(row, $event)" />
             </div>
             <button type="button" class="btn btn-secondary mb-0.5 h-10 w-10 shrink-0 p-0 text-gray-500 hover:text-red-600 dark:hover:text-red-400" :aria-label="t('sharedPool.subscriptionRemoveRule')" :title="t('sharedPool.subscriptionRemoveRule')" :disabled="disabled" data-remove-rule @click="removeRule(platform, row.id)"><Icon name="trash" size="sm" /></button>
-            <p v-if="row.groupId && !validGroup(platform, row.groupId)" class="col-span-2 text-xs text-amber-700 dark:text-amber-400 sm:col-span-3">{{ t('sharedPool.subscriptionUnavailableHint') }}</p>
+            <p v-if="row.groupIds.some(id => !validGroup(platform, id))" class="col-span-2 text-xs text-amber-700 dark:text-amber-400 sm:col-span-3">{{ t('sharedPool.subscriptionUnavailableHint') }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-3">
             <button v-if="platform !== 'anthropic'" type="button" class="btn btn-secondary btn-sm" :disabled="disabled || rows[platform].length >= tierOptions[platform].length" data-add-rule @click="addRule(platform)"><Icon name="plus" size="sm" class="mr-1.5" />{{ t('sharedPool.subscriptionAddRule') }}</button>
@@ -46,22 +45,27 @@ import type { SharedPlatform, SharedSettings } from '@/api/sharedPool'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
 import { sharedPlatforms as platforms, sharedPlatformNames as platformNames, subscriptionTierOptions as tierOptions, isDispatchGroup } from './settlementPolicy'
 
 const props = defineProps<{
   rules?: SharedSettings['subscription_group_ids']
-  defaults: Partial<Record<SharedPlatform, number>>
+  defaults: SharedSettings['default_group_ids']
   groups: AdminGroup[]
   disabled?: boolean
 }>()
 const { t } = useI18n()
-type RuleRow = { id: number; tier: string; groupId: number }
+type RuleRow = { id: number; tier: string; groupIds: number[] }
+type GroupOption = { value: string; label: string; disabled?: boolean }
 const rows = reactive<Record<SharedPlatform, RuleRow[]>>({ openai: [], anthropic: [], gemini: [], antigravity: [] })
 const expanded = reactive<Record<SharedPlatform, boolean>>({ openai: false, anthropic: false, gemini: false, antigravity: false })
 let nextRowId = 0
 watch(() => props.rules, value => {
   for (const platform of platforms) {
-    rows[platform] = Object.entries(value?.[platform] || {}).map(([tier, groupId]) => ({ id: nextRowId++, tier, groupId }))
+    rows[platform] = Object.entries(value?.[platform] || {}).map(([tier, groupIds]) => {
+      const ids = Array.isArray(groupIds) ? groupIds : (groupIds ? [groupIds] : [])
+      return { id: nextRowId++, tier, groupIds: [...new Set(ids.map(Number))] }
+    })
     if (rows[platform].length) expanded[platform] = true
   }
 }, { immediate: true, deep: true })
@@ -82,24 +86,27 @@ function tierSelectOptions(platform: SharedPlatform, row: RuleRow): SelectOption
   }
   return options.concat(tierOptions[platform])
 }
-function groupSelectOptions(platform: SharedPlatform, row: RuleRow): SelectOption[] {
-  const options: SelectOption[] = [{ value: 0, label: t('sharedPool.subscriptionSelectGroup') }]
-  if (row.groupId && !validGroup(platform, row.groupId)) {
-    options.push({ value: row.groupId, label: unavailableGroup(row.groupId), disabled: true })
-  }
-  return options.concat(groupsFor(platform).map(group => ({ value: group.id, label: `${group.name} · ${group.rate_multiplier}x` })))
+function groupSelectOptions(platform: SharedPlatform, row: RuleRow): GroupOption[] {
+  const selected = new Set(row.groupIds)
+  const unavailable: GroupOption[] = row.groupIds.filter(id => !validGroup(platform, id))
+    .map(id => ({ value: String(id), label: unavailableGroup(id), disabled: true }))
+  return unavailable.concat(groupsFor(platform)
+    .filter(group => !selected.has(group.id))
+    .map(group => ({ value: String(group.id), label: `${group.name} · ${group.rate_multiplier}x` })))
 }
 function updateTier(row: RuleRow, value: SelectOption['value']) {
   if (!props.disabled && typeof value === 'string') row.tier = value
 }
-function updateGroup(row: RuleRow, value: SelectOption['value']) {
-  if (!props.disabled && typeof value === 'number') row.groupId = value
+function updateGroups(row: RuleRow, value: string[]) {
+  if (!props.disabled) row.groupIds = [...new Set(value.map(Number))]
 }
 function fallbackText(platform: SharedPlatform) {
-  const group = groupsFor(platform).find(item => item.id === props.defaults[platform])
-  return group ? t('sharedPool.subscriptionFallback', { name: group.name }) : t('sharedPool.subscriptionDefaultRequiredHint')
+  const value = props.defaults[platform]
+  const ids = Array.isArray(value) ? value : value ? [value] : []
+  const groups = ids.map(id => groupsFor(platform).find(item => item.id === id)).filter(group => group !== undefined)
+  return groups.length ? t('sharedPool.subscriptionFallback', { name: groups.map(group => group.name).join(', ') }) : t('sharedPool.subscriptionDefaultRequiredHint')
 }
-function addRule(platform: SharedPlatform) { rows[platform].push({ id: nextRowId++, tier: '', groupId: 0 }) }
+function addRule(platform: SharedPlatform) { rows[platform].push({ id: nextRowId++, tier: '', groupIds: [] }) }
 function removeRule(platform: SharedPlatform, id: number) { rows[platform] = rows[platform].filter(row => row.id !== id) }
 
 function serialize(): NonNullable<SharedSettings['subscription_group_ids']> {
@@ -108,7 +115,7 @@ function serialize(): NonNullable<SharedSettings['subscription_group_ids']> {
     if (!rows[platform].length) continue
     const ruleError = validatePlatform(platform)
     if (ruleError) { expanded[platform] = true; throw new Error(ruleError) }
-    result[platform] = Object.fromEntries(rows[platform].map(row => [row.tier, row.groupId]))
+    result[platform] = Object.fromEntries(rows[platform].map(row => [row.tier, row.groupIds]))
   }
   return result
 }
@@ -118,7 +125,7 @@ function validatePlatform(platform: SharedPlatform) {
   for (const row of rows[platform]) {
     if (!knownTier(platform, row.tier)) return t('sharedPool.subscriptionInvalidTier', context)
     if (seen.has(row.tier)) return t('sharedPool.subscriptionDuplicateTier', context)
-    if (!validGroup(platform, row.groupId)) return t('sharedPool.subscriptionInvalidGroup', context)
+    if (!row.groupIds.length || row.groupIds.some(id => !validGroup(platform, id))) return t('sharedPool.subscriptionInvalidGroup', context)
     seen.add(row.tier)
   }
   return ''

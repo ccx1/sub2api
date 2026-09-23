@@ -718,6 +718,7 @@ const (
 	// SettingKeyOpenAICodexTicketHarvestProxyURL Codex 292 打票出口（socks5h/http），后台可改、热更新。
 	SettingKeyOpenAICodexTicketHarvestProxyURL  = "openai_codex_ticket_harvest_proxy_url"
 	SettingKeyOpenAICodexTicketHarvestProxyMode = "openai_codex_ticket_harvest_proxy_mode"
+	SettingKeyOpenAICodexTicketHarvestProxyID   = "openai_codex_ticket_harvest_proxy_id"
 	SettingKeyProxyPoolMaxAccounts              = "proxy_pool_max_accounts"
 	// SettingKeyClaudeCodeClientVersion 网关对 Anthropic 上游声明的 Claude Code CLI 客户端版本号（管理员覆写）。
 	// 空值表示跟随自动同步值；自动同步也没有结果时回退到 claude.CLIVersion()（环境变量覆盖 + 内置基线）。

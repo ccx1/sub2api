@@ -491,6 +491,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAICodexTicketHarvestProxyMode != after.OpenAICodexTicketHarvestProxyMode {
 		changed = append(changed, "openai_codex_ticket_harvest_proxy_mode")
 	}
+	if before.OpenAICodexTicketHarvestProxyID != after.OpenAICodexTicketHarvestProxyID {
+		changed = append(changed, "openai_codex_ticket_harvest_proxy_id")
+	}
 	if before.ProxyPoolMaxAccounts != after.ProxyPoolMaxAccounts {
 		changed = append(changed, "proxy_pool_max_accounts")
 	}

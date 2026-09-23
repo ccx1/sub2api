@@ -29,6 +29,8 @@ func registerSharedPoolRoutes(authenticated *gin.RouterGroup, h *handler.SharedP
 	p.GET("/summary", h.Summary)
 	p.GET("/earnings", h.Earnings)
 	p.POST("/transfer", h.Transfer)
+	p.GET("/auto-transfer", h.AutoTransferSettings)
+	p.PUT("/auto-transfer", h.SaveAutoTransferSettings)
 	p.POST("/oauth/:platform/start", h.OAuthStart)
 	p.POST("/oauth/:platform/finish", h.OAuthFinish)
 }
@@ -45,4 +47,5 @@ func registerAdminSharedPoolRoutes(admin *gin.RouterGroup, h *handler.SharedPool
 	p.GET("/user-rates", h.AdminUserRates)
 	p.PUT("/user-rates/:id", h.AdminSaveUserRate)
 	p.GET("/earnings", h.AdminEarnings)
+	p.GET("/user-earnings", h.AdminUserEarnings)
 }

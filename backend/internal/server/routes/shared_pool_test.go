@@ -17,6 +17,8 @@ func TestSharedAccountTestRoutesRequireUserIdentity(t *testing.T) {
 	registerSharedPoolRoutes(router.Group("/api/v1"), &handler.SharedPoolHandler{})
 	for _, request := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/shared-pool/overview"},
+		{http.MethodGet, "/api/v1/shared-pool/auto-transfer"},
+		{http.MethodPut, "/api/v1/shared-pool/auto-transfer"},
 		{http.MethodGet, "/api/v1/shared-pool/accounts/1/models"},
 		{http.MethodGet, "/api/v1/shared-pool/accounts/1/usage"},
 		{http.MethodPost, "/api/v1/shared-pool/accounts/1/test"},

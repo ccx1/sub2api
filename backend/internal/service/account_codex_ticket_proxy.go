@@ -12,13 +12,24 @@ import (
 )
 
 const (
-	CodexTicketProxyModeExtraKey = "codex_ticket_proxy_mode"
-	CodexTicketProxyIDExtraKey   = "codex_ticket_proxy_id"
-	CodexTicketProxyModeInherit  = "inherit"
-	CodexTicketProxyModeAccount  = "account"
-	CodexTicketProxyModeRandom   = "random"
-	CodexTicketProxyModeFixed    = "fixed"
+	CodexTicketProxyModeExtraKey       = "codex_ticket_proxy_mode"
+	CodexTicketProxyIDExtraKey         = "codex_ticket_proxy_id"
+	CodexTicketProxyStrategyExtraKey   = "codex_ticket_proxy_strategy"
+	CodexTicketProxyStrategyAffinity   = "affinity"
+	CodexTicketProxyStrategyRoundRobin = "round_robin"
+	CodexTicketProxyModeInherit        = "inherit"
+	CodexTicketProxyModeAccount        = "account"
+	CodexTicketProxyModeRandom         = "random"
+	CodexTicketProxyModeFixed          = "fixed"
 )
+
+func (a *Account) CodexTicketProxyStrategy() string {
+	if a == nil || a.Extra[CodexTicketProxyStrategyExtraKey] == nil {
+		return CodexTicketProxyStrategyAffinity
+	}
+	strategy, _ := a.Extra[CodexTicketProxyStrategyExtraKey].(string)
+	return strings.TrimSpace(strategy)
+}
 
 func (a *Account) CodexTicketProxyMode() string {
 	if a == nil || a.Extra[CodexTicketProxyModeExtraKey] == nil {
@@ -50,7 +61,13 @@ func codexTicketProxyID(raw any) (int64, bool) {
 
 // 对完整配置校验；局部更新先与账号已有配置合并。
 func ValidateCodexTicketProxyExtra(extra map[string]any) error {
+	if _, err := parseCodexTicketCredentialPolicy(extra[CodexTicketCredentialPolicyExtraKey]); err != nil {
+		return err
+	}
 	account := &Account{Extra: extra}
+	if strategy := account.CodexTicketProxyStrategy(); strategy != CodexTicketProxyStrategyAffinity && strategy != CodexTicketProxyStrategyRoundRobin {
+		return infraerrors.BadRequest("INVALID_CODEX_TICKET_PROXY_STRATEGY", "打票代理策略必须是保持亲和或逐次轮转")
+	}
 	mode := account.CodexTicketProxyMode()
 	if mode != CodexTicketProxyModeInherit && mode != CodexTicketProxyModeAccount && mode != CodexTicketProxyModeRandom && mode != CodexTicketProxyModeFixed {
 		return infraerrors.BadRequest("INVALID_CODEX_TICKET_PROXY_MODE", "打票代理模式必须是跟随账号、跟随全局、随机或固定代理")
@@ -65,7 +82,7 @@ func ValidateCodexTicketProxyExtra(extra map[string]any) error {
 func mergeCodexTicketProxyExtra(extra, current map[string]any) map[string]any {
 	mode, modeSupplied := extra[CodexTicketProxyModeExtraKey]
 	_, idSupplied := extra[CodexTicketProxyIDExtraKey]
-	for _, key := range []string{CodexTicketProxyModeExtraKey, CodexTicketProxyIDExtraKey} {
+	for _, key := range []string{CodexTicketProxyModeExtraKey, CodexTicketProxyIDExtraKey, CodexTicketProxyStrategyExtraKey, CodexTicketCredentialPolicyExtraKey} {
 		if _, supplied := extra[key]; supplied {
 			continue
 		}
@@ -85,18 +102,23 @@ func mergeCodexTicketProxyExtra(extra, current map[string]any) map[string]any {
 func hasCodexTicketProxyUpdates(extra map[string]any) bool {
 	_, mode := extra[CodexTicketProxyModeExtraKey]
 	_, id := extra[CodexTicketProxyIDExtraKey]
-	return mode || id
+	_, strategy := extra[CodexTicketProxyStrategyExtraKey]
+	_, credentialPolicy := extra[CodexTicketCredentialPolicyExtraKey]
+	return mode || id || strategy || credentialPolicy
 }
 
 func normalizeCodexTicketProxyUpdate(extra, current map[string]any) (map[string]any, error) {
 	normalized := mergeCodexTicketProxyExtra(maps.Clone(extra), current)
+	if err := normalizeCodexTicketCredentialExtra(normalized); err != nil {
+		return nil, err
+	}
 	return normalized, ValidateCodexTicketProxyExtra(normalized)
 }
 
 // 校验快照不代表更新意图；省略字段交由仓储在行锁内读取，避免覆盖并发设置。
 func codexTicketProxyExplicitExtra(extra, requested map[string]any) map[string]any {
 	result := maps.Clone(extra)
-	for _, key := range []string{CodexTicketProxyModeExtraKey, CodexTicketProxyIDExtraKey} {
+	for _, key := range []string{CodexTicketProxyModeExtraKey, CodexTicketProxyIDExtraKey, CodexTicketProxyStrategyExtraKey, CodexTicketCredentialPolicyExtraKey} {
 		if _, supplied := requested[key]; !supplied {
 			delete(result, key)
 		}

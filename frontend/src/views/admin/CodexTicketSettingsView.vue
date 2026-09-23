@@ -21,9 +21,45 @@
               <input v-model="form.enabled" type="checkbox" data-testid="enabled" class="mt-1 h-4 w-4" />
               <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.enabled') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.enabledHint') }}</span></span>
             </label>
+            <label class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.credentialMode') }}</span>
+              <select v-model="form.credential_mode" data-testid="credential-mode" class="input w-full">
+                <option value="state">{{ t('codexTicketSettings.credentialState') }}</option>
+                <option value="cookie_state">{{ t('codexTicketSettings.credentialCookieState') }}</option>
+                <option value="cookie">{{ t('codexTicketSettings.credentialCookie') }}</option>
+              </select>
+              <span class="block input-hint">{{ t('codexTicketSettings.credentialModeHint') }}</span>
+            </label>
             <label class="flex items-start gap-3">
-              <input v-model="form.fail_closed" type="checkbox" class="mt-1 h-4 w-4" />
+              <input v-model="form.fail_closed" type="checkbox" data-testid="fail-closed" :disabled="saving" class="mt-1 h-4 w-4" />
               <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.failClosed') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.failClosedHint') }}</span></span>
+            </label>
+            <label for="ticket-session-mode" class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.sessionMode') }}</span>
+              <select id="ticket-session-mode" v-model="form.session_mode" data-testid="session-mode" aria-describedby="ticket-session-mode-hint" class="input w-full">
+                <option value="random">{{ t('codexTicketSettings.sessionModeRandom') }}</option>
+                <option value="account">{{ t('codexTicketSettings.sessionModeAccount') }}</option>
+                <option value="account_model">{{ t('codexTicketSettings.sessionModeAccountModel') }}</option>
+              </select>
+              <span id="ticket-session-mode-hint" class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.sessionModeHint') }}</span>
+            </label>
+            <label for="ticket-refresh-strategy" class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.refreshStrategy') }}</span>
+              <select id="ticket-refresh-strategy" v-model="form.refresh_strategy" data-testid="refresh-strategy" aria-describedby="ticket-refresh-strategy-hint" class="input w-full" :disabled="saving">
+                <option value="replace">{{ t('codexTicketSettings.refreshStrategyReplace') }}</option>
+                <option value="revalidate">{{ t('codexTicketSettings.refreshStrategyRevalidate') }}</option>
+              </select>
+              <span id="ticket-refresh-strategy-hint" data-testid="refresh-strategy-hint" class="block text-xs text-gray-500 dark:text-gray-400">{{ t(form.refresh_strategy === 'replace' ? 'codexTicketSettings.refreshStrategyReplaceHint' : 'codexTicketSettings.refreshStrategyRevalidateHint') }}</span>
+              <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.refreshStrategyManualHint') }}</span>
+            </label>
+            <label class="flex items-start gap-3">
+              <input v-model="form.verify_business" type="checkbox" data-testid="verify-business" aria-describedby="ticket-verify-business-hint" class="mt-1 h-4 w-4" />
+              <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.verifyBusiness') }}<span id="ticket-verify-business-hint" class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.verifyBusinessHint') }}</span></span>
+            </label>
+            <label for="ticket-business-verification-rounds" class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.businessVerificationRounds') }}</span>
+              <input id="ticket-business-verification-rounds" v-model.number="form.business_verification_rounds" data-testid="business-verification-rounds" aria-describedby="ticket-business-verification-rounds-hint" type="number" min="1" max="10" step="1" class="input w-full" :disabled="saving || !form.verify_business" />
+              <span id="ticket-business-verification-rounds-hint" class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.businessVerificationRoundsHint') }}</span>
             </label>
             <div class="space-y-1">
               <CodexTicketTagSelect v-model="form.models" data-testid="models" :options="modelOptions" :disabled="saving" :max="32" :label="t('codexTicketSettings.models')" :placeholder="t('codexTicketSettings.selectModels')" />
@@ -31,21 +67,32 @@
             </div>
             <label class="block space-y-1">
               <span class="input-label">{{ t('codexTicketSettings.lengthMode') }}</span>
-              <select v-model="form.length_mode" data-testid="length-mode" class="input w-full" :disabled="saving">
+              <select v-model="form.length_mode" data-testid="length-mode" class="input w-full" :disabled="saving || usesCookie">
                 <option value="auto">{{ t('codexTicketSettings.lengthModeAuto') }}</option>
                 <option value="strict">{{ t('codexTicketSettings.lengthModeStrict') }}</option>
               </select>
             </label>
-            <p data-testid="length-mode-hint" class="text-sm text-gray-500 dark:text-gray-400">{{ t(isAutoLength ? 'codexTicketSettings.lengthModeAutoHint' : 'codexTicketSettings.lengthModeStrictHint') }}</p>
+            <p data-testid="length-mode-hint" class="text-sm text-gray-500 dark:text-gray-400">{{ t(usesCookie ? 'codexTicketSettings.cookieLengthHint' : isAutoLength ? 'codexTicketSettings.lengthModeAutoHint' : 'codexTicketSettings.lengthModeStrictHint') }}</p>
           </section>
-          <fieldset :disabled="saving || isAutoLength" data-testid="length-rules" class="card min-w-0 space-y-4 p-5" :class="isAutoLength && 'opacity-60'" aria-labelledby="ticket-tier-title">
+          <section class="card space-y-4 p-5" aria-labelledby="ticket-cookie-title">
+            <h2 id="ticket-cookie-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.cookieTitle') }}</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.cookieTimingHint') }}</p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label v-for="field in ticketCookieFields" :key="field.key" class="min-w-0 space-y-1">
+                <span class="input-label">{{ numericFieldLabel(field.key) }}</span>
+                <input v-model.number="form[field.key]" :data-testid="field.key" type="number" :min="field.min" :max="field.max" step="1" class="input w-full" />
+                <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.range', { min: field.min, max: field.max }) }}</span>
+              </label>
+            </div>
+          </section>
+          <fieldset :disabled="saving || isAutoLength || usesCookie" data-testid="length-rules" class="card min-w-0 space-y-4 p-5" :class="(isAutoLength || usesCookie) && 'opacity-60'" aria-labelledby="ticket-tier-title">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <h2 id="ticket-tier-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.tiers') }}</h2>
-              <button type="button" class="btn btn-secondary" data-testid="add-tier" :disabled="saving || isAutoLength || rules.length >= 32" @click="addRule">{{ t('codexTicketSettings.addTier') }}</button>
+              <button type="button" class="btn btn-secondary" data-testid="add-tier" :disabled="saving || isAutoLength || usesCookie || rules.length >= 32" @click="addRule">{{ t('codexTicketSettings.addTier') }}</button>
             </div>
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.tiersHint') }}</p>
             <div v-for="(rule, index) in rules" :key="rule.id" data-testid="tier-rule" class="grid min-w-0 gap-3 border-b border-gray-100 pb-4 dark:border-dark-700 sm:grid-cols-12 sm:items-end">
-              <CodexTicketTagSelect v-model="rule.tiers" :data-testid="`tier-${index}`" class="sm:col-span-8" :options="ticketTierOptions(rule, rules, tierSelections.bindings, tierOptions)" :disabled="saving || isAutoLength" :max="544" :label="t('codexTicketSettings.tier')" :placeholder="t('codexTicketSettings.selectTiers')" />
+              <CodexTicketTagSelect v-model="rule.tiers" :data-testid="`tier-${index}`" class="sm:col-span-8" :options="ticketTierOptions(rule, rules, tierSelections.bindings, tierOptions)" :disabled="saving || isAutoLength || usesCookie" :max="544" :label="t('codexTicketSettings.tier')" :placeholder="t('codexTicketSettings.selectTiers')" />
               <label class="min-w-0 space-y-1 sm:col-span-2">
                 <span class="input-label">{{ t('codexTicketSettings.length') }}</span>
                 <input v-model.number="rule.target_length" :data-testid="`length-${index}`" type="number" min="16" max="8192" step="1" class="input w-full" />
@@ -66,6 +113,37 @@
               </label>
             </div>
           </fieldset>
+          <section class="card space-y-4 p-5" aria-labelledby="ticket-protection-title">
+            <h2 id="ticket-protection-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.protectionTitle') }}</h2>
+            <label class="flex items-start gap-3">
+              <input v-model="protection.enabled" type="checkbox" data-testid="protection-enabled" class="mt-1 h-4 w-4" />
+              <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.protectionEnabled') }}</span>
+            </label>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.protectionHint') }}</p>
+            <p v-if="isAutoLength && protection.enabled && !usesCookie" role="status" data-testid="protection-auto-warning" class="text-sm text-amber-700 dark:text-amber-300">{{ t('codexTicketSettings.protectionAutoHint') }}</p>
+            <p v-if="usesCookie" class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.cookieProtectionHint') }}</p>
+            <label class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.protectionLengths') }}</span>
+              <input v-model="protectionLengthsText" data-testid="protection-lengths" :disabled="saving || usesCookie" class="input w-full font-mono" />
+            </label>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label v-for="field in ticketProtectionFields" :key="field.key" class="min-w-0 space-y-1">
+                <span class="input-label">{{ t(`codexTicketSettings.fields.${field.key}`) }}</span>
+                <input v-model.number="protection[field.key]" :data-testid="field.key" type="number" :min="field.min" :max="field.max" step="1" class="input w-full" />
+              </label>
+            </div>
+          </section>
+          <section class="card space-y-4 p-5" data-testid="rejection-retry-settings" aria-labelledby="ticket-rejection-retry-title">
+            <h2 id="ticket-rejection-retry-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.rejectionRetryTitle') }}</h2>
+            <p id="ticket-rejection-retry-hint" class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.rejectionRetryHint') }}</p>
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <label v-for="field in ticketRejectionRetryFields" :key="field.key" class="min-w-0 space-y-1">
+                <span class="input-label">{{ t(`codexTicketSettings.fields.${field.key}`) }}</span>
+                <input v-model.number="protection[field.key]" :data-testid="field.key" type="number" :min="field.min" :max="field.max" step="1" class="input w-full" aria-describedby="ticket-rejection-retry-hint" />
+                <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.range', { min: field.min, max: field.max }) }}</span>
+              </label>
+            </div>
+          </section>
           <section v-for="group in ticketNumericGroups" :key="group.key" class="card space-y-4 p-5" :aria-labelledby="`ticket-${group.key}-title`">
             <div>
               <h2 :id="`ticket-${group.key}-title`" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t(`codexTicketSettings.${group.key}`) }}</h2>
@@ -78,9 +156,11 @@
             </label>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <label v-for="field in group.fields" :key="field.key" class="min-w-0 space-y-1">
-                <span class="input-label">{{ t(`codexTicketSettings.fields.${field.key}`) }}</span>
-                <input v-model.number="form[field.key]" :data-testid="field.key" type="number" :min="field.min" :max="field.max" step="1" class="input w-full" />
+                <span class="input-label">{{ numericFieldLabel(field.key) }}</span>
+                <input v-model.number="form[field.key]" :data-testid="field.key" type="number" :min="field.min" :max="field.max" step="1" class="input w-full" :aria-describedby="field.key === 'pool_capacity' ? 'ticket-pool-capacity-hint' : undefined" />
                 <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.range', { min: field.min, max: field.max }) }}</span>
+                <span v-if="field.key === 'pool_capacity'" id="ticket-pool-capacity-hint" class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.poolCapacityHint') }}</span>
+                <span v-if="field.key === 'proxy_failure_threshold'" class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.proxyFailureThresholdHint') }}</span>
               </label>
             </div>
             <label v-if="group.key === 'retry'" class="flex items-start gap-3">
@@ -108,7 +188,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
 import { getCodexTicketSettings, saveCodexTicketSettings, type CodexTicketSettings } from '@/api/admin/codexTicketSettings'
-import { splitTicketList, ticketNumericGroups, validateTicketSettings } from '@/components/admin/codexTicketSettingsForm'
+import { defaultTicketProtection, readTicketProtection, splitTicketList, ticketCookieFields, ticketNumericGroups, ticketProtectionFields, ticketRejectionRetryFields, validateTicketSettings } from '@/components/admin/codexTicketSettingsForm'
 import { readTicketTierSelections, writeTicketTierSelections, ticketTierOptions, ticketModelOptions, type TicketTierRow } from '@/components/admin/codexTicketSelections'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -120,8 +200,11 @@ const loadError = ref('')
 const saveError = ref('')
 const form = ref<CodexTicketSettings | null>(null)
 const isAutoLength = computed(() => form.value?.length_mode === 'auto')
+const usesCookie = computed(() => form.value?.credential_mode === 'cookie' || form.value?.credential_mode === 'cookie_state')
 const backoffText = ref('')
 const rejectedText = ref('')
+const protection = ref(defaultTicketProtection())
+const protectionLengthsText = ref('312')
 const rules = ref<TicketTierRow[]>([])
 const tierSelections = ref(readTicketTierSelections([]))
 const savedModels = ref<string[]>([])
@@ -138,25 +221,47 @@ const payload = computed<CodexTicketSettings | null>(() => form.value && ({
   models: [...form.value.models],
   retry_backoff_seconds: splitTicketList(backoffText.value).map(Number),
   rejected_lengths: splitTicketList(rejectedText.value).map(Number),
+  protection: { ...protection.value, reject_and_silence_lengths: splitTicketList(protectionLengthsText.value).map(Number) },
   tier_rules: writeTicketTierSelections(rules.value, tierSelections.value.bindings)
 }))
 const validationError = computed(() => {
   if (!payload.value) return ''
   if (rules.value.some(rule => !rule.tiers.length)) return t('codexTicketSettings.errors.selectTier')
   const error = validateTicketSettings(payload.value)
-  return error ? t(`codexTicketSettings.errors.${error.key}`, { ...error, field: error.field ? t(`codexTicketSettings.fields.${error.field}`) : '' }) : ''
+  return error ? t(`codexTicketSettings.errors.${error.key}`, { ...error, field: error.field ? numericFieldLabel(error.field) : '' }) : ''
 })
 
+function numericFieldLabel(key: string) {
+  const timingFields = ['ttl_seconds', 'refresh_before_seconds', 'cookie_ttl_seconds', 'cookie_refresh_before_seconds']
+  const group = form.value?.refresh_strategy === 'replace' && timingFields.includes(key) ? 'updateFields' : 'fields'
+  return t(`codexTicketSettings.${group}.${key}`)
+}
+
 function setForm(settings: CodexTicketSettings) {
-  form.value = { ...settings, length_mode: settings.length_mode === undefined ? 'strict' : settings.length_mode, models: [...settings.models] }
+  form.value = {
+    ...settings,
+    credential_mode: settings.credential_mode ?? 'state',
+    cookie_ttl_seconds: settings.cookie_ttl_seconds ?? 20,
+    cookie_refresh_before_seconds: settings.cookie_refresh_before_seconds ?? 5,
+    refresh_strategy: settings.refresh_strategy === undefined ? 'revalidate' : settings.refresh_strategy,
+    pool_capacity: settings.pool_capacity ?? 5,
+    verify_business: settings.verify_business === undefined ? true : settings.verify_business,
+    business_verification_rounds: settings.business_verification_rounds === undefined || settings.business_verification_rounds === 0 ? 1 : settings.business_verification_rounds,
+    session_mode: settings.session_mode === undefined ? 'random' : settings.session_mode,
+    proxy_failure_threshold: settings.proxy_failure_threshold === undefined || settings.proxy_failure_threshold === 0 ? 3 : settings.proxy_failure_threshold,
+    length_mode: settings.length_mode === undefined ? 'strict' : settings.length_mode,
+    models: [...settings.models]
+  }
   savedModels.value = [...settings.models]
   backoffText.value = settings.retry_backoff_seconds.join(', ')
   rejectedText.value = settings.rejected_lengths.join(', ')
+  protection.value = readTicketProtection(settings.protection)
+  protectionLengthsText.value = protection.value.reject_and_silence_lengths.join(', ')
   tierSelections.value = readTicketTierSelections(settings.tier_rules)
   rules.value = tierSelections.value.rows.map(rule => ({ ...rule, id: ++ruleSequence }))
 }
 function addRule() {
-  if (!saving.value && !isAutoLength.value && rules.value.length < 32) rules.value.push({ id: ++ruleSequence, tiers: [], target_length: form.value?.target_length ?? 292 })
+  if (!saving.value && !isAutoLength.value && !usesCookie.value && rules.value.length < 32) rules.value.push({ id: ++ruleSequence, tiers: [], target_length: form.value?.target_length ?? 292 })
 }
 async function load() {
   loading.value = true

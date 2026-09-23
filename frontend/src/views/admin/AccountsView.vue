@@ -17,6 +17,7 @@
             @create="showCreate = true"
           >
             <template #after>
+              <CodexTicketAlerts :accounts="accounts" />
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -516,10 +517,10 @@
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="codexTicketGlobalEnabled && !!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
+    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" @imported-and-edit="handleDataImportedAndEdit" />
     <BulkEditAccountModal
       :show="showBulkEdit"
-      :account-ids="selIds"
+      :account-ids="bulkEditTarget?.mode === 'selected' ? bulkEditTarget.accountIds : selIds"
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
       :target="bulkEditTarget ?? undefined"
@@ -571,6 +572,7 @@ import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vu
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import CodexTicketHistoryModal from '@/components/account/CodexTicketHistoryModal.vue'
+import CodexTicketAlerts from '@/components/account/CodexTicketAlerts.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
@@ -1553,6 +1555,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
+    JSON.stringify(current.codex_turn_tickets ?? []) !== JSON.stringify(next.codex_turn_tickets ?? []) ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next) ||
     buildGrokUsageRefreshKey(current) !== buildGrokUsageRefreshKey(next)
   )
@@ -2296,6 +2299,31 @@ const handleBulkUpdated = () => {
   reload()
 }
 const handleDataImported = () => { showImportData.value = false; reload() }
+const handleDataImportedAndEdit = async (accountIds: number[]) => {
+  handleDataImported()
+  const ids = [...new Set(accountIds)].filter(id => Number.isSafeInteger(id) && id > 0)
+  if (ids.length === 0) return
+  try {
+    const importedAccounts: Account[] = []
+    for (let offset = 0; offset < ids.length; offset += 8) {
+      const batch = await Promise.all(ids.slice(offset, offset + 8).map(id => adminAPI.accounts.getById(id)))
+      importedAccounts.push(...batch)
+    }
+    if (importedAccounts.length === 1) {
+      edAcc.value = importedAccounts[0]!
+      showEdit.value = true
+      return
+    }
+    bulkEditTarget.value = {
+      mode: 'selected',
+      accountIds: ids,
+      ...collectSelectionMetadata(importedAccounts)
+    }
+    showBulkEdit.value = true
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  }
+}
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
@@ -2351,7 +2379,15 @@ const accountMatchesCurrentFilters = (account: Account) => {
     }
   }
   const search = String(filters.search || '').trim().toLowerCase()
-  if (search && !account.name.toLowerCase().includes(search)) return false
+  if (search) {
+    const ownerID = account.extra?.shared_pool_owner_id
+    const ownerSearchable = ownerID == null ? '' : String(ownerID).toLowerCase()
+    if (!account.name.toLowerCase().includes(search) && !ownerSearchable.includes(search)) {
+      // 服务端还支持共享用户邮箱和用户名；精简账号列表只返回 owner ID，
+      // 因此局部运行态刷新无法重新判断这两类搜索条件，保留服务端已筛出的行。
+      if (ownerID == null) return false
+    }
+  }
   return true
 }
 const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Account => ({

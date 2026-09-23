@@ -20,9 +20,9 @@
       <div class="space-y-4 p-5 sm:p-6">
         <p v-if="!sharedGroups.length" class="flex items-start gap-2 rounded-lg bg-amber-50/80 p-3 text-sm text-amber-700 dark:bg-amber-950/30 dark:text-amber-400"><Icon name="infoCircle" size="sm" class="mt-0.5 shrink-0" />{{ t('sharedPool.defaultGroupMissing') }}</p>
         <div class="grid gap-5 sm:grid-cols-2">
-          <div v-for="platform in platforms" :key="platform">
-            <label :for="`default-group-${platform}`" class="input-label flex items-center gap-2"><PlatformIcon :platform="platform" />{{ platformNames[platform] }}</label>
-            <Select :key="`${platform}-${saving}`" :id="`default-group-${platform}`" :model-value="defaults[platform]" :options="defaultGroupOptions(platform)" :disabled="saving" :error="Boolean(defaults[platform] && !validDefault(platform))" :aria-label="`${platformNames[platform]} ${t('sharedPool.defaultGroup')}`" class="min-w-0" @update:model-value="updateDefault(platform, $event)" />
+          <div v-for="platform in platforms" :key="platform" :data-default-platform="platform" class="min-w-0">
+            <CodexTicketTagSelect :model-value="defaults[platform].map(String)" :options="defaultGroupOptions(platform)" :label="`${platformNames[platform]} ${t('sharedPool.defaultGroup')}`" :placeholder="t('sharedPool.defaultGroupSelect')" :disabled="saving" :max="groups.length + defaults[platform].length" @update:model-value="updateDefault(platform, $event)" />
+            <p v-if="!validDefault(platform)" class="mt-2 text-xs text-amber-700 dark:text-amber-400">{{ t('sharedPool.subscriptionInvalidDefault', { platform: platformNames[platform] }) }}</p>
           </div>
         </div>
       </div>
@@ -42,8 +42,7 @@ import type { AdminGroup } from '@/types'
 import { adminSharedPoolAPI, type SharedSettings, type SharedPlatform } from '@/api/sharedPool'
 import { useAppStore } from '@/stores/app'
 import Icon from '@/components/icons/Icon.vue'
-import PlatformIcon from '@/components/common/PlatformIcon.vue'
-import Select, { type SelectOption } from '@/components/common/Select.vue'
+import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
 import SharedPoolSubscriptionGroups from './SharedPoolSubscriptionGroups.vue'
 import SharedPoolSubscriptionRates from './SharedPoolSubscriptionRates.vue'
 import SharedPoolSettlementSettings from './SharedPoolSettlementSettings.vue'
@@ -58,24 +57,27 @@ const platformRate = ref(props.settings.platform_rate_bps / 100)
 const proxyRate = ref(props.settings.proxy_rate_bps / 100)
 const maxConcurrency = ref(props.settings.max_concurrency)
 const defaultPriority = ref<number | ''>(props.settings.default_priority ?? 50)
-const defaults = reactive<Partial<Record<SharedPlatform, number>>>({ openai: 0, anthropic: 0, gemini: 0, antigravity: 0, ...props.settings.default_group_ids })
+const defaults = reactive(Object.fromEntries(platforms.map(platform => {
+  const value = props.settings.default_group_ids?.[platform]
+  return [platform, [...new Set(Array.isArray(value) ? value : value ? [value] : [])]]
+})) as Record<SharedPlatform, number[]>)
 const sharedGroups = computed(() => props.groups.filter(isDispatchGroup))
 const saving = ref(false)
 const error = ref('')
 const subscriptionGroups = ref<InstanceType<typeof SharedPoolSubscriptionGroups>>()
 const subscriptionRates = ref<InstanceType<typeof SharedPoolSubscriptionRates>>()
 const settlementSettings = ref<InstanceType<typeof SharedPoolSettlementSettings>>()
-function validDefault(platform: SharedPlatform) { return sharedGroups.value.some(group => group.id === defaults[platform] && group.platform === platform) }
-function defaultGroupOptions(platform: SharedPlatform): SelectOption[] {
-  const options: SelectOption[] = [{ value: 0, label: t('sharedPool.noDefault') }]
-  const selected = defaults[platform]
-  if (selected && !validDefault(platform)) {
-    options.push({ value: selected, label: t('sharedPool.subscriptionUnavailableGroup', { name: props.groups.find(group => group.id === selected)?.name || `#${selected}` }), disabled: true })
-  }
-  return options.concat(sharedGroups.value.filter(group => group.platform === platform).map(group => ({ value: group.id, label: `${group.name} · ${group.rate_multiplier}x` })))
+function validDefault(platform: SharedPlatform) { return defaults[platform].every(id => sharedGroups.value.some(group => group.id === id && group.platform === platform)) }
+function defaultGroupOptions(platform: SharedPlatform) {
+  const available = sharedGroups.value.filter(group => group.platform === platform)
+  const unavailable = defaults[platform].filter(id => !available.some(group => group.id === id))
+  return [
+    ...unavailable.map(id => ({ value: String(id), label: t('sharedPool.subscriptionUnavailableGroup', { name: props.groups.find(group => group.id === id)?.name || `#${id}` }), disabled: true })),
+    ...available.map(group => ({ value: String(group.id), label: `${group.name} · ${group.rate_multiplier}x` }))
+  ]
 }
-function updateDefault(platform: SharedPlatform, value: SelectOption['value']) {
-  if (!saving.value && typeof value === 'number') defaults[platform] = value
+function updateDefault(platform: SharedPlatform, value: string[]) {
+  if (!saving.value) defaults[platform] = [...new Set(value.map(Number))]
 }
 async function save() {
   if (saving.value) return
@@ -84,11 +86,11 @@ async function save() {
   if (!validSharedPriority(defaultPriority.value)) { error.value = t('sharedPool.invalidPriority'); return }
   saving.value = true
   try {
-    const defaultGroupIDs: Partial<Record<SharedPlatform, number>> = {}
+    const defaultGroupIDs: Partial<Record<SharedPlatform, number[]>> = {}
     for (const platform of platforms) {
-      if (!defaults[platform]) continue
+      if (!defaults[platform].length) continue
       if (!validDefault(platform)) throw new Error(t('sharedPool.subscriptionInvalidDefault', { platform: platformNames[platform] }))
-      defaultGroupIDs[platform] = defaults[platform]
+      defaultGroupIDs[platform] = [...defaults[platform]]
     }
     const subscriptionGroupIDs = subscriptionGroups.value?.serialize() || {}
     const subscriptionSettlementMultipliers = subscriptionRates.value?.serialize() || {}

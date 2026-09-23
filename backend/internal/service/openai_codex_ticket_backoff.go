@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -50,13 +51,38 @@ func (s *OpenAIGatewayService) openAICodexTicketBackoffActive(account *Account, 
 
 func (s *OpenAIGatewayService) finishOpenAICodexTicketHarvest(ctx context.Context, input *openAICodexTicketProbeInput) {
 	attempt := input.Attempt
-	if attempt == nil || attempt.StartedAt.IsZero() {
+	if attempt == nil {
 		return
 	}
-	if attempt.Success || !attempt.canceled && attempt.Reason != "controls_changed" && s.openAICodexTicketProbeAllowed(ctx, input.Account, input.Token) && s.openAICodexTicketProbeConfigCurrent(ctx, *input) {
+	attempt.Outcome = codexTicketAttemptOutcome(attempt)
+	if schedule := codexTicketScheduleFrom(ctx); schedule != nil && schedule.upstream != nil && !attempt.Success && !attempt.canceled && attempt.Reason != "controls_changed" && schedule.deferred == nil {
+		attempt.Outcome = "upstream_error"
+	}
+	s.finishCodexTicketSchedule(ctx, input)
+	if attempt.StartedAt.IsZero() {
+		return
+	}
+	sharedRejection := codexTicketScheduleFrom(ctx) != nil && attempt.Outcome == "ticket_rejected"
+	if attempt.Success || sharedRejection {
+		s.clearCodexTicketAccountBackoff(input.Account, input.Token)
+	}
+	if !sharedRejection && !codexTicketScheduledProtected(ctx) && (attempt.Success || !attempt.canceled && attempt.Reason != "controls_changed" && attempt.Reason != "verification_deferred" && s.openAICodexTicketProbeAllowed(ctx, input.Account, input.Token) && s.openAICodexTicketProbeConfigCurrent(ctx, *input)) {
 		s.advanceCodexTicketBackoff(input, time.Now())
 	}
 	s.finishCodexTicketAttempt(ctx, input.Account.ID, attempt)
+}
+
+func (s *OpenAIGatewayService) clearCodexTicketAccountBackoff(account *Account, token string) {
+	identity := openAICodexTicketCooldownKey(account, token)
+	if identity == "" {
+		return
+	}
+	s.openaiCodexTicketBackoff.Range(func(key, value any) bool {
+		if name, ok := key.(string); ok && strings.HasPrefix(name, identity+":") {
+			s.openaiCodexTicketBackoff.CompareAndDelete(key, value)
+		}
+		return true
+	})
 }
 
 func (s *OpenAIGatewayService) advanceCodexTicketBackoff(input *openAICodexTicketProbeInput, now time.Time) {

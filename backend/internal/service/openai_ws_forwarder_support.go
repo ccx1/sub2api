@@ -82,7 +82,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	watchdog := receipt.watch(ctx, s, prewarmModel)
 	if watchdog != nil {
 		// 预热结束后会立即发送业务请求，撤票须先完成本机禁用再允许回退。
-		watchdog.invalidate = func() { s.invalidateOpenAICodexTicket(ctx, receipt.account, &receipt.ticket) }
+		watchdog.invalidate = func() {
+			s.invalidateOpenAICodexTicket(ctx, receipt.account, &receipt.ticket, watchdog.invalidation("websocket_prewarm"))
+		}
 	}
 
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
@@ -121,7 +123,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 
 		watchdog.observe(message)
 		if watchdog != nil {
-			if completed, matches := watchdog.observer.Result(); completed && !matches {
+			if completed, matches := watchdog.observer.Result(); completed && !matches && (!receipt.ticket.usesCookies() || receipt.config.FailClosed) {
 				lease.MarkBroken()
 				return wrapOpenAIWSFallback("prewarm_ticket_mismatch", ErrOpenAICodexTicketUnavailable)
 			}

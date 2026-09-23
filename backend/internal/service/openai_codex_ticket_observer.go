@@ -19,6 +19,8 @@ type openAICodexTicketResponseObserver struct {
 	failureStatus                             int
 	reportedModels                            []string
 	modelsTruncated                           bool
+	diagnostics                               *codexTicketResponseDiagnostics
+	diagnosticEventType                       string
 }
 
 func newOpenAICodexTicketResponseObserver(model string) *openAICodexTicketResponseObserver {
@@ -84,6 +86,10 @@ func (o *openAICodexTicketResponseObserver) consumeLine() {
 		if !o.eventOverflow && len(o.event) > 0 {
 			o.inspect(o.event)
 		}
+		if o.diagnostics != nil && o.eventOverflow {
+			o.diagnostics.declaration.Truncated = true
+		}
+		o.diagnosticEventType = ""
 		o.event, o.eventOverflow, o.eventType = o.event[:0], false, ""
 	} else if bytes.HasPrefix(line, []byte("data:")) && !o.eventOverflow {
 		data := bytes.TrimPrefix(line[5:], []byte{' '})
@@ -93,6 +99,9 @@ func (o *openAICodexTicketResponseObserver) consumeLine() {
 		}
 	} else if bytes.HasPrefix(line, []byte("event:")) {
 		name := bytes.TrimPrefix(line[6:], []byte{' '})
+		if o.diagnostics != nil {
+			o.diagnosticEventType = codexTicketUTF8Prefix(string(name), 96)
+		}
 		o.eventType = "other"
 		if bytes.Equal(name, []byte("response.completed")) {
 			o.eventType = "response.completed"
@@ -110,6 +119,9 @@ func (o *openAICodexTicketResponseObserver) Finish() {
 	o.finished = true
 	if o.jsonMode && !o.bodyOverflow {
 		o.inspect(o.body)
+	}
+	if o.diagnostics != nil && (o.bodyOverflow || o.lineOverflow || o.eventOverflow || len(o.line) > 0 || len(o.event) > 0) {
+		o.diagnostics.declaration.Truncated = true
 	}
 	// SSE 在空行处派发；EOF 不能把缺少事件终止符的片段变成成功响应。
 	o.line, o.event, o.body = nil, nil, nil
@@ -134,6 +146,9 @@ func (o *openAICodexTicketResponseObserver) inspect(data []byte) {
 	}
 	if json.Unmarshal(data, &value) != nil {
 		return
+	}
+	if o.diagnostics != nil {
+		o.diagnostics.observe(data, o.diagnosticEventType, o.jsonMode)
 	}
 	if openAICodexTicketResponseFailed(value.Type, value.Status, value.Error) || (value.Response != nil &&
 		openAICodexTicketResponseFailed("", value.Response.Status, value.Response.Error)) {

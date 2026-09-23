@@ -11,10 +11,114 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const sharedOverviewRegistrationQuery = `SELECT spa.account_id,spa.enabled,spa.admin_disabled,ag.group_id
+const sharedOverviewRegistrationQuery = `SELECT spa.account_id,spa.enabled,spa.admin_disabled,ag.group_id,COALESCE(u.status=$1,false)
 	FROM shared_pool_accounts spa JOIN accounts a ON a.id=spa.account_id AND a.deleted_at IS NULL
-	JOIN users u ON u.id=spa.owner_user_id AND u.deleted_at IS NULL AND u.status=$1
+	LEFT JOIN users u ON u.id=spa.owner_user_id AND u.deleted_at IS NULL
 	LEFT JOIN account_groups ag ON ag.account_id=spa.account_id`
+
+func TestSharedPoolOverviewRegistrationsRetainInactiveAndDeletedOwners(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close(); require.NoError(t, mock.ExpectationsWereMet()) })
+	rows := sqlmock.NewRows([]string{"account_id", "enabled", "admin_disabled", "group_id", "owner_active"}).
+		AddRow(1, true, false, 7, true).
+		AddRow(2, true, false, 7, false).
+		AddRow(3, true, false, 7, false).
+		AddRow(3, true, false, 8, false)
+	mock.ExpectQuery(sharedOverviewRegistrationQuery).WithArgs(service.StatusActive).WillReturnRows(rows)
+	repo := newGroupRepositoryWithSQL(nil, db)
+	registrations, groupIDs, err := repo.sharedOverviewRegistrations(context.Background())
+	require.NoError(t, err)
+	require.Len(t, registrations, 3, "用户停用或删除时，共享账号仍计入总数")
+	require.ElementsMatch(t, []int64{7, 8}, groupIDs)
+	accounts := []*service.Account{}
+	for id := int64(1); id <= 3; id++ {
+		accounts = append(accounts, &service.Account{ID: id, Platform: service.PlatformOpenAI,
+			Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true})
+	}
+	state := sharedOverviewState{registrations: registrations, groups: map[int64]*service.Group{
+		7: {ID: 7, Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, IsSharedPool: true},
+	}}
+	got := state.snapshots(accounts)
+	require.Len(t, got, 3)
+	for i, account := range got {
+		require.True(t, account.Valid)
+		require.Equal(t, i == 0, account.Available, "停用或已删除用户的账号不得调度")
+	}
+}
+
+func TestSharedPoolOverviewRegistrationFailuresPropagate(t *testing.T) {
+	for _, mode := range []string{"query", "scan", "rows"} {
+		t.Run(mode, func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close(); require.NoError(t, mock.ExpectationsWereMet()) })
+			query := mock.ExpectQuery(sharedOverviewRegistrationQuery).WithArgs(service.StatusActive)
+			failure := errors.New("registration read failed")
+			rows := sqlmock.NewRows([]string{"account_id", "enabled", "admin_disabled", "group_id", "owner_active"})
+			switch mode {
+			case "query":
+				query.WillReturnError(failure)
+			case "scan":
+				query.WillReturnRows(rows.AddRow(1, true, false, 7, "invalid boolean"))
+			case "rows":
+				query.WillReturnRows(rows.AddRow(1, true, false, 7, true).RowError(0, failure))
+			}
+			got, err := newGroupRepositoryWithSQL(nil, db).SharedPoolOverviewAccounts(context.Background())
+			require.Error(t, err)
+			require.Empty(t, got)
+			if mode != "scan" {
+				require.ErrorIs(t, err, failure)
+			}
+		})
+	}
+}
+
+func TestSharedPoolOverviewValidityUsesAccountStatusAndExpiration(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		name      string
+		status    string
+		expiresAt *time.Time
+		valid     bool
+	}{
+		{"active", service.StatusActive, nil, true},
+		{"future", service.StatusActive, new(now.Add(time.Hour)), true},
+		{"expired", service.StatusActive, new(now.Add(-time.Hour)), false},
+		{"expiry boundary", service.StatusActive, &now, false},
+		{"disabled", service.StatusDisabled, nil, false},
+		{"error", service.StatusError, nil, false},
+	} {
+		for _, autoPause := range []bool{false, true} {
+			t.Run(tc.name+map[bool]string{false: "/without auto pause", true: "/with auto pause"}[autoPause], func(t *testing.T) {
+				account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+					Status: tc.status, ExpiresAt: tc.expiresAt, AutoPauseOnExpired: autoPause,
+					Credentials: map[string]any{"expires_at": now.Add(-time.Hour).Format(time.RFC3339)}}
+				got := (sharedOverviewState{}).snapshots([]*service.Account{account})
+				require.Equal(t, tc.valid, got[0].Valid, "OAuth token 过期或自动暂停设置不能改变账号有效期口径")
+			})
+		}
+	}
+}
+
+func TestSharedPoolOverviewTicketRequirementUsesAccountKind(t *testing.T) {
+	for _, tc := range []struct {
+		platform, kind string
+		parent         *int64
+		required       bool
+	}{
+		{service.PlatformOpenAI, service.AccountTypeOAuth, nil, true},
+		{service.PlatformOpenAI, service.AccountTypeSetupToken, nil, true},
+		{service.PlatformOpenAI, service.AccountTypeAPIKey, nil, false},
+		{service.PlatformOpenAI, service.AccountTypeOAuth, new(int64(9)), false},
+		{service.PlatformAnthropic, service.AccountTypeOAuth, nil, false},
+		{service.PlatformGemini, service.AccountTypeOAuth, nil, false},
+	} {
+		account := &service.Account{ID: 1, Platform: tc.platform, Type: tc.kind, ParentAccountID: tc.parent, Status: service.StatusActive}
+		got := (sharedOverviewState{}).snapshots([]*service.Account{account})
+		require.Equal(t, tc.required, got[0].TicketRequired, "%s/%s parent=%v", tc.platform, tc.kind, tc.parent)
+	}
+}
 
 func TestSharedPoolOverviewSourceRetainsDisabledAndUnassignedAccounts(t *testing.T) {
 	_, client := newAPIKeyRepoSQLite(t)
@@ -26,7 +130,7 @@ func TestSharedPoolOverviewSourceRetainsDisabledAndUnassignedAccounts(t *testing
 	require.NoError(t, err)
 	second, err := client.Group.Create().SetName("second").SetPlatform(service.PlatformOpenAI).SetIsSharedPool(true).Save(ctx)
 	require.NoError(t, err)
-	rows := sqlmock.NewRows([]string{"account_id", "enabled", "admin_disabled", "group_id"})
+	rows := sqlmock.NewRows([]string{"account_id", "enabled", "admin_disabled", "group_id", "owner_active"})
 	var availableID int64
 	for _, name := range []string{"available", "disabled", "admin disabled", "unassigned", "deleted", "proxy unhealthy"} {
 		builder := client.Account.Create().SetName(name).SetPlatform(service.PlatformOpenAI).SetType(service.AccountTypeOAuth).
@@ -40,13 +144,13 @@ func TestSharedPoolOverviewSourceRetainsDisabledAndUnassignedAccounts(t *testing
 		account, err := builder.Save(ctx)
 		require.NoError(t, err)
 		if name == "unassigned" {
-			rows.AddRow(account.ID, true, false, nil)
+			rows.AddRow(account.ID, true, false, nil, true)
 			continue
 		}
-		rows.AddRow(account.ID, name != "disabled", name == "admin disabled", first.ID)
+		rows.AddRow(account.ID, name != "disabled", name == "admin disabled", first.ID, true)
 		if name == "available" {
 			availableID = account.ID
-			rows.AddRow(account.ID, true, false, second.ID)
+			rows.AddRow(account.ID, true, false, second.ID, true)
 		}
 	}
 	pool, _ := newProxyPoolAllocatorTest(t, 1, poolCandidate(7))
@@ -105,6 +209,9 @@ func TestSharedPoolOverviewSnapshotsRespectActualSchedulingRules(t *testing.T) {
 		{"registration admin disabled", func(_ *service.Account, _ *service.Group, r *sharedOverviewRegistration, _ *service.SharedPoolSettlementTerms) {
 			r.adminDisabled = true
 		}, false},
+		{"owner disabled or deleted", func(_ *service.Account, _ *service.Group, r *sharedOverviewRegistration, _ *service.SharedPoolSettlementTerms) {
+			r.ownerActive = false
+		}, false},
 		{"unassigned", func(_ *service.Account, _ *service.Group, r *sharedOverviewRegistration, _ *service.SharedPoolSettlementTerms) {
 			r.groups = nil
 		}, false},
@@ -131,7 +238,7 @@ func TestSharedPoolOverviewSnapshotsRespectActualSchedulingRules(t *testing.T) {
 			account := &service.Account{ID: 9, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 3,
 				Extra: map[string]any{service.SharedPoolOwnerKey: 7, service.SharedPoolEnabledKey: true, service.SharedPoolDispatchConsentKey: true}}
 			group := &service.Group{ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 2}
-			registration := &sharedOverviewRegistration{enabled: true, groups: []int64{1}}
+			registration := &sharedOverviewRegistration{enabled: true, ownerActive: true, groups: []int64{1}}
 			terms := &service.SharedPoolSettlementTerms{Multiplier: 1, PlatformRateBPS: 500, ProxyRateBPS: 100}
 			tc.change(account, group, registration, terms)
 			state := sharedOverviewState{registrations: map[int64]*sharedOverviewRegistration{9: registration},
@@ -139,8 +246,8 @@ func TestSharedPoolOverviewSnapshotsRespectActualSchedulingRules(t *testing.T) {
 			got := state.snapshots([]*service.Account{account})
 			require.Len(t, got, 1, "不可用账号也应保留总数")
 			require.Equal(t, tc.available, got[0].Available)
-			require.Equal(t, registration.enabled && !registration.adminDisabled, got[0].Participating,
-				"参与调度只取决于共享开关和管理员停用，不应受实时准入条件影响")
+			require.Equal(t, account.Status == service.StatusActive, got[0].Valid,
+				"有效账号独立于共享开关、用户状态和实时调度准入条件")
 		})
 	}
 }
@@ -153,7 +260,7 @@ func TestSharedPoolOverviewAnyCompatibleGroupAndProtectionCapacity(t *testing.T)
 		1: {ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusDisabled, SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 2},
 		2: {ID: 2, Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 2},
 	}
-	registrations := map[int64]*sharedOverviewRegistration{9: {enabled: true, groups: []int64{1, 2}}}
+	registrations := map[int64]*sharedOverviewRegistration{9: {enabled: true, ownerActive: true, groups: []int64{1, 2}}}
 	terms := map[int64]*service.SharedPoolSettlementTerms{9: {Multiplier: 1}}
 	state := sharedOverviewState{registrations: registrations, groups: groups, terms: terms, proxies: &sharedPoolProxyAvailability{}}
 	got := state.snapshots([]*service.Account{account})
@@ -176,13 +283,13 @@ func TestSharedPoolOverviewSourceBatchesOwnerTermsAndPropagatesFailure(t *testin
 			ctx := context.Background()
 			group, err := client.Group.Create().SetName("ordinary").SetPlatform(service.PlatformOpenAI).SetRateMultiplier(2).Save(ctx)
 			require.NoError(t, err)
-			members := sqlmock.NewRows([]string{"account_id", "enabled", "admin_disabled", "group_id"})
+			members := sqlmock.NewRows([]string{"account_id", "enabled", "admin_disabled", "group_id", "owner_active"})
 			terms := sqlmock.NewRows([]string{"account_id", "owner_user_id", "settlement_multiplier", "subscription_settlement_multipliers", "user_multiplier", "platform_rate_bps", "proxy_rate_bps"})
 			for i := 0; i < 2; i++ {
 				account, err := client.Account.Create().SetName("modern").SetPlatform(service.PlatformOpenAI).SetType(service.AccountTypeOAuth).
 					SetCredentials(map[string]any{}).SetSchedulable(true).SetConcurrency(3).SetExtra(map[string]any{service.SharedPoolDispatchConsentKey: true}).Save(ctx)
 				require.NoError(t, err)
-				members.AddRow(account.ID, true, false, group.ID)
+				members.AddRow(account.ID, true, false, group.ID, true)
 				terms.AddRow(account.ID, 7, 1, `{}`, 0, 500, 100)
 			}
 			mock.ExpectQuery("SELECT spa.account_id,spa.enabled,spa.admin_disabled,ag.group_id").WithArgs(service.StatusActive).WillReturnRows(members)

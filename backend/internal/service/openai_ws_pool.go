@@ -599,6 +599,9 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	if c.ws == nil {
 		return errOpenAIWSConnClosed
 	}
+	if err := c.codexTicketReceipt.validate(time.Now()); err != nil {
+		return err
+	}
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
@@ -1117,6 +1120,13 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 	}
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+	if lease != nil && lease.conn != nil {
+		if ticketErr := lease.conn.codexTicketReceipt.validate(time.Now()); ticketErr != nil {
+			lease.MarkBroken()
+			lease.Release()
+			return nil, ticketErr
+		}
+	}
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。
@@ -1144,7 +1154,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	if stringsTrim(req.WSURL) == "" {
 		return nil, errors.New("ws url is empty")
 	}
-	if req.CodexTicketReceipt != nil && req.Headers.Get(openAICodexTurnStateHeader) != req.CodexTicketReceipt.ticket.State {
+	if !validOpenAICodexTicketWSReceiptAccount(req) || req.CodexTicketReceipt != nil && !req.CodexTicketReceipt.ticket.matchesHeaders(req.Headers) {
 		return nil, ErrOpenAICodexTicketUnavailable
 	}
 	if queueWait == nil {
@@ -2134,8 +2144,16 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	if req.CodexTicketReceipt != nil && headers.Get(openAICodexTurnStateHeader) != req.CodexTicketReceipt.ticket.State {
+	if !validOpenAICodexTicketWSReceiptAccount(req) || req.CodexTicketReceipt != nil && !req.CodexTicketReceipt.ticket.matchesHeaders(headers) {
 		return nil, ErrOpenAICodexTicketUnavailable
+	}
+	if err := req.CodexTicketReceipt.validate(time.Now()); err != nil {
+		return nil, err
+	}
+	if req.CodexTicketReceipt != nil && req.CodexTicketReceipt.ticket.usesCookies() {
+		req.Headers = headers
+		discardExpiredOpenAICodexTicketWSHandshake(&req, time.Now())
+		headers = req.Headers
 	}
 	conn, status, handshakeHeaders, err := p.dialWithAccountTransport(ctx, req, headers)
 	if err != nil {

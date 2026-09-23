@@ -53,6 +53,7 @@ func TestCodexTicketAccountModeUsesFixedAccountExitAndKeepsUsableTicket(t *testi
 	require.Empty(t, repo.selections)
 	ticket := svc.lookupOpenAICodexTicket(repo.account, "gpt-6-astra")
 	require.True(t, ticket.valid(time.Now(), 292))
+	require.True(t, svc.storeOpenAICodexTicket(context.Background(), repo.account, inventoryTestTicket(ticket, "D", time.Second)))
 	svc.cfg.Gateway.OpenAICodexTicket.HarvestProxyURL = "http://other-global.example:8080"
 	svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, "gpt-6-astra")
 	require.Len(t, upstream.proxies, 2)
@@ -68,9 +69,36 @@ func TestCodexTicketAccountModeExplicitlyFollowsDirect(t *testing.T) {
 	require.Empty(t, repo.selections)
 	ticket := svc.lookupOpenAICodexTicket(repo.account, "gpt-6-astra")
 	require.True(t, ticket.valid(time.Now(), 292))
+	require.True(t, svc.storeOpenAICodexTicket(context.Background(), repo.account, inventoryTestTicket(ticket, "D", time.Second)))
 	svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, "gpt-6-astra")
 	require.Len(t, upstream.proxies, 2)
 	require.Equal(t, ticket, svc.lookupOpenAICodexTicket(repo.account, "gpt-6-astra"))
+}
+
+func TestCodexTicketGlobalAccountKeepsBusinessPolicySnapshot(t *testing.T) {
+	svc, repo := accountEgressTicketFixture(t)
+	repo.account.Extra[CodexTicketProxyModeExtraKey] = CodexTicketProxyModeInherit
+	repo.account.ProxyID, repo.account.Proxy = &repo.proxy.ID, repo.proxy
+	settings := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{
+		SettingKeyOpenAICodexTicketHarvestProxyMode: OpenAICodexTicketHarvestProxyModeAccount,
+	}}}
+	svc.settingService = NewSettingService(settings, svc.cfg)
+
+	proxy, err := svc.selectOpenAICodexTicketProxy(context.Background(), repo.account)
+	require.NoError(t, err)
+	require.Equal(t, repo.proxy.ID, proxy.proxyID)
+	require.True(t, proxy.policy.followBusiness)
+	require.Equal(t, proxy.proxyID, proxy.policy.proxyID)
+	require.Equal(t, proxy.url, proxy.policy.url)
+	require.True(t, svc.codexTicketProxyPolicyCurrent(context.Background(), openAICodexTicketProbeInput{
+		Account: repo.account, HarvestProxyPolicy: &proxy.policy,
+	}))
+
+	upstream := &ticketPoolUpstream{}
+	svc.httpUpstream = upstream
+	svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, "gpt-6-astra")
+	require.Equal(t, []string{repo.proxy.URL(), repo.proxy.URL()}, upstream.proxies)
+	require.True(t, svc.lookupOpenAICodexTicket(repo.account, "gpt-6-astra").valid(time.Now(), 292))
 }
 
 func TestCodexTicketAccountModeFollowsPersistedExpiryFallback(t *testing.T) {

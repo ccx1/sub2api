@@ -9,10 +9,14 @@ import (
 )
 
 const (
-	OpenAICodexTicketHarvestProxyModeFixed = "fixed"
-	OpenAICodexTicketHarvestProxyModePool  = "pool"
-	ProxyPoolMaxAccountsLimit              = 10000
-	proxyPoolSettingsCacheTTL              = 5 * time.Second
+	OpenAICodexTicketHarvestProxyModeAccount = "account"
+	OpenAICodexTicketHarvestProxyModeInherit = "inherit"
+	OpenAICodexTicketHarvestProxyModeRandom  = "random"
+	OpenAICodexTicketHarvestProxyModeFixed   = "fixed"
+	// pool 是旧版全局设置的持久化值，读取时继续接受，运行时按 random 处理。
+	OpenAICodexTicketHarvestProxyModePool = "pool"
+	ProxyPoolMaxAccountsLimit             = 10000
+	proxyPoolSettingsCacheTTL             = 5 * time.Second
 )
 
 type cachedProxyPoolSettings struct {
@@ -35,10 +39,16 @@ func (s *SettingService) resolveCodexTicketHarvestProxyMode(raw, proxyURL string
 	if mode == "" {
 		return s.defaultCodexTicketHarvestProxyMode(proxyURL), nil
 	}
-	if mode != OpenAICodexTicketHarvestProxyModeFixed && mode != OpenAICodexTicketHarvestProxyModePool {
-		return "", fmt.Errorf("%s must be fixed or pool", SettingKeyOpenAICodexTicketHarvestProxyMode)
+	switch mode {
+	case OpenAICodexTicketHarvestProxyModeAccount,
+		OpenAICodexTicketHarvestProxyModeInherit,
+		OpenAICodexTicketHarvestProxyModeRandom,
+		OpenAICodexTicketHarvestProxyModeFixed,
+		OpenAICodexTicketHarvestProxyModePool:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("%s must be account, inherit, random, or fixed", SettingKeyOpenAICodexTicketHarvestProxyMode)
 	}
-	return mode, nil
 }
 
 func validateProxyPoolMaxAccounts(value int) error {
@@ -95,6 +105,7 @@ func (s *SettingService) getProxyPoolSettingValues(ctx context.Context) (map[str
 	values, err := s.settingRepo.GetMultiple(dbCtx, []string{
 		SettingKeyOpenAICodexTicketHarvestProxyMode,
 		SettingKeyOpenAICodexTicketHarvestProxyURL,
+		SettingKeyOpenAICodexTicketHarvestProxyID,
 		SettingKeyProxyPoolMaxAccounts,
 	})
 	if err != nil {

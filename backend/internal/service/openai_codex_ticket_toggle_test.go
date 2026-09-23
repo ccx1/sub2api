@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,7 @@ func TestCodexTicketToggleReusesPersistedFreshTicket(t *testing.T) {
 		for _, kind := range []string{"legacy", "verified", "auto"} {
 			t.Run(mode+"/"+kind, func(t *testing.T) {
 				svc, repo, previous := codexTicketToggleFixture(t, mode, kind)
+				previous.Standby = inventoryTestTicket(previous, "D", time.Second)
 				upstream := &ticketPoolUpstream{}
 				svc.httpUpstream = upstream
 				ctx := context.Background()
@@ -72,12 +74,15 @@ func TestCodexTicketToggleReusesPersistedFreshTicket(t *testing.T) {
 				require.Empty(t, upstream.proxies)
 				svc.cfg.Gateway.OpenAICodexTicket.Enabled = true
 				svc.refreshOpenAICodexTickets(ctx)
-				require.Empty(t, upstream.proxies, "重新启用不能重采仍可用的持久化旧票")
+				require.Empty(t, upstream.proxies, "重新启用不能重采仍完整有效的持久化主备库存")
 				// 已排队的采集任务也要重新检查，不能覆盖刚复用或并发发布的有效票。
 				svc.probeOnceOpenAICodexTicket(ctx, repo.account, previous.Model)
 				require.Empty(t, upstream.proxies)
 				require.Zero(t, repo.writes)
-				require.Equal(t, previous, svc.lookupOpenAICodexTicket(repo.account, previous.Model))
+				expected := codexTicketLeaf(previous)
+				hydrateCodexTicketStateExpiry(expected)
+				require.Equal(t, expected, svc.lookupOpenAICodexTicket(repo.account, previous.Model))
+				require.Equal(t, previous, repo.account.Extra[openAICodexTicketExtraKey(previous.Model)])
 				headers := http.Header{}
 				require.NoError(t, svc.applyOpenAICodexTicket(ctx, repo.account, previous.Model, headers))
 				require.Equal(t, previous.State, headers.Get(openAICodexTurnStateHeader))
@@ -86,15 +91,17 @@ func TestCodexTicketToggleReusesPersistedFreshTicket(t *testing.T) {
 	}
 }
 
-func TestCodexTicketRetryReusesPersistedLegacyTicket(t *testing.T) {
+func TestCodexTicketRetryForcesPersistedLegacyTicket(t *testing.T) {
 	for _, mode := range []string{"inherit", "fixed", "random", "account"} {
 		t.Run(mode, func(t *testing.T) {
 			svc, repo, previous := codexTicketToggleFixture(t, mode, "legacy")
 			result, err := svc.RetryOpenAICodexTicket(context.Background(), repo.account.ID, previous.Model)
 			require.NoError(t, err)
-			require.Zero(t, result.Scheduled)
-			require.Equal(t, 1, result.Skipped)
-			require.Equal(t, previous, svc.lookupOpenAICodexTicket(repo.account, previous.Model))
+			require.Equal(t, 1, result.Scheduled)
+			require.Zero(t, result.Skipped)
+			expected := codexTicketLeaf(previous)
+			hydrateCodexTicketStateExpiry(expected)
+			require.Equal(t, expected, svc.lookupOpenAICodexTicket(repo.account, previous.Model))
 		})
 	}
 }
@@ -105,6 +112,7 @@ func TestCodexTicketToggleDoesNotReuseInvalidTicket(t *testing.T) {
 			svc, repo, previous := codexTicketToggleFixture(t, "inherit", "verified")
 			switch invalid {
 			case "expired":
+				previous.State = codexTicketStateForExpiryTest(time.Now().Add(-2*time.Hour), 10)
 				previous.ExpiresAt = time.Now().Add(-time.Second)
 			case "revoked":
 				previous.Revoked = true
@@ -131,10 +139,25 @@ func TestCodexTicketToggleDoesNotReuseInvalidTicket(t *testing.T) {
 
 func TestCodexTicketFixedProxyStillRefreshesWithinConfiguredWindow(t *testing.T) {
 	svc, repo, previous := codexTicketToggleFixture(t, "fixed", "verified")
-	previous.ExpiresAt = time.Now().Add(time.Minute)
+	previous.State = "gAAAAA" + strings.Repeat("A", 286)
+	previous.ExpiresAt = time.Now().UTC().Add(time.Minute)
+	previous.Standby = inventoryTestTicket(previous, "D", time.Second)
 	upstream := &ticketPoolUpstream{}
 	svc.httpUpstream = upstream
 	svc.refreshOpenAICodexTickets(context.Background())
-	require.Len(t, upstream.proxies, 2)
-	require.True(t, svc.lookupOpenAICodexTicket(repo.account, previous.Model).CapturedAt.After(previous.CapturedAt))
+	require.Len(t, upstream.proxies, 1, "复验原票只需要一次业务请求")
+	next := svc.lookupOpenAICodexTicket(repo.account, previous.Model)
+	require.NotNil(t, next)
+	require.Equal(t, previous.State, next.State)
+	require.True(t, next.RevalidatedAt.After(previous.CapturedAt))
+	require.True(t, next.CapturedAt.After(previous.CapturedAt))
+	require.True(t, next.ExpiresAt.After(previous.ExpiresAt))
+	stored, ok := svc.openaiCodexTickets.Load(openAICodexTicketKey(repo.account.ID, previous.Model))
+	require.True(t, ok)
+	standby := stored.(*openAICodexTicket).Standby
+	require.NotNil(t, standby)
+	expectedStandby := codexTicketLeaf(previous.Standby)
+	hydrateCodexTicketStateExpiry(expectedStandby)
+	require.Equal(t, expectedStandby, standby, "主票同槽续用，不替换备用或增加库存")
+	require.Len(t, codexTicketSlots(stored.(*openAICodexTicket)), 2)
 }

@@ -248,6 +248,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
 		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingKeyOpenAICodexTicketHarvestProxyMode:                  s.defaultCodexTicketHarvestProxyMode(""),
+		SettingKeyOpenAICodexTicketHarvestProxyID:                    "0",
 		SettingKeyProxyPoolMaxAccounts:                               "0",
 		SettingKeyClaudeCodeClientVersion:                            "",
 		SettingKeyClaudeCodeClientVersionSynced:                      "",
@@ -906,6 +907,10 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAICodexTicketHarvestProxyMode = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyMode])
 	if result.OpenAICodexTicketHarvestProxyMode == "" {
 		result.OpenAICodexTicketHarvestProxyMode = s.defaultCodexTicketHarvestProxyMode(result.OpenAICodexTicketHarvestProxyURL)
+	}
+	result.OpenAICodexTicketHarvestProxyID, _ = strconv.ParseInt(strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyID]), 10, 64)
+	if result.OpenAICodexTicketHarvestProxyID < 0 {
+		result.OpenAICodexTicketHarvestProxyID = 0
 	}
 	result.ProxyPoolMaxAccounts, _ = parseProxyPoolMaxAccounts(settings[SettingKeyProxyPoolMaxAccounts])
 	result.ClaudeCodeClientVersion = NormalizeClaudeCodeClientVersion(settings[SettingKeyClaudeCodeClientVersion])

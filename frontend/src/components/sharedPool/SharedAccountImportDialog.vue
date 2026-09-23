@@ -46,10 +46,9 @@
             <DailyCooldownSettings v-model="dailyCooldown" :disabled="importing" @update:model-value="dailyCooldownChanged = true; result = null" />
             <p class="input-hint">{{ t('sharedPool.dailyCooldownHint') }}</p>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <div><div class="flex items-center justify-between gap-2 text-sm font-medium"><span>{{ t('sharedPool.sharing') }}</span><Toggle v-model="defaults.enabled" :disabled="importing || !canConsent" :aria-label="t('sharedPool.sharing')" /></div><p class="input-hint">{{ t('sharedPool.sharingHint') }}</p></div>
+          <div class="space-y-4">
             <div><label class="flex items-center gap-2 text-sm font-medium"><input v-model="defaults.protection_enabled" type="checkbox" class="h-4 w-4 rounded" />{{ t('sharedPool.protection') }}</label><p class="input-hint">{{ t('sharedPool.protectionHint') }}</p></div>
-            <div class="flex items-start justify-between gap-4 sm:col-span-2">
+            <div class="flex items-start justify-between gap-4">
               <div><label for="shared-import-codex-ticket" class="input-label">{{ t('sharedPool.codexTicket') }}</label><p class="input-hint">{{ t('sharedPool.codexTicketHint') }}</p><p class="input-hint">{{ t('sharedPool.codexTicketRequiredHint') }}</p></div>
               <Toggle id="shared-import-codex-ticket" v-model="defaults.codex_ticket_enabled" :aria-label="t('sharedPool.codexTicket')" :disabled="importing" @update:model-value="result = null" />
             </div>
@@ -90,8 +89,7 @@ const props = defineProps<{ show: boolean; config: SharedConfig; initialDefaults
 const emit = defineEmits<{ close: []; imported: [] }>()
 const { t } = useI18n()
 const app = useAppStore()
-const defaults = reactive<SharedImportDefaults & { codex_ticket_enabled: boolean }>({ name: '', concurrency: 1, proxy_url: '', enabled: false, protection_enabled: true, ...props.initialDefaults, codex_ticket_enabled: props.initialDefaults?.codex_ticket_enabled ?? true })
-defaults.enabled = props.initialDefaults?.enabled === true && props.initialDefaults?.dispatch_consent === true
+const defaults = reactive<SharedImportDefaults & { codex_ticket_enabled: boolean }>({ name: '', concurrency: 1, proxy_url: '', protection_enabled: true, ...props.initialDefaults, enabled: true, codex_ticket_enabled: props.initialDefaults?.codex_ticket_enabled ?? true })
 const canConsent = computed(() => hasSettlementPolicy(props.config))
 const dailyCooldown = ref(normalizeDailyCooldown(props.initialDefaults?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
@@ -144,14 +142,14 @@ async function getSources(): Promise<SharedImportInput['sources']> {
 }
 async function submit() {
   if (importing.value) return
-  if (defaults.enabled && !canConsent.value) { error.value = t('sharedPool.settlementRequired'); return }
+  if (!canConsent.value) { error.value = t('sharedPool.settlementRequired'); return }
   const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError) { error.value = t(cooldownError); result.value = null; return }
   importing.value = true; error.value = ''; result.value = null
   try {
     const cooldown = dailyCooldownChanged.value || props.initialDefaults?.daily_cooldown !== undefined
       ? { daily_cooldown: withDailyCooldownExtra(undefined, dailyCooldown.value).daily_cooldown } : {}
-    const input: SharedImportInput = { sources: await getSources(), defaults: { ...defaults, dispatch_consent: defaults.enabled, ...cooldown, name: defaults.name?.trim() } }
+    const input: SharedImportInput = { sources: await getSources(), defaults: { ...defaults, enabled: true, dispatch_consent: true, ...cooldown, name: defaults.name?.trim() } }
     const payload = JSON.stringify(input)
     // 网络失败重试沿用同一请求号；凭证只在弹窗内存中保留。
     if (payload !== lastPayload) {

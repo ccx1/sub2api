@@ -414,6 +414,9 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateProxyRegionExtra(accountExtra); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeCodexTicketProxyUpdate(accountExtra, nil)
 	if err != nil {
 		return nil, err
@@ -559,6 +562,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
+	if err := s.prepareAccountCreationOptions(ctx, account, input); err != nil {
+		return nil, err
+	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -599,6 +605,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	ctx = WithAccountProxyRegionWrite(ctx, input.Extra)
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -608,6 +615,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		update := *input
 		update.Extra = mergeRandomProxyRoutingExtra(input.Extra, account.Extra)
 		input = &update
+		if err := ValidateProxyRegionExtra(input.Extra); err != nil {
+			return nil, err
+		}
 		if err := ValidateRandomProxyPoolExtra(input.Extra); err != nil {
 			return nil, err
 		}
@@ -989,6 +999,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	ctx = WithAccountProxyRegionWrite(ctx, updates)
 	routingUpdates := maps.Clone(updates)
 	if hasRandomProxyGroupUpdates(updates) {
 		account, err := s.accountRepo.GetByID(ctx, id)
@@ -1019,6 +1030,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 		return err
 	}
 	updates = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(updates, nil))
+	if err := normalizeCodexTicketCredentialExtra(updates); err != nil {
+		return err
+	}
 	updates = explicitRandomProxyRoutingPatch(updates, routingUpdates)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
@@ -1048,6 +1062,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	ctx = WithAccountProxyRegionWrite(ctx, input.Extra)
 	routingUpdates := maps.Clone(input.Extra)
 	if err := ValidateRandomProxyPoolExtra(input.Extra); err != nil {
 		return nil, err
@@ -1060,6 +1075,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = NormalizeProxyModeExtra(MergeOpenAICodexTicketExtra(input.Extra, nil))
+	if err := normalizeCodexTicketCredentialExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	input.Extra = explicitRandomProxyRoutingPatch(input.Extra, routingUpdates)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)

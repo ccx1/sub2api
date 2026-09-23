@@ -56,6 +56,7 @@ func TestCodexTicketWSPrewarmObservesCompleteResponse(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			s, account, receipt := codexTicketWSFixture(t)
 			s.cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = true
+			writes := captureTicketInvalidations(s)
 			inner := &openAIWSCaptureConn{}
 			if scenario.prefix != "" {
 				inner.events = append(inner.events, []byte(scenario.prefix))
@@ -75,12 +76,17 @@ func TestCodexTicketWSPrewarmObservesCompleteResponse(t *testing.T) {
 			require.Equal(t, false, inner.writes[0]["generate"])
 			if scenario.reject {
 				require.ErrorIs(t, err, ErrOpenAICodexTicketUnavailable)
+				event := awaitTicketInvalidation(t, writes).Invalidation
+				require.Equal(t, "websocket_prewarm", event.Source)
+				require.Equal(t, "response_model_mismatch", event.Reason)
+				require.Equal(t, []string{"gpt-other"}, event.ReportedModels)
 				require.False(t, lease.IsPrewarmed())
 				require.Nil(t, s.lookupOpenAICodexTicket(account, "gpt-6-astra"))
 				require.Error(t, lease.WriteJSONWithContextTimeout(context.Background(), payload, time.Second), "撤票后不能向旧握手写入本次业务")
 				return
 			}
 			require.NoError(t, err)
+			require.Empty(t, writes, "successful or incomplete prewarm must not record revocation")
 			require.True(t, lease.IsPrewarmed())
 			require.NotNil(t, s.lookupOpenAICodexTicket(account, "gpt-6-astra"))
 		})

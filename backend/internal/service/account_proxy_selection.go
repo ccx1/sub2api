@@ -90,7 +90,14 @@ func ResolveRandomProxy(ctx context.Context, account *Account, selector RandomPr
 	// direct egress.
 	account.ProxyID = nil
 	account.Proxy = nil
+	country, err := account.ProxyRegionCountry()
+	if err != nil {
+		return err
+	}
 	if selector == nil {
+		if country != "" {
+			return errors.New("proxy region selection requires an available proxy pool")
+		}
 		if account.RandomProxyEmptyPoolPolicy() == RandomProxyEmptyPoolPolicyDirect {
 			return nil
 		}
@@ -116,8 +123,14 @@ func ResolveRandomProxy(ctx context.Context, account *Account, selector RandomPr
 // existing dependency is an AccountRepository interface. Implementations that
 // support random proxy selection opt in via the optional interface above.
 func ResolveRandomProxyFromSource(ctx context.Context, account *Account, source any) error {
-	if account == nil || !account.IsRandomProxy() {
+	if account == nil {
 		return nil
+	}
+	if !account.IsRandomProxy() {
+		if err := resolveFixedProxyTransportFallback(ctx, account, source); err != nil {
+			return err
+		}
+		return validateFixedAccountProxyRegion(ctx, account, source)
 	}
 	selector, _ := source.(RandomProxySelector)
 	return ResolveRandomProxy(ctx, account, selector)

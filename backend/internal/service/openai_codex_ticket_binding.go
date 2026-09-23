@@ -26,7 +26,7 @@ func (t *openAICodexTicket) accountCompatible(account *Account) bool {
 	if t == nil || account == nil {
 		return false
 	}
-	if t.Verified && !account.IsRandomProxy() && t.Egress != "" {
+	if (t.Verified || t.VerificationSkipped) && !account.IsRandomProxy() && t.Egress != "" {
 		if account.ProxyID != nil && account.Proxy == nil || t.Egress != openAICodexTicketEgress(resolveAccountProxyURL(account)) {
 			return false
 		}

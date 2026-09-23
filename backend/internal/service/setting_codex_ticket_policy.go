@@ -21,6 +21,18 @@ type cachedCodexTicketSettings struct {
 }
 
 func cloneCodexTicketSettings(cfg config.OpenAICodexTicketConfig) config.OpenAICodexTicketConfig {
+	if cfg.CookieRefreshBeforeSeconds != nil {
+		refresh := *cfg.CookieRefreshBeforeSeconds
+		cfg.CookieRefreshBeforeSeconds = &refresh
+	}
+	if cfg.VerifyBusiness != nil {
+		enabled := *cfg.VerifyBusiness
+		cfg.VerifyBusiness = &enabled
+	}
+	if cfg.Protection != nil {
+		protection := cfg.TicketProtection()
+		cfg.Protection = &protection
+	}
 	cfg.Models = slices.Clone(cfg.Models)
 	cfg.RejectedLengths = slices.Clone(cfg.RejectedLengths)
 	cfg.RetryBackoffSeconds = slices.Clone(cfg.RetryBackoffSeconds)
@@ -98,7 +110,11 @@ func (s *SettingService) UpdateCodexTicketSettings(ctx context.Context, cfg conf
 	defer s.codexTicketPublishMu.Unlock()
 	s.codexTicketSettingsMu.Lock()
 	defer s.codexTicketSettingsMu.Unlock()
-	if err := s.settingRepo.SetMultiple(ctx, map[string]string{SettingKeyCodexTicketPolicy: string(raw), SettingKeyOpenAICodexTicketEnabled: strconv.FormatBool(cfg.Enabled)}); err != nil {
+	values := map[string]string{SettingKeyCodexTicketPolicy: string(raw), SettingKeyOpenAICodexTicketEnabled: strconv.FormatBool(cfg.Enabled)}
+	if err := s.recordCodexTicketProtectionDisable(ctx, cfg, values); err != nil {
+		return cfg, err
+	}
+	if err := s.settingRepo.SetMultiple(ctx, values); err != nil {
 		return cfg, err
 	}
 	cfg.HarvestProxyURL = s.defaultCodexTicketSettings().HarvestProxyURL

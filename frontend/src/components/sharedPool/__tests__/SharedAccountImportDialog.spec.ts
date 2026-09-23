@@ -28,12 +28,23 @@ async function choose(wrapper: ReturnType<typeof render>, files: File[]) {
 describe('shared account import', () => {
   beforeEach(() => { vi.clearAllMocks(); importAccounts.mockResolvedValue(response) })
 
-  it('requires explicit dispatch consent even when old defaults say enabled', async () => {
-    const wrapper = render({ enabled: true, concurrency: 1, protection_enabled: true })
-    const sharing = wrapper.get('[role="switch"][aria-label="sharedPool.sharing"]')
-    expect(sharing.attributes('aria-checked')).toBe('false')
-    await sharing.trigger('click')
+  it.each([undefined, false, true])('automatically enables scheduling without a switch when inherited enabled is %s', async enabled => {
+    const wrapper = render(enabled === undefined ? undefined : { enabled, dispatch_consent: false, concurrency: 1, protection_enabled: true })
+    expect(wrapper.find('[role="switch"][aria-label="sharedPool.sharing"]').exists()).toBe(false)
     await wrapper.get('textarea').setValue('{}')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(importAccounts).toHaveBeenCalledWith(expect.objectContaining({ defaults: expect.objectContaining({ enabled: true, dispatch_consent: true }) }), expect.any(String))
+    wrapper.unmount()
+  })
+
+  it('blocks import without settlement terms and accepts a zero multiplier', async () => {
+    const wrapper = render()
+    await wrapper.get('textarea').setValue('{}')
+    await wrapper.setProps({ config: { ...config, platforms: [...config.platforms], settlement_multiplier: undefined } })
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(importAccounts).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('sharedPool.settlementRequired')
+    await wrapper.setProps({ config: { ...config, platforms: [...config.platforms], settlement_multiplier: 0 } })
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(importAccounts).toHaveBeenCalledWith(expect.objectContaining({ defaults: expect.objectContaining({ enabled: true, dispatch_consent: true }) }), expect.any(String))
     wrapper.unmount()
@@ -48,7 +59,7 @@ describe('shared account import', () => {
     await flushPromises()
     expect(importAccounts).toHaveBeenCalledWith({
       sources: [{ name: 'export.json', content: '{"accounts":[]}' }, { name: 'auth.json', content: '{"tokens":{}}' }],
-      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: false, dispatch_consent: false, protection_enabled: true, codex_ticket_enabled: true }
+      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true }
     }, expect.stringMatching(/^shared-import-/))
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)

@@ -221,7 +221,7 @@ func TestEnrichTokenInfo_WorkspaceEntitlementDoesNotOverridePersonalSubscription
 }
 
 // 单个人账号（poid == chatgpt_account_id）是绝大多数情况，行为必须保持不变：
-// 直接用 accounts/check 的 entitlement，不额外打订阅端点。
+// 到期时间仍取 accounts/check；额外订阅查询只补齐账单资料。
 func TestEnrichTokenInfo_KeepsEntitlementWhenAccountMatches(t *testing.T) {
 	const personalAccountID = "personal-account-a"
 	entitlementExpiresAt := time.Now().Add(720 * time.Hour).UTC().Format(time.RFC3339)
@@ -257,7 +257,7 @@ func TestEnrichTokenInfo_KeepsEntitlementWhenAccountMatches(t *testing.T) {
 	svc.enrichTokenInfo(context.Background(), tokenInfo, "")
 
 	require.Equal(t, entitlementExpiresAt, tokenInfo.SubscriptionExpiresAt)
-	require.Zero(t, subscriptionCalls, "账号一致时不应额外请求订阅端点")
+	require.Equal(t, 1, subscriptionCalls, "订阅查询补齐账单资料，不覆盖已有到期时间")
 }
 
 // 反向不变式：套餐本身就取自 accounts/check（JWT 没有 plan_type）时，到期时间必须
@@ -299,7 +299,7 @@ func TestEnrichTokenInfo_WorkspacePlanTypeKeepsItsOwnExpiry(t *testing.T) {
 	require.Equal(t, "self_serve_business_usage_based", tokenInfo.PlanType)
 	require.Equal(t, workspaceExpiresAt, tokenInfo.SubscriptionExpiresAt,
 		"套餐与到期时间必须来自同一条记录")
-	require.Zero(t, subscriptionCalls)
+	require.Equal(t, 1, subscriptionCalls, "个人账单查询不能覆盖工作区套餐的到期时间")
 }
 
 type chatGPTBackendTestServerConfig struct {

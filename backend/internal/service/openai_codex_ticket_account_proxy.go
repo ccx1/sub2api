@@ -8,10 +8,15 @@ import (
 
 // 跟随账号只读取当前真实出口；过期代理由既有 sweep 完成账号改投后再采集。
 func (s *OpenAIGatewayService) resolveCodexTicketAccountProxy(ctx context.Context, account *Account) (openAICodexTicketProxy, error) {
-	result := openAICodexTicketProxy{policy: codexTicketProxyPolicy{mode: CodexTicketProxyModeAccount}}
+	result := openAICodexTicketProxy{policy: codexTicketProxyPolicy{mode: CodexTicketProxyModeAccount, strategy: account.CodexTicketProxyStrategy()}}
 	if account == nil || ValidateCodexTicketProxyExtra(account.Extra) != nil {
 		return result, errors.New("invalid codex ticket account proxy settings")
 	}
+	country, err := account.ProxyRegionCountry()
+	if err != nil {
+		return result, err
+	}
+	result.policy.countryCode = country
 	resolved := cloneOpenAICodexTicketAccount(account)
 	if resolved.IsRandomProxy() {
 		if err := ResolveRandomProxyFromSource(ctx, resolved, s.accountRepo); err != nil {
@@ -31,6 +36,11 @@ func (s *OpenAIGatewayService) resolveCodexTicketAccountProxy(ctx context.Contex
 			return result, err
 		}
 		resolved.Proxy = proxy
+	}
+	if !resolved.IsRandomProxy() {
+		if err := ResolveRandomProxyFromSource(ctx, resolved, s.accountRepo); err != nil {
+			return result, err
+		}
 	}
 	if resolved.ProxyID == nil {
 		return result, nil

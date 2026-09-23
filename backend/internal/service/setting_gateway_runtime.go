@@ -434,24 +434,34 @@ func (s *SettingService) InvalidateOpenAICodexTicketHarvestProxyCache() {
 	s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{expiresAt: 0})
 }
 
-// 模式与地址来自同一受锁快照，防止旧 URL 在途读取跨过保存失效后重新污染采集配置。
-func (s *SettingService) GetOpenAICodexTicketHarvestProxySettings(ctx context.Context) (string, string, error) {
+// 模式、地址和托管代理 ID 来自同一受锁快照，防止旧值在保存失效后重新污染采集配置。
+func (s *SettingService) GetOpenAICodexTicketHarvestProxySettingsWithID(ctx context.Context) (string, string, int64, error) {
 	values, err := s.getProxyPoolSettingValues(ctx)
 	if err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
 	proxyURL := strings.TrimSpace(values[SettingKeyOpenAICodexTicketHarvestProxyURL])
 	mode, err := s.resolveCodexTicketHarvestProxyMode(values[SettingKeyOpenAICodexTicketHarvestProxyMode], proxyURL)
 	if err != nil || mode != OpenAICodexTicketHarvestProxyModeFixed {
-		return mode, "", err
+		return mode, "", 0, err
+	}
+	proxyID, parseErr := strconv.ParseInt(strings.TrimSpace(values[SettingKeyOpenAICodexTicketHarvestProxyID]), 10, 64)
+	if parseErr == nil && proxyID > 0 {
+		return mode, "", proxyID, nil
 	}
 	if proxyURL == "" && s.cfg != nil {
 		proxyURL = strings.TrimSpace(s.cfg.Gateway.OpenAICodexTicket.HarvestProxyURL)
 	}
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(proxyURL); err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
-	return mode, proxyURL, nil
+	return mode, proxyURL, 0, nil
+}
+
+// GetOpenAICodexTicketHarvestProxySettings 保留旧调用方的二元返回契约。
+func (s *SettingService) GetOpenAICodexTicketHarvestProxySettings(ctx context.Context) (string, string, error) {
+	mode, proxyURL, _, err := s.GetOpenAICodexTicketHarvestProxySettingsWithID(ctx)
+	return mode, proxyURL, err
 }
 
 // GetOpenAICodexUserAgent 返回 OpenAI Codex 上游请求使用的 User-Agent。

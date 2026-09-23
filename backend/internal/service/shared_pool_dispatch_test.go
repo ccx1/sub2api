@@ -62,13 +62,13 @@ func TestSharedDispatchAssignmentDoesNotExpandLegacyScope(t *testing.T) {
 	g := sharedTierGroup(4, PlatformOpenAI)
 	g.IsSharedPool = false
 	s := &SharedPoolService{groups: sharedTierGroups{items: map[int64]*Group{4: g}}}
-	cfg := &SharedPoolSettings{DefaultGroupIDs: map[string]int64{PlatformOpenAI: 4}}
+	cfg := &SharedPoolSettings{DefaultGroupIDs: SharedPoolDefaultGroupIDs{PlatformOpenAI: {4}}}
 	require.NoError(t, s.validateSharedGroupSettings(context.Background(), cfg))
 	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	_, err := s.initialSharedGroup(context.Background(), cfg, a)
+	_, err := s.initialSharedGroups(context.Background(), cfg, a)
 	require.Error(t, err)
 	a.Extra = map[string]any{SharedPoolDispatchConsentKey: true}
-	id, err := s.initialSharedGroup(context.Background(), cfg, a)
+	ids, err := s.initialSharedGroups(context.Background(), cfg, a)
 	require.NoError(t, err)
-	require.Equal(t, int64(4), id)
+	require.Equal(t, []int64{4}, ids)
 }

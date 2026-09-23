@@ -36,18 +36,20 @@ type DataPayload struct {
 }
 
 type DataProxy struct {
-	ProxyKey        string `json:"proxy_key"`
-	Name            string `json:"name"`
-	Protocol        string `json:"protocol"`
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	Username        string `json:"username,omitempty"`
-	Password        string `json:"password,omitempty"`
-	Status          string `json:"status"`
-	ExpiresAt       *int64 `json:"expires_at,omitempty"`        // unix 秒，与 DataAccount.ExpiresAt 风格一致
-	FallbackMode    string `json:"fallback_mode,omitempty"`     // none/direct/proxy
-	BackupProxyName string `json:"backup_proxy_name,omitempty"` // 备用代理 name（跨实例按 name 反查）
-	ExpiryWarnDays  int    `json:"expiry_warn_days,omitempty"`
+	ProxyKey        string  `json:"proxy_key"`
+	GroupID         *int64  `json:"group_id,omitempty"`
+	CountryCode     *string `json:"country_code,omitempty"`
+	Name            string  `json:"name"`
+	Protocol        string  `json:"protocol"`
+	Host            string  `json:"host"`
+	Port            int     `json:"port"`
+	Username        string  `json:"username,omitempty"`
+	Password        string  `json:"password,omitempty"`
+	Status          string  `json:"status"`
+	ExpiresAt       *int64  `json:"expires_at,omitempty"`        // unix 秒，与 DataAccount.ExpiresAt 风格一致
+	FallbackMode    string  `json:"fallback_mode,omitempty"`     // none/direct/proxy
+	BackupProxyName string  `json:"backup_proxy_name,omitempty"` // 备用代理 name（跨实例按 name 反查）
+	ExpiryWarnDays  int     `json:"expiry_warn_days,omitempty"`
 }
 
 // DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的脱敏路径，
@@ -75,6 +77,8 @@ type DataAccount struct {
 type DataImportRequest struct {
 	Data                 DataPayload `json:"data"`
 	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	ProtectionEnabled    *bool       `json:"protection_enabled"`
+	CodexTicketEnabled   *bool       `json:"codex_ticket_enabled"`
 }
 
 type DataImportResult struct {
@@ -83,6 +87,7 @@ type DataImportResult struct {
 	ProxyFailed    int               `json:"proxy_failed"`
 	AccountCreated int               `json:"account_created"`
 	AccountFailed  int               `json:"account_failed"`
+	AccountIDs     []int64           `json:"account_ids"`
 	Errors         []DataImportError `json:"errors,omitempty"`
 }
 
@@ -169,8 +174,14 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		if p.BackupProxyID != nil {
 			backupProxyName = proxyNameByID[*p.BackupProxyID]
 		}
+		var countryCode *string
+		if p.CountryCode != "" {
+			countryCode = &p.CountryCode
+		}
 		dataProxies = append(dataProxies, DataProxy{
 			ProxyKey:        key,
+			GroupID:         p.GroupID,
+			CountryCode:     countryCode,
 			Name:            p.Name,
 			Protocol:        p.Protocol,
 			Host:            p.Host,
@@ -249,7 +260,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 	}
 
 	dataPayload := req.Data
-	result := DataImportResult{}
+	result := DataImportResult{AccountIDs: []int64{}}
 
 	existingProxies, err := h.listAllProxies(ctx)
 	if err != nil {
@@ -289,38 +300,13 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			proxyKeyToID[key] = existingID
 			result.ProxyReused++
 			if normalizedStatus != "" {
-				if proxy, getErr := h.adminService.GetProxy(ctx, existingID); getErr == nil && proxy != nil && proxy.Status != normalizedStatus {
-					// 同步 status 时传入完整字段，避免零值覆盖已存在代理的有效期/fallback 配置。
-					var existingExpiresAt *time.Time
-					if item.ExpiresAt != nil {
-						t := time.Unix(*item.ExpiresAt, 0).UTC()
-						existingExpiresAt = &t
-					}
-					existingFallbackMode := item.FallbackMode
-					if existingFallbackMode == "" {
-						existingFallbackMode = service.FallbackModeNone
-					}
-					var existingBackupProxyID *int64
-					if item.BackupProxyName != "" {
-						if bid, ok := proxyNameToID[item.BackupProxyName]; ok {
-							existingBackupProxyID = &bid
-						}
-					}
-					_, _ = h.adminService.UpdateProxy(ctx, existingID, &service.UpdateProxyInput{
-						Status:         normalizedStatus,
-						ExpiresAt:      existingExpiresAt,
-						ClearExpiresAt: existingExpiresAt == nil,
-						FallbackMode:   existingFallbackMode,
-						BackupProxyID:  existingBackupProxyID,
-						ClearBackupID:  existingBackupProxyID == nil,
-						ExpiryWarnDays: &item.ExpiryWarnDays,
-						Name:           proxy.Name,
-						Protocol:       proxy.Protocol,
-						Host:           proxy.Host,
-						Port:           proxy.Port,
-						Username:       &proxy.Username,
-						Password:       &proxy.Password,
-					})
+				if proxy, getErr := h.adminService.GetProxy(ctx, existingID); getErr == nil && proxy != nil && (proxy.Status != normalizedStatus || item.CountryCode != nil || item.GroupID != nil) {
+					_, _ = h.adminService.UpdateProxy(ctx, existingID, importedProxyUpdateInput(item, proxy, normalizedStatus, proxyNameToID))
+				}
+			}
+			if normalizedStatus == "" && (item.CountryCode != nil || item.GroupID != nil) {
+				if proxy, getErr := h.adminService.GetProxy(ctx, existingID); getErr == nil && proxy != nil {
+					_, _ = h.adminService.UpdateProxy(ctx, existingID, importedProxyUpdateInput(item, proxy, "", proxyNameToID))
 				}
 			}
 			continue
@@ -352,6 +338,8 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 
 		created, createErr := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
+			GroupID:        proxyImportGroupID(item.GroupID),
+			CountryCode:    optionalStringValue(item.CountryCode),
 			Name:           defaultProxyName(item.Name),
 			Protocol:       item.Protocol,
 			Host:           item.Host,
@@ -383,19 +371,23 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if normalizedStatus != "" && normalizedStatus != created.Status {
 			// 新建后同步 status 时，传入完整字段，避免零值覆盖刚创建的有效期/fallback 配置。
 			_, _ = h.adminService.UpdateProxy(ctx, created.ID, &service.UpdateProxyInput{
-				Status:         normalizedStatus,
-				ExpiresAt:      expiresAt,
-				ClearExpiresAt: expiresAt == nil,
-				FallbackMode:   fallbackMode,
-				BackupProxyID:  backupProxyID,
-				ClearBackupID:  backupProxyID == nil,
-				ExpiryWarnDays: &item.ExpiryWarnDays,
-				Name:           created.Name,
-				Protocol:       created.Protocol,
-				Host:           created.Host,
-				Port:           created.Port,
-				Username:       &created.Username,
-				Password:       &created.Password,
+				GroupID:          item.GroupID,
+				ClearGroupID:     item.GroupID != nil && *item.GroupID == 0,
+				CountryCode:      item.CountryCode,
+				ClearCountryCode: item.CountryCode != nil && strings.TrimSpace(*item.CountryCode) == "",
+				Status:           normalizedStatus,
+				ExpiresAt:        expiresAt,
+				ClearExpiresAt:   expiresAt == nil,
+				FallbackMode:     fallbackMode,
+				BackupProxyID:    backupProxyID,
+				ClearBackupID:    backupProxyID == nil,
+				ExpiryWarnDays:   &item.ExpiryWarnDays,
+				Name:             created.Name,
+				Protocol:         created.Protocol,
+				Host:             created.Host,
+				Port:             created.Port,
+				Username:         &created.Username,
+				Password:         &created.Password,
 			})
 		}
 	}
@@ -448,6 +440,8 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,
+			ProtectionEnabled:    req.ProtectionEnabled,
+			CodexTicketEnabled:   req.CodexTicketEnabled,
 		}
 
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
@@ -466,6 +460,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
+		result.AccountIDs = append(result.AccountIDs, created.ID)
 	}
 
 	// 异步设置 Antigravity 隐私，避免大量导入时阻塞请求
@@ -656,6 +651,14 @@ func validateDataHeader(payload DataPayload) error {
 }
 
 func validateDataProxy(item DataProxy) error {
+	if item.GroupID != nil && *item.GroupID < 0 {
+		return errors.New("proxy group_id is invalid")
+	}
+	if item.CountryCode != nil {
+		if _, err := service.NormalizeProxyCountryCode(*item.CountryCode); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(item.Protocol) == "" {
 		return errors.New("proxy protocol is required")
 	}
@@ -669,6 +672,14 @@ func validateDataProxy(item DataProxy) error {
 	case "http", "https", "socks5", "socks5h":
 	default:
 		return fmt.Errorf("proxy protocol is invalid: %s", item.Protocol)
+	}
+	if item.GroupID != nil && *item.GroupID < 0 {
+		return errors.New("proxy group_id is invalid")
+	}
+	if item.CountryCode != nil {
+		if _, err := service.NormalizeProxyCountryCode(*item.CountryCode); err != nil {
+			return err
+		}
 	}
 	if item.Status != "" {
 		normalizedStatus := normalizeProxyStatus(item.Status)
@@ -718,6 +729,13 @@ func defaultProxyName(name string) string {
 		return "imported-proxy"
 	}
 	return name
+}
+
+func proxyImportGroupID(value *int64) *int64 {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	return value
 }
 
 // enrichCredentialsFromIDToken performs best-effort extraction of user info fields

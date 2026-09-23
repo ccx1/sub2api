@@ -28,6 +28,7 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 // CreateProxyRequest represents create proxy request
 type CreateProxyRequest struct {
 	GroupID        *int64 `json:"group_id" binding:"omitempty,gt=0"`
+	CountryCode    string `json:"country_code"`
 	Name           string `json:"name" binding:"required"`
 	Protocol       string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
 	Host           string `json:"host" binding:"required"`
@@ -43,6 +44,7 @@ type CreateProxyRequest struct {
 // UpdateProxyRequest represents update proxy request
 type UpdateProxyRequest struct {
 	GroupID        dto.NullableInt64Field `json:"group_id"`
+	CountryCode    *string                `json:"country_code"`
 	Name           string                 `json:"name"`
 	Protocol       string                 `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
 	Host           string                 `json:"host"`
@@ -160,6 +162,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 		}
 		proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
 			GroupID:        req.GroupID,
+			CountryCode:    strings.TrimSpace(req.CountryCode),
 			Name:           strings.TrimSpace(req.Name),
 			Protocol:       strings.TrimSpace(req.Protocol),
 			Host:           strings.TrimSpace(req.Host),
@@ -205,21 +208,23 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		*req.Password = strings.TrimSpace(*req.Password)
 	}
 	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
-		GroupID:        req.GroupID.Value,
-		ClearGroupID:   req.GroupID.Set && req.GroupID.Value == nil,
-		Name:           strings.TrimSpace(req.Name),
-		Protocol:       strings.TrimSpace(req.Protocol),
-		Host:           strings.TrimSpace(req.Host),
-		Port:           req.Port,
-		Username:       req.Username,
-		Password:       req.Password,
-		Status:         strings.TrimSpace(req.Status),
-		ExpiresAt:      expiresAt,
-		ClearExpiresAt: req.ExpiresAt.Set && expiresAt == nil,
-		FallbackMode:   strings.TrimSpace(req.FallbackMode),
-		BackupProxyID:  req.BackupProxyID.Value,
-		ClearBackupID:  req.BackupProxyID.Set && req.BackupProxyID.Value == nil,
-		ExpiryWarnDays: req.ExpiryWarnDays,
+		GroupID:          req.GroupID.Value,
+		ClearGroupID:     req.GroupID.Set && req.GroupID.Value == nil,
+		CountryCode:      req.CountryCode,
+		ClearCountryCode: req.CountryCode != nil && strings.TrimSpace(*req.CountryCode) == "",
+		Name:             strings.TrimSpace(req.Name),
+		Protocol:         strings.TrimSpace(req.Protocol),
+		Host:             strings.TrimSpace(req.Host),
+		Port:             req.Port,
+		Username:         req.Username,
+		Password:         req.Password,
+		Status:           strings.TrimSpace(req.Status),
+		ExpiresAt:        expiresAt,
+		ClearExpiresAt:   req.ExpiresAt.Set && expiresAt == nil,
+		FallbackMode:     strings.TrimSpace(req.FallbackMode),
+		BackupProxyID:    req.BackupProxyID.Value,
+		ClearBackupID:    req.BackupProxyID.Set && req.BackupProxyID.Value == nil,
+		ExpiryWarnDays:   req.ExpiryWarnDays,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -349,16 +354,45 @@ func (h *ProxyHandler) GetProxyAccounts(c *gin.Context) {
 
 // BatchCreateProxyItem represents a single proxy in batch create request
 type BatchCreateProxyItem struct {
-	Protocol string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
-	Host     string `json:"host" binding:"required"`
-	Port     int    `json:"port" binding:"required,min=1,max=65535"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	GroupID     *int64 `json:"group_id" binding:"omitempty,gt=0"`
+	CountryCode string `json:"country_code"`
+	Protocol    string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
+	Host        string `json:"host" binding:"required"`
+	Port        int    `json:"port" binding:"required,min=1,max=65535"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	// 上限为 9999-12-31 23:59:59 UTC，确保日期可序列化为 JSON。
+	ExpiresAt      *int64 `json:"expires_at" binding:"omitempty,max=253402300799"`
+	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID  *int64 `json:"backup_proxy_id" binding:"required_if=FallbackMode proxy,omitempty,gt=0"`
+	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // BatchCreateRequest represents batch create proxies request
 type BatchCreateRequest struct {
-	Proxies []BatchCreateProxyItem `json:"proxies" binding:"required,min=1"`
+	Proxies []BatchCreateProxyItem `json:"proxies" binding:"required,min=1,dive"`
+}
+
+func (item BatchCreateProxyItem) createInput() *service.CreateProxyInput {
+	var expiresAt *time.Time
+	if item.ExpiresAt != nil && *item.ExpiresAt > 0 {
+		t := time.Unix(*item.ExpiresAt, 0).UTC()
+		expiresAt = &t
+	}
+	return &service.CreateProxyInput{
+		GroupID:        item.GroupID,
+		CountryCode:    item.CountryCode,
+		Name:           "default",
+		Protocol:       strings.TrimSpace(item.Protocol),
+		Host:           strings.TrimSpace(item.Host),
+		Port:           item.Port,
+		Username:       strings.TrimSpace(item.Username),
+		Password:       strings.TrimSpace(item.Password),
+		ExpiresAt:      expiresAt,
+		FallbackMode:   strings.TrimSpace(item.FallbackMode),
+		BackupProxyID:  item.BackupProxyID,
+		ExpiryWarnDays: item.ExpiryWarnDays,
+	}
 }
 
 // BatchCreate handles batch creating proxies
@@ -374,14 +408,10 @@ func (h *ProxyHandler) BatchCreate(c *gin.Context) {
 	skipped := 0
 
 	for _, item := range req.Proxies {
-		// Trim all string fields
-		host := strings.TrimSpace(item.Host)
-		protocol := strings.TrimSpace(item.Protocol)
-		username := strings.TrimSpace(item.Username)
-		password := strings.TrimSpace(item.Password)
+		input := item.createInput()
 
 		// Check for duplicates (same host, port, username, password)
-		exists, err := h.adminService.CheckProxyExists(c.Request.Context(), host, item.Port, username, password)
+		exists, err := h.adminService.CheckProxyExists(c.Request.Context(), input.Host, input.Port, input.Username, input.Password)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -393,14 +423,7 @@ func (h *ProxyHandler) BatchCreate(c *gin.Context) {
 		}
 
 		// Create proxy with default name
-		_, err = h.adminService.CreateProxy(c.Request.Context(), &service.CreateProxyInput{
-			Name:     "default",
-			Protocol: protocol,
-			Host:     host,
-			Port:     item.Port,
-			Username: username,
-			Password: password,
-		})
+		_, err = h.adminService.CreateProxy(c.Request.Context(), input)
 		if err != nil {
 			// If creation fails due to duplicate, count as skipped
 			skipped++

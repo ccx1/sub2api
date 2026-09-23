@@ -74,12 +74,26 @@ func (r *accountRepository) DisableRandomProxyAccountIfUnavailable(ctx context.C
 	if r.proxyPool != nil {
 		return r.disableAccountWhenBalancedPoolUnavailable(ctx, id)
 	}
-	_, err := r.sql.ExecContext(ctx, `WITH disabled AS (
+	current, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current != nil {
+		country, err := current.ProxyRegionCountry()
+		if err != nil {
+			return err
+		}
+		if country != "" {
+			return errors.New("cannot disable a region-restricted account without the proxy pool allocator")
+		}
+	}
+	_, err = r.sql.ExecContext(ctx, `WITH disabled AS (
  UPDATE accounts a SET status='disabled', schedulable=FALSE,
  error_message='random proxy pool has no active proxies', proxy_id=NULL, updated_at=NOW()
  WHERE a.id=$1 AND a.deleted_at IS NULL AND a.status <> 'disabled'
  AND lower(btrim(a.extra->>'proxy_mode'))='random'
  AND lower(btrim(a.extra->>'random_proxy_empty_pool_policy'))='disable'
+ AND COALESCE(NULLIF(btrim(a.extra->>'proxy_region_mode'), ''), 'off')='off'
  AND NOT EXISTS (
   SELECT 1 FROM proxies p WHERE p.deleted_at IS NULL AND p.status='active'
   AND NOT EXISTS (SELECT 1 FROM shared_pool_proxies sp WHERE sp.proxy_id=p.id)

@@ -408,6 +408,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.PUT("/:id/codex-ticket", h.Admin.Account.SetCodexTicketEnabled)
 		accounts.GET("/:id/codex-ticket/history", h.Admin.Account.GetCodexTicketHistory)
+		accounts.GET("/:id/codex-ticket/runtime-status", h.Admin.Account.GetCodexTicketRuntimeStatus)
+		accounts.POST("/:id/codex-ticket/request-preview", h.Admin.Account.PreviewCodexTicketRequest)
 		accounts.POST("/:id/codex-ticket/retry", h.Admin.Account.RetryCodexTicket)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)

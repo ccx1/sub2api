@@ -18,6 +18,7 @@ type openAICodexTicketWSReceipt struct {
 	account *Account
 	ticket  openAICodexTicket
 	config  config.OpenAICodexTicketConfig
+	service *OpenAIGatewayService
 	once    sync.Once
 }
 
@@ -25,19 +26,39 @@ func codexTicketWSReceiptFromSnapshot(receipt *openAICodexTicketReceipt) *openAI
 	if receipt == nil {
 		return nil
 	}
-	return &openAICodexTicketWSReceipt{account: receipt.account, ticket: receipt.ticket, config: receipt.config}
+	return &openAICodexTicketWSReceipt{account: receipt.account, ticket: receipt.ticket, config: receipt.config, service: receipt.service}
 }
 
-func (r *openAICodexTicketWSReceipt) invalidate(ctx context.Context, s *OpenAIGatewayService) {
+func (r *openAICodexTicketWSReceipt) invalidate(ctx context.Context, s *OpenAIGatewayService, detail *CodexTicketInvalidation) {
 	if r != nil {
-		r.once.Do(func() { go s.invalidateOpenAICodexTicket(ctx, r.account, &r.ticket) })
+		r.once.Do(func() { go s.invalidateOpenAICodexTicket(ctx, r.account, &r.ticket, detail) })
 	}
 }
 
 func (r *openAICodexTicketWSReceipt) observeHandshake(ctx context.Context, s *OpenAIGatewayService, headers http.Header) {
+	if r == nil {
+		return
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, chatgptCodexURL, nil)
+	r.ticket.applyHeaders(req.Header)
+	// 握手已发送，观察响应时不能按当前时间过滤它实际携带的旧快照。
+	if r.ticket.usesCookies() {
+		req.Header.Del("Cookie")
+		for _, cookie := range r.ticket.Cookies {
+			if cookie != nil {
+				req.AddCookie(cookie)
+			}
+		}
+	}
+	s.captureCodexTicketCookieCandidate(&openAICodexTicketReceipt{account: r.account, ticket: r.ticket, config: r.config}, req, &http.Response{Header: headers})
+	// Handshake Set-Cookie is learned by the next scheduled revalidation. The
+	// current WebSocket keeps its immutable receipt and is never revoked in
+	// place by a cookie refresh.
 	state := extractOpenAICodexTurnState(headers)
-	if r != nil && codexTicketStateRejected(state, config.NormalizeOpenAICodexTicketConfig(r.config)) {
-		r.invalidate(ctx, s)
+	if !r.ticket.usesCookies() && codexTicketStateRejected(state, config.NormalizeOpenAICodexTicketConfig(r.config)) {
+		detail := codexTicketRejectedInvalidation("websocket_handshake", state)
+		detail.Signals = codexTicketSignalsFromHeaders(headers)
+		r.invalidate(ctx, s, detail)
 	}
 }
 
@@ -45,12 +66,25 @@ func (r *openAICodexTicketWSReceipt) watch(ctx context.Context, s *OpenAIGateway
 	if r == nil || model != r.ticket.Model {
 		return nil
 	}
-	return &openAICodexTicketWSWatchdog{observer: newOpenAICodexTicketResponseObserver(model), invalidate: func() { r.invalidate(ctx, s) }}
+	watchdog := &openAICodexTicketWSWatchdog{observer: newOpenAICodexTicketResponseObserver(model)}
+	watchdog.observer.diagnostics = &codexTicketResponseDiagnostics{wireStatus: http.StatusSwitchingProtocols}
+	watchdog.invalidate = func() {
+		r.invalidate(ctx, s, watchdog.invalidation("websocket"))
+	}
+	return watchdog
 }
 
 type openAICodexTicketWSWatchdog struct {
 	observer   *openAICodexTicketResponseObserver
 	invalidate func()
+}
+
+func (w *openAICodexTicketWSWatchdog) invalidation(source string) *CodexTicketInvalidation {
+	detail := newCodexTicketInvalidation("response_model_mismatch", source, w.observer.reportedModels)
+	if w.observer.diagnostics != nil {
+		detail.Signals = cloneCodexTicketSignals(w.observer.diagnostics.signals)
+	}
+	return detail
 }
 
 func (w *openAICodexTicketWSWatchdog) observe(payload []byte) {
@@ -82,14 +116,61 @@ func (r *openAICodexTicketWSReceipt) identity() openAICodexTicketWSIdentity {
 	if r == nil {
 		return openAICodexTicketWSIdentity{}
 	}
-	return openAICodexTicketWSIdentity{state: sha256.Sum256([]byte(r.ticket.State)),
+	return openAICodexTicketWSIdentity{state: sha256.Sum256([]byte(r.ticket.credentialIdentity())),
 		model: r.ticket.Model, capturedAt: r.ticket.CapturedAt.UnixNano()}
+}
+
+func codexTicketWSCookieTransition(current, next *openAICodexTicketWSReceipt) bool {
+	if current != nil && current.config.FailClosed || next != nil && next.config.FailClosed {
+		return false
+	}
+	return current != nil && current.ticket.usesCookies() || next != nil && next.ticket.usesCookies()
+}
+
+func (r *openAICodexTicketWSReceipt) validate(now time.Time) error {
+	if r == nil || !r.config.FailClosed {
+		return nil
+	}
+	if !r.ticket.usable(now, r.account, r.config) {
+		return ErrOpenAICodexTicketUnavailable
+	}
+	if s := r.service; s != nil {
+		current := s.lookupOpenAICodexTicketForConfig(r.account, r.ticket.Model, r.config)
+		if !current.usable(now, r.account, r.config) || s.codexTicketRevoked(openAICodexTicketKey(r.account.ID, r.ticket.Model), &r.ticket) {
+			return ErrOpenAICodexTicketUnavailable
+		}
+	}
+	return nil
+}
+
+func discardExpiredOpenAICodexTicketWSHandshake(req *openAIWSAcquireRequest, now time.Time) {
+	receipt := req.CodexTicketReceipt
+	if receipt == nil || !receipt.ticket.usesCookies() || receipt.config.FailClosed {
+		return
+	}
+	expired := !receipt.ticket.effectiveExpiresAt(receipt.config).After(now)
+	for _, cookie := range receipt.ticket.Cookies {
+		if cookie == nil || !cookie.Expires.After(now) {
+			expired = true
+		}
+	}
+	if expired {
+		// 排队和身份头生成可能耗尽短 TTL；只清本次新握手，不改已有连接。
+		receipt.ticket.clearHeaders(req.Headers)
+		req.CodexTicketReceipt = nil
+	}
+}
+
+func validOpenAICodexTicketWSReceiptAccount(req openAIWSAcquireRequest) bool {
+	receipt := req.CodexTicketReceipt
+	return receipt == nil || req.Account != nil && receipt.account != nil &&
+		receipt.account.ID == req.Account.ID && receipt.ticket.AccountID == req.Account.ID
 }
 
 func normalizeOpenAIWSTicketCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
 	key := normalizeOpenAIWSTransportCompatibility(req)
-	// 没有原生注入凭证时，不把客户端 STATE 当作受管理票据。
-	if receipt := req.CodexTicketReceipt; receipt != nil && req.Headers.Get(openAICodexTurnStateHeader) == receipt.ticket.State {
+	// 没有原生注入凭证时，不把客户端请求头当作受管理票据。
+	if receipt := req.CodexTicketReceipt; receipt != nil && receipt.ticket.matchesHeaders(req.Headers) {
 		key.codexTicket = receipt.identity()
 	}
 	return key
@@ -100,8 +181,8 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTicketWSHeaders(ctx context.Con
 	if req.Headers == nil {
 		req.Headers = make(http.Header)
 	}
-	if old := req.CodexTicketReceipt; old != nil && req.Headers.Get(openAICodexTurnStateHeader) == old.ticket.State {
-		req.Headers.Del(openAICodexTurnStateHeader)
+	if old := req.CodexTicketReceipt; old != nil {
+		old.ticket.clearHeaders(req.Headers)
 	}
 	account, err := s.refreshOpenAICodexTicketWSAccount(ctx, account)
 	if err != nil {
@@ -147,7 +228,11 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTicketWSAccount(ctx context.Con
 	latest, err := repo.GetCodexTicketAccountSnapshot(ctx, account.ID)
 	if err != nil || latest == nil || latest.ID != account.ID || latest.Status != StatusActive ||
 		OpenAICodexTicketAccountEnabled(latest) != OpenAICodexTicketAccountEnabled(account) ||
-		openAICodexTicketAccountBinding(latest) != openAICodexTicketAccountBinding(account) {
+		openAICodexTicketAccountBinding(latest.ConfiguredProxySnapshot()) != openAICodexTicketAccountBinding(account.ConfiguredProxySnapshot()) {
+		return nil, ErrOpenAICodexTicketUnavailable
+	}
+	latest = s.codexTicketAdmissionAccount(ctx, latest)
+	if latest == nil || openAICodexTicketAccountBinding(latest) != openAICodexTicketAccountBinding(account) {
 		// 只刷新票据快照不能改变既有 WS 出口；配置变化必须让客户端重新连接。
 		return nil, ErrOpenAICodexTicketUnavailable
 	}
@@ -185,12 +270,15 @@ func (c *openAICodexTicketWSFrameConn) WriteFrame(ctx context.Context, kind code
 		model := gjson.GetBytes(payload, "model").String()
 		req := openAIWSAcquireRequest{}
 		err := c.service.refreshOpenAICodexTicketWSHeaders(ctx, c.account, model, &req)
-		if err != nil || c.receipt.identity() != req.CodexTicketReceipt.identity() {
+		changed := c.receipt.identity() != req.CodexTicketReceipt.identity()
+		cookieMode := codexTicketWSCookieTransition(c.receipt, req.CodexTicketReceipt)
+		if err != nil || changed && !cookieMode || c.receipt.validate(time.Now()) != nil {
 			c.mu.Unlock()
 			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation,
 				"upstream continuation connection is unavailable; please restart the conversation", ErrOpenAICodexTicketUnavailable)
 		}
-		if c.inFlight {
+		if changed || c.inFlight {
+			// 显式允许无票放行时保留 Cookie 会话；新凭据只在下次握手注入。
 			// 无法关联并行响应时停止观察，绝不让后一请求覆盖前一请求快照。
 			c.watchdog, c.observationDisabled = nil, true
 		} else if !c.observationDisabled {

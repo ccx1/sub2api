@@ -31,6 +31,7 @@ func (matcher ticketDiagnosticPayload) Match(value driver.Value) bool {
 		return false
 	}
 	require.Equal(matcher.t, []string{"actual"}, current.HarvestExchange.ReportedModels)
+	require.Equal(matcher.t, "raw", current.HarvestExchange.CaptureMode)
 	require.Equal(matcher.t, `{"model":"actual"}`, current.HarvestExchange.Response.Body)
 	if current.HarvestTicketLength == nil || current.TargetLength == nil || current.BusinessTicketLength == nil || current.HarvestHTTPStatus == nil {
 		return false
@@ -49,7 +50,7 @@ func TestCodexTicketHistoryPersistsDiagnosticsAlongsideLegacyRows(t *testing.T) 
 	attempt := service.CodexTicketAttempt{ID: "diagnostic", StartedAt: time.Now(), Reason: "ticket_length_mismatch",
 		LengthMode: "strict", TargetLength: &target, RejectedLengths: []int{312}, HarvestTicketLength: &length,
 		BusinessTicketLength: &missing, HarvestHTTPStatus: &status,
-		HarvestExchange: &service.CodexTicketExchange{RequestedModel: "requested", ReportedModels: []string{"actual"},
+		HarvestExchange: &service.CodexTicketExchange{CaptureMode: "raw", RequestedModel: "requested", ReportedModels: []string{"actual"},
 			Response: &service.CodexTicketHTTPMessage{StatusCode: 200, Body: `{"model":"actual"}`}}}
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT extra`).WithArgs(int64(41), service.OpenAICodexTicketHistoryKey).

@@ -438,13 +438,13 @@
         <ProxyAdBanner />
       </div>
 
-      <!-- Standard Add Form -->
+      <!-- Create Proxy Form -->
       <form
-        v-if="createMode === 'standard'"
         id="create-proxy-form"
-        @submit.prevent="handleCreateProxy"
+        @submit.prevent="createMode === 'standard' ? handleCreateProxy() : handleBatchCreate()"
         class="space-y-5"
       >
+      <div v-if="createMode === 'standard'" class="space-y-5">
         <div>
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input
@@ -511,43 +511,7 @@
             </button>
           </div>
         </div>
-        <div>
-          <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
-          <div class="mb-2 flex flex-wrap gap-2">
-            <button
-              v-for="d in EXPIRY_PRESETS"
-              :key="d"
-              type="button"
-              class="btn btn-sm"
-              :class="createForm.expires_at === addDaysToBase('', d) ? 'btn-primary' : 'btn-secondary'"
-              @click="createExpiresDays = d"
-            >
-              {{ t('admin.proxies.nDays', { days: d }) }}
-            </button>
-          </div>
-          <input
-            v-model.number="createExpiresDays"
-            type="number"
-            min="0"
-            class="input mb-2"
-            :placeholder="t('admin.proxies.expiryDaysPlaceholder')"
-          />
-          <input v-model="createForm.expires_at" type="date" max="9999-12-31" class="input" />
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
-          <Select v-model="createForm.fallback_mode" :options="[
-            { label: t('admin.proxies.fallbackNone'), value: 'none' },
-            { label: t('admin.proxies.fallbackProxy'), value: 'proxy' },
-            { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
-          ]" />
-        </div>
-        <div v-if="createForm.fallback_mode === 'proxy'">
-          <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
-          <Select v-model="createForm.backup_proxy_id" :options="backupProxyOptions()" />
-        </div>
-
-      </form>
+      </div>
 
       <!-- Batch Add Form -->
       <div v-else class="space-y-5">
@@ -645,6 +609,47 @@
 
       </div>
 
+        <p v-if="createMode === 'batch'" class="input-hint">
+          {{ t('admin.proxies.batchSettingsHint') }}
+        </p>
+        <div>
+          <label for="create-proxy-expiry" class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
+          <div class="mb-2 flex flex-wrap gap-2">
+            <button
+              v-for="d in EXPIRY_PRESETS"
+              :key="d"
+              type="button"
+              class="btn btn-sm"
+              :class="createForm.expires_at === addDaysToBase('', d) ? 'btn-primary' : 'btn-secondary'"
+              @click="createExpiresDays = d"
+            >
+              {{ t('admin.proxies.nDays', { days: d }) }}
+            </button>
+          </div>
+          <input
+            v-model.number="createExpiresDays"
+            type="number"
+            min="0"
+            class="input mb-2"
+            :aria-label="t('admin.proxies.expiryDaysPlaceholder')"
+            :placeholder="t('admin.proxies.expiryDaysPlaceholder')"
+          />
+          <input id="create-proxy-expiry" v-model="createForm.expires_at" type="date" max="9999-12-31" class="input" />
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
+          <Select v-model="createForm.fallback_mode" :options="[
+            { label: t('admin.proxies.fallbackNone'), value: 'none' },
+            { label: t('admin.proxies.fallbackProxy'), value: 'proxy' },
+            { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
+          ]" />
+        </div>
+        <div v-if="createForm.fallback_mode === 'proxy'">
+          <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
+          <Select v-model="createForm.backup_proxy_id" :options="backupProxyOptions()" />
+        </div>
+      </form>
+
       <template #footer>
         <div class="flex justify-end gap-3">
           <button @click="closeCreateModal" type="button" class="btn btn-secondary">
@@ -681,8 +686,8 @@
           </button>
           <button
             v-else
-            @click="handleBatchCreate"
-            type="button"
+            type="submit"
+            form="create-proxy-form"
             :disabled="submitting || batchParseResult.valid === 0"
             class="btn btn-primary"
           >
@@ -1074,6 +1079,15 @@ const columns = computed<Column[]>(() => [
   { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false }
 ])
 
+const countryOptions = computed(() => {
+  const codes = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ')
+  const displayNames = new Intl.DisplayNames([locale?.value || 'zh-CN'], { type: 'region' })
+  return codes.sort().map(code => ({
+    code,
+    label: `${code} · ${displayNames.of(code) || code}`
+  }))
+})
+
 // Filter options
 const protocolOptions = computed(() => [
   { value: '', label: t('admin.proxies.allProtocols') },
@@ -1223,12 +1237,6 @@ const batchParseResult = reactive({
     username: string
     password: string
   }>
-})
-
-const countryOptions = computed(() => {
-  const codes = 'AD AE AF AG AI AL AM AO AR AT AU AZ BA BB BD BE BF BG BH BI BJ BN BO BR BS BT BW BY BZ CA CD CF CG CH CI CL CM CN CO CR CU CV CY CZ DE DJ DK DM DO DZ EC EE EG ES ET FI FJ FM FR GA GB GD GE GH GL GM GN GQ GR GT GW GY HK HN HR HT HU ID IE IL IN IQ IR IS IT JM JO JP KE KG KH KI KM KN KR KW KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MG MH MK ML MM MN MO MR MT MU MV MW MX MY MZ NA NE NG NI NL NO NP NR NZ OM PA PE PG PH PK PL PR PS PT PW PY QA RO RS RU RW SA SB SC SD SE SG SI SK SL SM SN SO SR ST SV SY SZ TD TG TH TJ TL TM TN TO TR TT TV TW TZ UA UG US UY UZ VC VE VN VU WS YE ZA ZM ZW'.split(' ')
-  const displayNames = new Intl.DisplayNames([locale.value || 'zh-CN'], { type: 'region' })
-  return codes.map(code => ({ code, label: `${code} · ${displayNames.of(code) || code}` }))
 })
 
 const createForm = reactive({
@@ -1436,14 +1444,25 @@ const parseBatchInput = () => {
 }
 
 const handleBatchCreate = async () => {
-  if (batchParseResult.valid === 0) return
+  if (submitting.value || batchParseResult.valid === 0) return
+  if (createForm.fallback_mode === 'proxy' && !createForm.backup_proxy_id) {
+    appStore.showError(t('admin.proxies.backupProxyRequired'))
+    return
+  }
 
   submitting.value = true
   try {
+    const expiresAt = createForm.expires_at
+      ? Math.floor(new Date(createForm.expires_at).getTime() / 1000)
+      : null
     const result = await adminAPI.proxies.batchCreate(batchParseResult.proxies.map(proxy => ({
       ...proxy,
       group_id: createForm.group_id,
-      country_code: createForm.country_code || null
+      country_code: createForm.country_code || null,
+      expires_at: expiresAt,
+      fallback_mode: createForm.fallback_mode,
+      backup_proxy_id: createForm.fallback_mode === 'proxy' ? createForm.backup_proxy_id : null,
+      expiry_warn_days: createForm.expiry_warn_days,
     })))
     const created = result.created || 0
     const skipped = result.skipped || 0

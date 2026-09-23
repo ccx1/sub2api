@@ -8,7 +8,8 @@ import (
 func mergeRandomProxyRoutingExtra(extra, current map[string]any) map[string]any {
 	merged := maps.Clone(extra)
 	for _, key := range []string{ProxyModeExtraKey, RandomProxyPoolScopeExtraKey, RandomProxyPoolIDsExtraKey,
-		RandomProxyGroupIDExtraKey, RandomProxyEmptyPoolPolicyExtraKey, RandomProxyMaxReuseMinutesExtraKey} {
+		RandomProxyGroupIDExtraKey, RandomProxyEmptyPoolPolicyExtraKey, RandomProxyMaxReuseMinutesExtraKey,
+		ProxyRegionModeExtraKey, ProxyRegionCountryExtraKey} {
 		if _, supplied := extra[key]; supplied {
 			continue
 		}
@@ -23,7 +24,7 @@ func mergeRandomProxyRoutingExtra(extra, current map[string]any) map[string]any 
 }
 
 func hasRandomProxyGroupUpdates(extra map[string]any) bool {
-	for _, key := range []string{ProxyModeExtraKey, RandomProxyPoolScopeExtraKey, RandomProxyGroupIDExtraKey} {
+	for _, key := range []string{ProxyModeExtraKey, RandomProxyPoolScopeExtraKey, RandomProxyGroupIDExtraKey, ProxyRegionModeExtraKey, ProxyRegionCountryExtraKey} {
 		if _, exists := extra[key]; exists {
 			return true
 		}
@@ -47,6 +48,11 @@ func explicitRandomProxyRoutingPatch(extra, requested map[string]any) map[string
 }
 
 func (s *adminServiceImpl) validateAccountRandomProxyGroup(ctx context.Context, account *Account) error {
+	if account != nil {
+		if err := ValidateProxyRegionExtra(account.Extra); err != nil {
+			return err
+		}
+	}
 	if account == nil || !account.IsRandomProxy() || account.RandomProxyPoolScope() != RandomProxyPoolGroup {
 		return nil
 	}

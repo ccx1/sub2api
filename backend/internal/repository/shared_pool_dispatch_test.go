@@ -17,7 +17,7 @@ func TestSharedDispatchStateActorCannotForgeAuthorization(t *testing.T) {
 	for _, state := range []service.SharedPoolAccountState{
 		{DispatchConsent: new(true)},
 		{OwnerID: 7, AdminDisabled: new(false)}, {OwnerID: -1},
-		{OwnerID: 7, SubscriptionTier: new("pro")}, {OwnerID: 7, DefaultGroupID: new(int64(5))},
+		{OwnerID: 7, SubscriptionTier: new("pro")}, {OwnerID: 7, DefaultGroupIDs: []int64{5}},
 		{OwnerID: 7, Priority: new(1)}, {Priority: new(-1)}, {Priority: new(101)},
 	} {
 		repo, _ := newSharedDailyCooldownRepository(t)

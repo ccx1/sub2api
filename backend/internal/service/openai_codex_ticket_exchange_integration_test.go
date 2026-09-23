@@ -33,6 +33,7 @@ func TestCodexTicketExchangeExplainsDynamicModelMismatch(t *testing.T) {
 				require.Nil(t, item.BusinessExchange, "采集失败时业务复验没有发生")
 			}
 			require.NotNil(t, exchange)
+			require.Equal(t, "raw", exchange.CaptureMode)
 			require.Equal(t, "gpt-6-astra", exchange.RequestedModel)
 			require.Equal(t, []string{"gpt-6-astra-2026-09-01"}, exchange.ReportedModels)
 			require.Equal(t, http.MethodPost, exchange.Request.Method)
@@ -43,8 +44,8 @@ func TestCodexTicketExchangeExplainsDynamicModelMismatch(t *testing.T) {
 			require.False(t, exchange.Response.BodyTruncated)
 			encoded, err := json.Marshal(item)
 			require.NoError(t, err)
-			require.NotContains(t, string(encoded), fakeCodexTicketState(356))
-			require.NotContains(t, string(encoded), "Bearer tok")
+			require.Contains(t, string(encoded), fakeCodexTicketState(356))
+			require.Contains(t, string(encoded), "Bearer tok")
 		})
 	}
 }
@@ -68,7 +69,7 @@ func TestCodexTicketExchangeRecordsRejectedResponseBody(t *testing.T) {
 	require.Equal(t, "harvest_http_rejected", item.Reason)
 	require.Equal(t, 429, item.HarvestExchange.Response.StatusCode)
 	require.Contains(t, item.HarvestExchange.Response.Body, "rate_limit_exceeded")
-	require.NotContains(t, item.HarvestExchange.Response.Body, "private-access")
+	require.Contains(t, item.HarvestExchange.Response.Body, "private-access")
 	require.Nil(t, item.BusinessExchange)
 }
 
@@ -76,7 +77,7 @@ func TestCodexTicketExchangeHistoryLimitsBodiesButRetainsModels(t *testing.T) {
 	history := CodexTicketHistory{}
 	var firstExchange *CodexTicketExchange
 	for i := 0; i < 105; i++ {
-		exchange := &CodexTicketExchange{RequestedModel: "requested", ReportedModels: []string{"actual"},
+		exchange := &CodexTicketExchange{CaptureMode: "raw", RequestedModel: "requested", ReportedModels: []string{"actual"},
 			Request: &CodexTicketHTTPMessage{Body: "request"}, Response: &CodexTicketHTTPMessage{Body: "response"}}
 		if i == 0 {
 			firstExchange = exchange
@@ -88,6 +89,7 @@ func TestCodexTicketExchangeHistoryLimitsBodiesButRetainsModels(t *testing.T) {
 	require.NotNil(t, firstExchange.Response)
 	require.Len(t, history.Items, 100)
 	for i, item := range history.Items {
+		require.Equal(t, "raw", item.HarvestExchange.CaptureMode)
 		require.Equal(t, []string{"actual"}, item.HarvestExchange.ReportedModels)
 		if i < 10 {
 			require.NotNil(t, item.HarvestExchange.Request)

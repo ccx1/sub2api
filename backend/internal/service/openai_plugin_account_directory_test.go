@@ -51,6 +51,10 @@ func (r *pluginDirectoryProxyRepo) DisableRandomProxyAccountIfUnavailable(_ cont
 	return nil
 }
 
+func pluginDirectoryScope() PluginAccountScope {
+	return newPluginAccountScope(pluginAccountScopeEntry{Platform: PlatformOpenAI, AccountType: AccountTypeOAuth})
+}
+
 func pluginDirectoryAccount(policy string) *Account {
 	return &Account{
 		ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
@@ -71,7 +75,7 @@ func TestResolvePluginOutboundIdentityPausesDuringDailyCooldown(t *testing.T) {
 		"start": now.Add(-time.Hour).Format("15:04"), "end": now.Add(time.Hour).Format("15:04"), "timezone": "UTC"}
 	repo := &pluginDirectoryProxyRepo{account: a}
 	svc := &OpenAIGatewayService{accountRepo: repo}
-	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), a.ID)
+	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), a.ID)
 	require.NoError(t, err)
 	require.Nil(t, identity)
 	require.Zero(t, repo.globalCalls, "冷却时不能分配出口或暴露出站凭据")
@@ -87,7 +91,7 @@ func TestResolvePluginOutboundIdentityUsesSelectedRandomProxy(t *testing.T) {
 		proxy:   &Proxy{ID: 7, Protocol: "socks5", Host: "proxy.example", Port: 1080, Status: StatusActive},
 	}
 	svc := &OpenAIGatewayService{accountRepo: repo}
-	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), account.ID)
+	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, identity)
 	require.Equal(t, "socks5://proxy.example:1080", identity.ProxyURL)
@@ -105,7 +109,7 @@ func TestResolvePluginOutboundIdentityHonorsEmptyPoolPolicy(t *testing.T) {
 		t.Run(policy, func(t *testing.T) {
 			repo := &pluginDirectoryProxyRepo{account: pluginDirectoryAccount(policy)}
 			svc := &OpenAIGatewayService{accountRepo: repo}
-			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), repo.account.ID)
+			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), repo.account.ID)
 			if policy == RandomProxyEmptyPoolPolicyDirect {
 				require.NoError(t, err)
 				require.NotNil(t, identity)
@@ -131,7 +135,7 @@ func TestResolvePluginOutboundIdentityFailsClosedOnProxyErrors(t *testing.T) {
 		failure := errors.New("proxy lookup failed")
 		repo := &pluginDirectoryProxyRepo{account: pluginDirectoryAccount(RandomProxyEmptyPoolPolicyDirect), selectionErr: failure}
 		svc := &OpenAIGatewayService{accountRepo: repo}
-		identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), repo.account.ID)
+		identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), repo.account.ID)
 		require.ErrorIs(t, err, failure)
 		require.Nil(t, identity)
 		require.Empty(t, repo.disabledIDs)
@@ -141,7 +145,7 @@ func TestResolvePluginOutboundIdentityFailsClosedOnProxyErrors(t *testing.T) {
 			account: pluginDirectoryAccount(RandomProxyEmptyPoolPolicyDisable), disableErr: errors.New("disable update failed"),
 		}
 		svc := &OpenAIGatewayService{accountRepo: repo}
-		identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), repo.account.ID)
+		identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), repo.account.ID)
 		require.ErrorIs(t, err, ErrRandomProxyUnavailable)
 		require.ErrorContains(t, err, "disable update failed")
 		require.Nil(t, identity)
@@ -156,7 +160,7 @@ func TestResolvePluginOutboundIdentityKeepsFixedProxy(t *testing.T) {
 	account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: "fixed.example", Port: 8080, Status: StatusActive}
 	repo := &pluginDirectoryProxyRepo{account: account, selectionErr: errors.New("must not select")}
 	svc := &OpenAIGatewayService{accountRepo: repo}
-	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), account.ID)
+	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, identity)
 	require.Equal(t, "http://fixed.example:8080", identity.ProxyURL)
@@ -181,7 +185,7 @@ func TestResolvePluginOutboundIdentityKeepsAccountScope(t *testing.T) {
 			}
 			repo := &pluginDirectoryProxyRepo{account: account}
 			svc := &OpenAIGatewayService{accountRepo: repo}
-			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), account.ID)
+			identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), account.ID)
 			require.NoError(t, err)
 			require.Nil(t, identity)
 			require.Zero(t, repo.globalCalls)
@@ -269,8 +273,9 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// Fields the snapshot intentionally strips. Credentials = long-lived secret
 	// (refresh_token) not handed out by ResolveOutboundIdentity. Groups/AccountGroups
 	// = relational graphs with back-references that would cycle under encoding/json.
+	// SharedPoolSettlement is a request-local billing snapshot excluded by json:"-".
 	stripped := map[string]struct{}{
-		"Credentials": {}, "Groups": {}, "AccountGroups": {},
+		"Credentials": {}, "Groups": {}, "AccountGroups": {}, "SharedPoolSettlement": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).
@@ -303,15 +308,17 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// The raw Credentials blob must never serialize; Extra and the proxy ARE released.
 	acct := &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
-		Credentials: map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
-		Extra:       map[string]any{"opaque": "extra-released"},
-		Proxy:       &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
+		Credentials:          map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
+		Extra:                map[string]any{"opaque": "extra-released"},
+		Proxy:                &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
+		SharedPoolSettlement: &SharedPoolSettlementTerms{Multiplier: 0.5, PlatformRateBPS: 500},
 	}
 	snap := accountReadableSnapshotJSON(acct)
 	require.NotNil(t, snap)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(snap, &m))
 	assert.NotContains(t, string(snap), "LEAK-REFRESH", "raw Credentials must never appear in metadata")
+	assert.NotContains(t, m, "SharedPoolSettlement", "request-local settlement must never appear in plugin metadata")
 	assert.Contains(t, string(snap), "extra-released", "Extra is intentionally released")
 	assert.Contains(t, string(snap), "pw-released", "proxy is intentionally released (already exposed via 打票)")
 

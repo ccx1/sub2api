@@ -80,7 +80,8 @@ func TestCodexTicketDiagnosticsAutoSuccessAndModelFailureKeepActual312(t *testin
 		}
 		encoded, err := json.Marshal(item)
 		require.NoError(t, err)
-		require.NotContains(t, string(encoded), fakeCodexTicketState(312))
+		require.Contains(t, string(encoded), fakeCodexTicketState(312))
+		require.Equal(t, "raw", item.HarvestExchange.CaptureMode)
 		if !matched {
 			require.Contains(t, string(encoded), "unexpected-private-model")
 		}

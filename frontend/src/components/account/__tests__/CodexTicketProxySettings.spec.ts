@@ -14,6 +14,39 @@ const proxies = [
 ] as Proxy[]
 
 describe('CodexTicketProxySettings', () => {
+  it('filters ticket choices by region and retains an existing incompatible fixed proxy', async () => {
+    const regionalProxies = [
+      { ...proxies[0], id: 1, country_code: 'JP' },
+      { ...proxies[0], id: 2, country_code: 'PH' },
+      { ...proxies[0], id: 3, country_code: 'US' }
+    ] as Proxy[]
+    const wrapper = mount(CodexTicketProxySettings, { props: { proxies: regionalProxies, modelValue: { mode: 'fixed', proxyId: 2 }, regionEnabled: true, regionCountry: 'JP' } })
+    expect(wrapper.getComponent(ProxySelector).props('proxies').map(proxy => proxy.id)).toEqual([1, 2])
+    expect(wrapper.text()).toContain('admin.accounts.proxyRegion.fixedMismatch')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.setProps({ modelValue: { mode: 'fixed', proxyId: 1 } })
+    expect(wrapper.getComponent(ProxySelector).props('proxies').map(proxy => proxy.id)).toEqual([1])
+    await wrapper.setProps({ regionEnabled: false })
+    expect(wrapper.getComponent(ProxySelector).props('proxies')).toHaveLength(3)
+    wrapper.unmount()
+  })
+
+  it('warns about a fixed proxy outside the account region without changing the selection', () => {
+    const wrapper = mount(CodexTicketProxySettings, { props: { proxies, modelValue: { mode: 'fixed', proxyId: 7 }, regionEnabled: true, regionCountry: 'PH' } })
+    expect(wrapper.text()).toContain('admin.accounts.proxyRegion.fixedMismatch')
+    expect(wrapper.text()).toContain('admin.accounts.proxyRegion.ticketHint')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('offers rotation only for pool-capable modes and preserves the chosen strategy', async () => {
+    const wrapper = mount(CodexTicketProxySettings, { props: { proxies, modelValue: { mode: 'random', proxyId: null } } })
+    await wrapper.get('[data-testid="codex-ticket-proxy-strategy"]').setValue('round_robin')
+    expect(wrapper.emitted('update:modelValue')).toEqual([[{ mode: 'random', proxyId: null, strategy: 'round_robin' }]])
+    await wrapper.setProps({ modelValue: { mode: 'fixed', proxyId: 7, strategy: 'round_robin' } })
+    expect(wrapper.find('[data-testid="codex-ticket-proxy-strategy"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('allows explicit account/global/random/fixed choices without changing the stored selection implicitly', async () => {
     const wrapper = mount(CodexTicketProxySettings, { props: { proxies, modelValue: { mode: 'inherit', proxyId: null } } })
     expect(wrapper.get<HTMLInputElement>('[value="inherit"]').element.checked).toBe(true)

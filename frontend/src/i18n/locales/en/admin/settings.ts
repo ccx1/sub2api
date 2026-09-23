@@ -564,8 +564,19 @@ export default {
         codexTicketEnabledDesc:
           "Manage enablement, subscription tier rules, retries and cooldowns on the ticket configuration page.",
         codexTicketHarvestProxy: "Default ticket harvest proxy",
-        codexTicketHarvestProxyFixed: "Fixed proxy URL",
+        codexTicketHarvestProxyAccount: "Follow account egress",
+        codexTicketHarvestProxyInherit: "Inherit startup config",
+        codexTicketHarvestProxyRandom: "Random proxy pool",
+        codexTicketHarvestProxyFixed: "Fixed managed proxy",
         codexTicketHarvestProxyPool: "Balanced proxy pool",
+        codexTicketHarvestProxyAccountDesc:
+          "Use each account's business egress, including its fixed, random, or direct policy.",
+        codexTicketHarvestProxyInheritDesc:
+          "Keep the legacy startup proxy URL; fall back to the random pool when it is empty.",
+        codexTicketHarvestProxyRandomDesc:
+          "Choose a balanced ticket egress from managed proxies; account overrides still take priority.",
+        codexTicketHarvestProxyFixedDesc:
+          "Use only the selected managed proxy; stop harvesting when it becomes unavailable.",
         codexTicketHarvestProxyPoolDesc:
           "Applies to accounts without a ticket proxy override. Account management can choose a fixed or random harvest proxy independently. Inherited random-proxy accounts keep their business proxy scope; others use the entire pool. Keep healthy proxies until repeated failures or degraded quality, then prefer proxies with fewer accounts and better quality. Skip harvesting without capacity; never connect directly.",
         codexTicketHarvestProxyDesc:

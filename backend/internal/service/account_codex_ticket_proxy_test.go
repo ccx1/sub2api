@@ -193,6 +193,7 @@ func TestAccountCodexTicketRandomProxyKeepsValidTicket(t *testing.T) {
 	svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, "gpt-6-astra")
 	previous := svc.lookupOpenAICodexTicket(repo.account, "gpt-6-astra")
 	require.NotNil(t, previous)
+	require.True(t, svc.storeOpenAICodexTicket(context.Background(), repo.account, inventoryTestTicket(previous, "D", time.Second)))
 	repo.account.Extra[CodexTicketProxyModeExtraKey], repo.account.Extra[CodexTicketProxyIDExtraKey] = "random", 0
 	svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, "gpt-6-astra")
 	require.Len(t, upstream.proxies, 2)

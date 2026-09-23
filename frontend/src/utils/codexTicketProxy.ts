@@ -4,6 +4,7 @@ export type CodexTicketProxyMode = 'account' | 'inherit' | 'random' | 'fixed'
 export interface CodexTicketProxySelection {
   mode: CodexTicketProxyMode
   proxyId: number | null
+  strategy?: 'affinity' | 'round_robin'
 }
 
 type TicketProxyAvailability = Pick<Proxy, 'id' | 'status'> & Partial<Pick<Proxy, 'expires_at'>>
@@ -27,7 +28,8 @@ export function readCodexTicketProxy(extra?: Record<string, unknown> | null): Co
   const proxyId = extra?.codex_ticket_proxy_id
   return {
     mode: mode === 'account' || mode === 'fixed' || mode === 'random' ? mode : 'inherit',
-    proxyId: typeof proxyId === 'number' && Number.isSafeInteger(proxyId) && proxyId > 0 ? proxyId : null
+    proxyId: typeof proxyId === 'number' && Number.isSafeInteger(proxyId) && proxyId > 0 ? proxyId : null,
+    strategy: extra?.codex_ticket_proxy_strategy === 'round_robin' ? 'round_robin' : 'affinity'
   }
 }
 
@@ -46,6 +48,7 @@ export function codexTicketProxyValidationError(
 export function codexTicketProxyExtra(selection: CodexTicketProxySelection): Record<string, unknown> {
   return {
     codex_ticket_proxy_mode: selection.mode,
-    codex_ticket_proxy_id: selection.mode === 'fixed' ? selection.proxyId : 0
+    codex_ticket_proxy_id: selection.mode === 'fixed' ? selection.proxyId : 0,
+    codex_ticket_proxy_strategy: selection.strategy ?? 'affinity'
   }
 }

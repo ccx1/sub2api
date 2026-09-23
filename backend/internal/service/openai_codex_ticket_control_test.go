@@ -104,7 +104,7 @@ func TestCodexTicketControlReloadsBeforeBusinessProbe(t *testing.T) {
 			}}
 			svc.probeOnceOpenAICodexTicket(context.Background(), account, "gpt-6-astra")
 			require.Equal(t, 1, calls)
-			require.Equal(t, 2, repo.reads, "每阶段只读取一次最新快照")
+			require.Equal(t, 3, repo.reads, "采集开始、发送前与业务复验前检查最新快照")
 			require.Nil(t, svc.lookupOpenAICodexTicket(account, "gpt-6-astra"))
 		})
 	}
@@ -147,7 +147,7 @@ func TestCodexTicketControlUnchangedAccountCompletesBothPhases(t *testing.T) {
 	}}
 	svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, "gpt-6-astra")
 	require.Equal(t, 2, calls)
-	require.Equal(t, 3, repo.reads, "采集、业务复验和发布前分别读取最新快照")
+	require.Equal(t, 5, repo.reads, "采集、复验、各次发送与发布前分别检查最新快照")
 	require.True(t, svc.lookupOpenAICodexTicket(repo.account, "gpt-6-astra").valid(time.Now(), 292))
 }
 

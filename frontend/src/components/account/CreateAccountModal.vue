@@ -3003,7 +3003,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :disabled="randomProxyEnabled" />
+        <ProxySelector v-model="form.proxy_id" :proxies="filterProxiesByRegion(proxies, randomProxyRegionCountry || '', form.proxy_id)" :disabled="randomProxyEnabled" />
         <RandomProxySettings
           v-model:enabled="randomProxyEnabled"
           v-model:scope="randomProxyPoolScope"
@@ -3018,10 +3018,29 @@
         />
       </div>
 
+      <AccountProxyRegionSettings
+        v-model="proxyRegion"
+        :credentials="form.credentials"
+        :proxies="proxies"
+        :proxy-id="form.proxy_id"
+        :random-enabled="randomProxyEnabled"
+        :empty-pool-policy="randomProxyEmptyPoolPolicy"
+        :billing-pending="true"
+        :disabled="submitting"
+      />
+
       <CodexTicketProxySettings
         v-if="supportsCodexTicketProxy(form)"
         v-model="codexTicketProxy"
+        :region-enabled="proxyRegion.mode !== 'off'"
+        :region-country="randomProxyRegionCountry"
         :proxies="proxies"
+        :disabled="submitting || openaiOAuth.loading.value"
+      />
+
+      <CodexTicketCredentialSettings
+        v-if="supportsCodexTicketProxy(form)"
+        v-model="codexTicketCredential"
         :disabled="submitting || openaiOAuth.loading.value"
       />
 
@@ -3952,13 +3971,16 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import AccountProxyRegionSettings from '@/components/account/AccountProxyRegionSettings.vue'
+import { accountProxyRegionExtra, accountProxyRegionValidationError, filterProxiesByRegion, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
+import CodexTicketCredentialSettings from '@/components/account/CodexTicketCredentialSettings.vue'
+import { readCodexTicketCredential, codexTicketCredentialExtra, codexTicketCredentialValidationError } from '@/utils/codexTicketCredential'
 import { readCodexTicketProxy, supportsCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
-import { resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -4761,9 +4783,16 @@ const form = reactive({
 
 
 const randomProxyEnabled = ref(false)
+const proxyRegionSelection = ref<ReturnType<typeof readAccountProxyRegion> | null>(null)
+const proxyRegion = computed({
+  get: () => proxyRegionSelection.value ?? readAccountProxyRegion({ proxy_region_mode: form.type === 'oauth' ? 'billing' : 'off' }),
+  set: value => { proxyRegionSelection.value = value }
+})
 const codexTicketProxy = ref(readCodexTicketProxy({ codex_ticket_proxy_mode: 'account' }))
+const codexTicketCredential = ref(readCodexTicketCredential())
 function validateCodexTicketProxy(): boolean {
-  const error = supportsCodexTicketProxy(form) && codexTicketProxyValidationError(codexTicketProxy.value, props.proxies)
+  const error = accountProxyRegionValidationError(proxyRegion.value) || (supportsCodexTicketProxy(form) &&
+    (codexTicketProxyValidationError(codexTicketProxy.value, props.proxies) || codexTicketCredentialValidationError(codexTicketCredential.value)))
   if (error) appStore.showError(t(error))
   return !error
 }
@@ -4774,8 +4803,7 @@ const randomProxyGroupId = ref<number | null>(null)
 const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
 const randomProxyRegionCountry = computed(() => {
-  if (form.type !== 'oauth') return undefined
-  return resolveAccountProxyRegion({ mode: 'billing', country: '' }, form.credentials).country || undefined
+  return resolveAccountProxyRegion(proxyRegion.value, form.credentials).country || undefined
 })
 const dailyCooldown = ref(normalizeDailyCooldown())
 
@@ -4786,10 +4814,13 @@ const handleRandomProxyChange = (enabled: boolean) => {
 }
 
 const withProxySelection = <T extends { proxy_id?: number | null; extra?: Record<string, unknown> }>(payload: T): T => {
+  const regionError = accountProxyRegionValidationError(proxyRegion.value)
+  if (regionError) throw new Error(t(regionError))
+  if (proxyRegionSelection.value !== null) payload = { ...payload, extra: { ...payload.extra, ...accountProxyRegionExtra(proxyRegion.value) } }
   if (supportsCodexTicketProxy(form)) {
-    const error = codexTicketProxyValidationError(codexTicketProxy.value, props.proxies)
+    const error = codexTicketProxyValidationError(codexTicketProxy.value, props.proxies) || codexTicketCredentialValidationError(codexTicketCredential.value)
     if (error) throw new Error(t(error))
-    payload = { ...payload, extra: { ...payload.extra, ...codexTicketProxyExtra(codexTicketProxy.value) } }
+    payload = { ...payload, extra: { ...payload.extra, ...codexTicketProxyExtra(codexTicketProxy.value), ...codexTicketCredentialExtra(codexTicketCredential.value) } }
   }
   const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError) throw new Error(t(cooldownError))
@@ -5391,7 +5422,9 @@ const resetForm = () => {
   form.group_ids = []
   form.expires_at = null
   randomProxyEnabled.value = false
+  proxyRegionSelection.value = null
   codexTicketProxy.value = readCodexTicketProxy({ codex_ticket_proxy_mode: 'account' })
+  codexTicketCredential.value = readCodexTicketCredential()
   randomProxyEmptyPoolPolicy.value = 'reject'
   randomProxyPoolScope.value = 'all'
   randomProxyPoolIds.value = []

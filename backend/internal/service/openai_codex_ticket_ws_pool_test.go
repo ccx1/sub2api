@@ -100,7 +100,10 @@ func TestCodexTicketWSPoolStrictPreferredRejectsChangedTicket(t *testing.T) {
 	next := req.CodexTicketReceipt.ticket
 	next.State, next.CapturedAt = "gAAAAA"+strings.Repeat("N", 286), time.Now()
 	require.True(t, s.storeOpenAICodexTicket(context.Background(), account, &next))
+	require.Equal(t, req.CodexTicketReceipt.ticket.State, s.lookupOpenAICodexTicket(account, next.Model).State)
+	s.invalidateOpenAICodexTicket(context.Background(), account, &req.CodexTicketReceipt.ticket)
 	req = codexTicketPoolRequest(t, s, account)
+	require.Equal(t, next.State, req.CodexTicketReceipt.ticket.State)
 	req.PreferredConnID, req.ForcePreferredConn = first.ConnID(), true
 	lease, err := pool.Acquire(context.Background(), req)
 	require.ErrorIs(t, err, errOpenAIWSPreferredConnUnavailable)
@@ -125,7 +128,11 @@ func TestCodexTicketWSPoolPrewarmPreservesActualReceipt(t *testing.T) {
 	next := req.CodexTicketReceipt.ticket
 	next.CapturedAt = time.Now()
 	require.True(t, s.storeOpenAICodexTicket(context.Background(), account, &next))
+	require.True(t, sameOpenAIWSPrewarmTarget(req, codexTicketPoolRequest(t, s, account)), "重复采到有效主票不改变实际握手身份")
+	s.invalidateOpenAICodexTicket(context.Background(), account, &req.CodexTicketReceipt.ticket)
+	require.True(t, s.storeOpenAICodexTicket(context.Background(), account, &next))
 	require.False(t, sameOpenAIWSPrewarmTarget(req, codexTicketPoolRequest(t, s, account)))
+	require.Equal(t, receipt.identity(), confirmedOpenAICodexTicketWSReceipt(nil, lease).identity(), "重采票不能改写已有连接的实际receipt")
 }
 
 func TestCodexTicketWSPoolUnmanagedStateCannotClaimNativeReceipt(t *testing.T) {
@@ -163,12 +170,14 @@ func TestCodexTicketWSFramesRenewalRequiresReconnectBeforeSending(t *testing.T) 
 	next := receipt.ticket
 	next.State, next.CapturedAt = "gAAAAA"+strings.Repeat("N", 286), time.Now()
 	require.True(t, s.storeOpenAICodexTicket(context.Background(), account, &next))
+	require.Equal(t, receipt.ticket.State, s.lookupOpenAICodexTicket(account, next.Model).State)
+	s.invalidateOpenAICodexTicket(context.Background(), account, &receipt.ticket)
 	for _, kind := range []coderws.MessageType{coderws.MessageText, coderws.MessageBinary} {
 		err := conn.WriteFrame(context.Background(), kind, []byte(`{"type":"response.create","model":"gpt-6-astra"}`))
 		var closeErr *OpenAIWSClientCloseError
 		require.ErrorAs(t, err, &closeErr)
 	}
-	require.Empty(t, inner.written, "新票发布后不得把新请求写入旧握手连接")
+	require.Empty(t, inner.written, "实际使用票变化后不得把新请求写入旧握手连接")
 	require.Equal(t, next.State, s.lookupOpenAICodexTicket(account, next.Model).State)
 }
 

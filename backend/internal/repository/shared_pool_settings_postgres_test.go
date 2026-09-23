@@ -17,8 +17,8 @@ import (
 func sharedSubscriptionSettings(f sharedAccountPG) *service.SharedPoolSettings {
 	return &service.SharedPoolSettings{
 		PlatformRateBPS: 500, ProxyRateBPS: 100, MaxConcurrency: 10,
-		DefaultGroupIDs:      map[string]int64{service.PlatformOpenAI: f.a},
-		SubscriptionGroupIDs: map[string]map[string]int64{service.PlatformOpenAI: {"plus": f.b}},
+		DefaultGroupIDs:      service.SharedPoolDefaultGroupIDs{service.PlatformOpenAI: {f.a}},
+		SubscriptionGroupIDs: service.SharedPoolSubscriptionGroupIDs{service.PlatformOpenAI: {"plus": {f.b}}},
 		SettlementMultiplier: 1.25,
 	}
 }
@@ -29,8 +29,8 @@ func TestSharedPoolSettingsPostgresSubscriptionRoundTrip(t *testing.T) {
 	s := sharedSubscriptionSettings(f)
 	claude, err := f.client.Group.Create().SetName("Claude Pro").SetPlatform(service.PlatformAnthropic).SetIsSharedPool(true).Save(ctx)
 	require.NoError(t, err)
-	s.DefaultGroupIDs[service.PlatformAnthropic] = claude.ID
-	s.SubscriptionGroupIDs[service.PlatformAnthropic] = map[string]int64{"pro": claude.ID}
+	s.DefaultGroupIDs[service.PlatformAnthropic] = []int64{claude.ID}
+	s.SubscriptionGroupIDs[service.PlatformAnthropic] = map[string][]int64{"pro": {claude.ID}}
 	require.NoError(t, f.repo.SaveSharedSettings(ctx, s))
 	saved, err := f.repo.SharedSettings(ctx)
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestSharedPoolSettingsPostgresLegacyPayloadPreservesAndEmptyClears(t *testi
 	require.NoError(t, err)
 	require.Equal(t, s.SubscriptionGroupIDs, saved.SubscriptionGroupIDs)
 	require.Equal(t, 700, saved.PlatformRateBPS)
-	legacy.SubscriptionGroupIDs = map[string]map[string]int64{}
+	legacy.SubscriptionGroupIDs = service.SharedPoolSubscriptionGroupIDs{}
 	require.NoError(t, f.repo.SaveSharedSettings(ctx, &legacy))
 	saved, err = f.repo.SharedSettings(ctx)
 	require.NoError(t, err)
@@ -83,8 +83,8 @@ func TestSharedPoolSettingsPostgresInvalidSubscriptionRollsBackAllFields(t *test
 			changed := sharedSubscriptionSettings(f)
 			changed.PlatformRateBPS, changed.MaxConcurrency = 900, 20
 			changed.SettlementMultiplier = 2.5
-			changed.DefaultGroupIDs[service.PlatformOpenAI] = f.b
-			changed.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = group.ID
+			changed.DefaultGroupIDs[service.PlatformOpenAI] = []int64{f.b}
+			changed.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = []int64{group.ID}
 			require.Error(t, f.repo.SaveSharedSettings(ctx, changed))
 			saved, err := f.repo.SharedSettings(ctx)
 			require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestSharedPoolSettingsPostgresInvalidSubscriptionRollsBackAllFields(t *test
 		})
 	}
 	missing := sharedSubscriptionSettings(f)
-	missing.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = 999999999
+	missing.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = []int64{999999999}
 	require.Error(t, f.repo.SaveSharedSettings(ctx, missing))
 	saved, err := f.repo.SharedSettings(ctx)
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestSharedPoolSettingsPostgresSubscriptionsRequireDefault(t *testing.T) {
 	require.NoError(t, f.repo.SaveSharedSettings(ctx, original))
 	for _, legacy := range []bool{false, true} {
 		changed := sharedSubscriptionSettings(f)
-		changed.DefaultGroupIDs = map[string]int64{}
+		changed.DefaultGroupIDs = service.SharedPoolDefaultGroupIDs{}
 		if legacy {
 			changed.SubscriptionGroupIDs = nil
 		}
@@ -127,7 +127,7 @@ func TestSharedPoolSettingsPostgresInvalidRatesRollBackSubscriptionChange(t *tes
 	changed := sharedSubscriptionSettings(f)
 	changed.ProxyRateBPS = 101
 	changed.SettlementMultiplier = 2.5
-	changed.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = f.a
+	changed.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = []int64{f.a}
 	require.Error(t, f.repo.SaveSharedSettings(ctx, changed))
 	saved, err := f.repo.SharedSettings(ctx)
 	require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestSharedPoolSettingsPostgresMigrationPreservesLegacySettings(t *testing.T
 	require.Equal(t, 500, saved.PlatformRateBPS)
 	require.Equal(t, 150, saved.ProxyRateBPS)
 	require.Equal(t, 7, saved.MaxConcurrency)
-	require.Equal(t, map[string]int64{service.PlatformOpenAI: f.a}, saved.DefaultGroupIDs)
+	require.Equal(t, service.SharedPoolDefaultGroupIDs{service.PlatformOpenAI: {f.a}}, saved.DefaultGroupIDs)
 	require.NotNil(t, saved.SubscriptionGroupIDs)
 	require.Empty(t, saved.SubscriptionGroupIDs)
 	require.Equal(t, 1.0, saved.SettlementMultiplier)
@@ -170,12 +170,12 @@ func TestSharedPoolSettingsPostgresOrdinaryStandardGroupsAllowed(t *testing.T) {
 				SetIsSharedPool(false).SetSubscriptionType("standard").SetRateMultiplier(1.5).Save(ctx)
 			require.NoError(t, err)
 			s := sharedSubscriptionSettings(f)
-			s.DefaultGroupIDs[platform] = group.ID
+			s.DefaultGroupIDs[platform] = []int64{group.ID}
 			tier := "plus"
 			if platform == service.PlatformAnthropic {
 				tier = "pro"
 			}
-			s.SubscriptionGroupIDs[platform] = map[string]int64{tier: group.ID}
+			s.SubscriptionGroupIDs[platform] = map[string][]int64{tier: {group.ID}}
 			require.NoError(t, f.repo.SaveSharedSettings(ctx, s))
 			saved, err := f.repo.SharedSettings(ctx)
 			require.NoError(t, err)

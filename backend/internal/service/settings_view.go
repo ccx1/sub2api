@@ -251,8 +251,9 @@ type SystemSettings struct {
 	OpenAICodexClientVersionSynced         string // 自动同步到的官方最新稳定版版本号（只读展示）
 	OpenAICodexVersionAutoSyncEnabled      bool   // 是否启用 Codex 客户端版本号自动同步（默认 true）
 	OpenAICodexTicketEnabled               bool   // Codex 292 打票总开关；关闭则不打票不注入
-	OpenAICodexTicketHarvestProxyURL       string // Codex 292 打票代理 URL；空则回退 yaml/env
-	OpenAICodexTicketHarvestProxyMode      string // fixed/pool；缺失时兼容既有代理 URL
+	OpenAICodexTicketHarvestProxyURL       string // 旧版 Codex 打票代理 URL；固定托管代理优先使用 ID
+	OpenAICodexTicketHarvestProxyMode      string // account/inherit/random/fixed；pool 为旧版兼容别名
+	OpenAICodexTicketHarvestProxyID        int64  // 固定托管代理 ID
 	ProxyPoolMaxAccounts                   int    // 单条代理的账号关联上限，0 表示不设硬上限
 	ClaudeCodeClientVersion                string // 出站声明的 Claude Code CLI 客户端版本号（管理员覆写）；空值跟随自动同步值
 	ClaudeCodeClientVersionSynced          string // 自动同步到的官方最新版本号（只读展示）

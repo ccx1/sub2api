@@ -105,3 +105,8 @@ func (h *SharedPoolHandler) AdminEarnings(c *gin.Context) {
 	}
 	h.listEarnings(c, ownerID)
 }
+
+func (h *SharedPoolHandler) AdminUserEarnings(c *gin.Context) {
+	data, err := h.earnings.UserEarnings(c.Request.Context())
+	sharedReply(c, data, err)
+}

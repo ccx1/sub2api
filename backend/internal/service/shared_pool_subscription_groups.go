@@ -103,56 +103,89 @@ func (s *SharedPoolService) sharedAssignmentGroup(ctx context.Context, a *Accoun
 	return g, nil
 }
 
-func (s *SharedPoolService) initialSharedGroup(ctx context.Context, cfg *SharedPoolSettings, a *Account) (int64, error) {
+func (s *SharedPoolService) initialSharedGroups(ctx context.Context, cfg *SharedPoolSettings, a *Account) ([]int64, error) {
 	if tier := sharedAccountSubscriptionTier(a); tier != "" {
-		g, err := s.sharedAssignmentGroup(ctx, a, cfg.SubscriptionGroupIDs[a.Platform][tier])
+		ids := make([]int64, 0, len(cfg.SubscriptionGroupIDs[a.Platform][tier]))
+		seen := make(map[int64]bool)
+		for _, id := range cfg.SubscriptionGroupIDs[a.Platform][tier] {
+			if seen[id] {
+				continue
+			}
+			g, err := s.sharedAssignmentGroup(ctx, a, id)
+			if err != nil {
+				return nil, err
+			}
+			if g != nil {
+				ids = append(ids, g.ID)
+				seen[g.ID] = true
+			}
+		}
+		if len(ids) > 0 {
+			return ids, nil
+		}
+	}
+	ids := []int64{}
+	seen := make(map[int64]bool)
+	for _, id := range cfg.DefaultGroupIDs[a.Platform] {
+		if seen[id] {
+			continue
+		}
+		g, err := s.sharedAssignmentGroup(ctx, a, id)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		if g != nil {
-			return g.ID, nil
+			ids = append(ids, g.ID)
+			seen[id] = true
 		}
 	}
-	g, err := s.sharedAssignmentGroup(ctx, a, cfg.DefaultGroupIDs[a.Platform])
-	if err != nil {
-		return 0, err
+	if len(ids) == 0 && !SharedPoolDispatchConsented(a) {
+		return nil, infraerrors.BadRequest("SHARED_DEFAULT_REQUIRED", "此平台的默认共享分组未配置或不可用于该账号，请联系管理员")
 	}
-	if g == nil {
-		if SharedPoolDispatchConsented(a) {
-			return 0, nil
-		}
-		return 0, infraerrors.BadRequest("SHARED_DEFAULT_REQUIRED", "此平台的默认共享分组未配置或不可用于该账号，请联系管理员")
-	}
-	return g.ID, nil
+	return ids, nil
 }
 
 func (s *SharedPoolService) validateSharedGroupSettings(ctx context.Context, cfg *SharedPoolSettings) error {
-	if cfg.DefaultGroupIDs == nil {
-		cfg.DefaultGroupIDs = map[string]int64{}
+	normalizedDefaults, err := NormalizeSharedDefaultGroupIDs(cfg.DefaultGroupIDs)
+	if err != nil {
+		return err
 	}
-	for platform, id := range cfg.DefaultGroupIDs {
-		g, err := s.groups.GetByID(ctx, id)
-		if err != nil || !validSharedAssignmentGroup(g, platform) {
-			return infraerrors.BadRequest("INVALID_SHARED_DEFAULT", "默认分组必须是同平台已启用的非专属标准分组")
+	for platform, ids := range normalizedDefaults {
+		for _, id := range ids {
+			g, err := s.groups.GetByID(ctx, id)
+			if err != nil || !validSharedAssignmentGroup(g, platform) {
+				return infraerrors.BadRequest("INVALID_SHARED_DEFAULT", "默认分组必须是同平台已启用的非专属标准分组")
+			}
 		}
 	}
+	cfg.DefaultGroupIDs = normalizedDefaults
 	// nil 保留旧客户端未提交的规则，空对象表示主动清空。
 	if cfg.SubscriptionGroupIDs == nil {
 		return nil
 	}
-	normalized := make(map[string]map[string]int64, len(cfg.SubscriptionGroupIDs))
+	normalizedInput, err := NormalizeSharedSubscriptionGroupIDs(cfg.SubscriptionGroupIDs)
+	if err != nil {
+		return err
+	}
+	normalized := make(SharedPoolSubscriptionGroupIDs, len(cfg.SubscriptionGroupIDs))
 	for platform, rules := range cfg.SubscriptionGroupIDs {
-		if !sharedPlatformSupported(platform) || (len(rules) > 0 && cfg.DefaultGroupIDs[platform] <= 0) {
+		if !sharedPlatformSupported(platform) || (len(rules) > 0 && len(cfg.DefaultGroupIDs[platform]) == 0) {
 			return infraerrors.BadRequest("INVALID_SHARED_SUBSCRIPTION_GROUP", "请先为订阅档位规则设置同平台默认共享分组")
 		}
-		normalized[platform] = make(map[string]int64, len(rules))
-		for raw, id := range rules {
+		normalized[platform] = make(map[string][]int64, len(rules))
+		for raw := range rules {
 			tier := canonicalSharedSubscriptionTier(platform, raw)
-			g, err := s.groups.GetByID(ctx, id)
-			if tier == "" || normalized[platform][tier] != 0 || id <= 0 || err != nil || !validSharedAssignmentGroup(g, platform) {
+			normalizedIDs := normalizedInput[platform][raw]
+			if tier == "" || len(normalizedIDs) == 0 || len(normalized[platform][tier]) != 0 {
 				return infraerrors.BadRequest("INVALID_SHARED_SUBSCRIPTION_GROUP", "订阅档位无效、重复或目标共享分组不可用")
 			}
-			normalized[platform][tier] = id
+			for _, id := range normalizedIDs {
+				g, err := s.groups.GetByID(ctx, id)
+				if err != nil || !validSharedAssignmentGroup(g, platform) {
+					return infraerrors.BadRequest("INVALID_SHARED_SUBSCRIPTION_GROUP", "订阅档位无效、重复或目标共享分组不可用")
+				}
+			}
+			normalized[platform][tier] = append([]int64(nil), normalizedIDs...)
 		}
 	}
 	cfg.SubscriptionGroupIDs = normalized

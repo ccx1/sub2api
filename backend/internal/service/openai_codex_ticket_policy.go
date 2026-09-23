@@ -65,7 +65,7 @@ func openAICodexTicketTargetLength(account *Account, cfg config.OpenAICodexTicke
 }
 
 func codexTicketStateRejected(state string, cfg config.OpenAICodexTicketConfig) bool {
-	if cfg.LengthMode == config.CodexTicketLengthAuto {
+	if config.CodexTicketUsesCookies(cfg) || cfg.LengthMode == config.CodexTicketLengthAuto {
 		return false
 	}
 	return strings.HasPrefix(state, openAICodexTicketStatePrefix) && slices.Contains(cfg.RejectedLengths, len(state))
@@ -85,6 +85,17 @@ func codexTicketConfigGatesModel(cfg config.OpenAICodexTicketConfig, model strin
 }
 
 func (ticket *openAICodexTicket) usable(now time.Time, account *Account, cfg config.OpenAICodexTicketConfig) bool {
+	cfg = resolveCodexTicketCredentialConfig(account, cfg)
+	if ticket == nil || !ticket.accountCompatible(account) ||
+		(ticket.VerificationSkipped && config.CodexTicketBusinessVerificationEnabled(cfg)) {
+		return false
+	}
+	if config.CodexTicketUsesCookies(cfg) {
+		return ticket.cookieUsable(now, cfg)
+	}
+	if ticket.usesCookies() {
+		return false
+	}
 	if cfg.LengthMode == config.CodexTicketLengthAuto {
 		return ticket.autoUsable(now, account)
 	}
@@ -95,7 +106,7 @@ func (s *OpenAIGatewayService) openAICodexTicketProbeConfigCurrent(ctx context.C
 	if input.Config == nil {
 		return true
 	}
-	current, captured := s.openAICodexTicketConfigContext(ctx), *input.Config
+	current, captured := s.openAICodexTicketConfigForAccount(ctx, input.Account), resolveCodexTicketCredentialConfig(input.Account, *input.Config)
 	// 总开关由 controls 单独检查，配置快照只用于阻止旧规则继续出站及发布。
 	current.Enabled, captured.Enabled = false, false
 	current.HarvestProxyURL, captured.HarvestProxyURL = "", ""

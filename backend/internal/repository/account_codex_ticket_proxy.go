@@ -23,7 +23,11 @@ func (r *accountRepository) GetCodexTicketProxy(ctx context.Context, id int64) (
 func (r *accountRepository) prepareCodexTicketProxyUpdate(ctx context.Context, ids []int64, updates map[string]any) (map[string]any, error) {
 	mode, hasMode := updates[service.CodexTicketProxyModeExtraKey]
 	_, hasID := updates[service.CodexTicketProxyIDExtraKey]
-	if !hasMode && !hasID {
+	_, hasStrategy := updates[service.CodexTicketProxyStrategyExtraKey]
+	_, hasCredentialPolicy := updates[service.CodexTicketCredentialPolicyExtraKey]
+	_, hasRegionMode := updates[service.ProxyRegionModeExtraKey]
+	_, hasRegionCountry := updates[service.ProxyRegionCountryExtraKey]
+	if !hasMode && !hasID && !hasStrategy && !hasCredentialPolicy && !hasRegionMode && !hasRegionCountry {
 		return updates, nil
 	}
 	updates = copyJSONMap(updates)
@@ -48,6 +52,10 @@ func (r *accountRepository) prepareCodexTicketProxyUpdate(ctx context.Context, i
 			}
 		}
 		merged := service.MergeOpenAICodexTicketExtra(copyJSONMap(updates), current)
+		merged = service.PreserveAccountProxyRegion(ctx, current, merged)
+		if err := service.ValidateProxyRegionExtra(merged); err != nil {
+			return nil, err
+		}
 		if err := service.ValidateCodexTicketProxyExtra(merged); err != nil {
 			return nil, err
 		}
@@ -58,7 +66,11 @@ func (r *accountRepository) prepareCodexTicketProxyUpdate(ctx context.Context, i
 func needsCodexTicketProxyTransaction(ctx context.Context, extra map[string]any) bool {
 	_, mode := extra[service.CodexTicketProxyModeExtraKey]
 	_, id := extra[service.CodexTicketProxyIDExtraKey]
-	return (mode || id) && dbent.TxFromContext(ctx) == nil
+	_, strategy := extra[service.CodexTicketProxyStrategyExtraKey]
+	_, credentialPolicy := extra[service.CodexTicketCredentialPolicyExtraKey]
+	_, regionMode := extra[service.ProxyRegionModeExtraKey]
+	_, regionCountry := extra[service.ProxyRegionCountryExtraKey]
+	return (mode || id || strategy || credentialPolicy || regionMode || regionCountry) && dbent.TxFromContext(ctx) == nil
 }
 
 func (r *accountRepository) updateCodexTicketProxyExtra(ctx context.Context, id int64, updates map[string]any) error {
@@ -95,6 +107,6 @@ func (r *accountRepository) bulkUpdateCodexTicketProxy(ctx context.Context, ids 
 }
 
 func preserveCodexTicketProxyExtraSQL(expression string) string {
-	keys := "ARRAY['codex_ticket_proxy_mode','codex_ticket_proxy_id']::text[]"
+	keys := "ARRAY['codex_ticket_proxy_mode','codex_ticket_proxy_id','codex_ticket_proxy_strategy','codex_ticket_credential_policy']::text[]"
 	return "(" + expression + ") || COALESCE((SELECT jsonb_object_agg(key,value) FROM jsonb_each(COALESCE(extra,'{}'::jsonb)) WHERE key = ANY(" + keys + ") AND NOT ((" + expression + ") ? key)), '{}'::jsonb)"
 }

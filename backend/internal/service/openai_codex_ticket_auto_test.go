@@ -41,8 +41,14 @@ func TestCodexTicketAutoAcceptsDifferentLengthsAcrossTiersAndModels(t *testing.T
 					require.Equal(t, length, ticket.Length)
 					require.Len(t, upstream.requests, 2)
 					require.Equal(t, ticket.State, upstream.requests[1].Header.Get(openAICodexTurnStateHeader))
+					upstream.respond = func(int) *http.Response {
+						return codexTicketCompletedResponse(model, "gAAAAA"+strings.Repeat("C", length-6))
+					}
 					svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, model)
-					require.Len(t, upstream.requests, 2, "随机打票优先复用经过复验的现有票")
+					require.Len(t, upstream.requests, 4, "自动采集补足独立备用票")
+					require.Equal(t, ticket.State, svc.lookupOpenAICodexTicket(repo.account, model).State, "补备不能替换当前主票")
+					svc.probeOnceOpenAICodexTicket(context.Background(), repo.account, model)
+					require.Len(t, upstream.requests, 4, "主备齐备后停止重复采集")
 					requireAutoTicketRuntimeAvailability(t, svc, repo.account, ticket, true)
 				})
 			}

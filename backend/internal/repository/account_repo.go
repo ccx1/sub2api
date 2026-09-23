@@ -590,8 +590,8 @@ func (r *accountRepository) updateLockedAccount(
 
 	if account.IsRandomProxy() {
 		builder.ClearProxyID()
-	} else if account.ProxyID != nil {
-		builder.SetProxyID(*account.ProxyID)
+	} else if configured := account.ConfiguredProxySnapshot(); configured.ProxyID != nil {
+		builder.SetProxyID(*configured.ProxyID)
 	} else {
 		builder.ClearProxyID()
 	}
@@ -652,6 +652,7 @@ func lockAndMergeAccountProbeExtra(
 	explicitProbeEnabled *bool,
 	explicitRateSyncEnabled *bool,
 ) (map[string]any, error) {
+	account = account.ConfiguredProxySnapshot()
 	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
 	if err != nil {
 		return nil, err
@@ -1124,7 +1125,26 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		}
 	}
 	if search != "" {
-		q = q.Where(dbaccount.NameContainsFold(search))
+		// 共享账号的实际归属用户保存在 shared_pool_accounts，而不是 accounts。
+		// 管理端账号搜索需要能按共享用户的邮箱、用户名或 ID 找到账号，
+		// 同时保留原有按账号名称搜索的行为。
+		ownerSearch := "%" + search + "%"
+		q = q.Where(dbaccount.Or(
+			dbaccount.NameContainsFold(search),
+			dbpredicate.Account(func(s *entsql.Selector) {
+				s.Where(entsql.P(func(b *entsql.Builder) {
+					b.WriteString("EXISTS (SELECT 1 FROM shared_pool_accounts spa JOIN users u ON u.id = spa.owner_user_id WHERE spa.account_id = ")
+					b.WriteString(s.C("id"))
+					b.WriteString(" AND (LOWER(u.email) LIKE LOWER(")
+					b.Arg(ownerSearch)
+					b.WriteString(") OR LOWER(u.username) LIKE LOWER(")
+					b.Arg(ownerSearch)
+					b.WriteString(") OR CAST(u.id AS TEXT) LIKE ")
+					b.Arg(ownerSearch)
+					b.WriteString("))")
+				}))
+			}),
+		))
 	}
 	if groupID == service.AccountListGroupUngrouped {
 		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))

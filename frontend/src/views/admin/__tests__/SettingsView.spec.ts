@@ -32,6 +32,7 @@ const {
   updateOllamaCloudUsageSettings,
   getGroups,
   listProxies,
+  getAllWithCount,
   getProviders,
   updateProvider,
   createProvider,
@@ -73,6 +74,7 @@ const {
   updateOllamaCloudUsageSettings: vi.fn().mockImplementation(async (payload) => payload),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
+  getAllWithCount: vi.fn(),
   getProviders: vi.fn(),
   updateProvider: vi.fn(),
   createProvider: vi.fn(),
@@ -113,6 +115,7 @@ vi.mock("@/api", () => ({
     },
     proxies: {
       list: listProxies,
+      getAllWithCount,
     },
     payment: {
       getProviders,
@@ -650,6 +653,7 @@ describe("admin SettingsView payment visible method controls", () => {
     updateOllamaCloudUsageSettings.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
+    getAllWithCount.mockReset();
     getProviders.mockReset();
     updateProvider.mockReset();
     createProvider.mockReset();
@@ -718,6 +722,7 @@ describe("admin SettingsView payment visible method controls", () => {
     listProxies.mockResolvedValue({
       items: [],
     });
+    getAllWithCount.mockResolvedValue([]);
     getProviders.mockResolvedValue({
       data: [],
     });
@@ -760,28 +765,74 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
-  it("defaults ticket harvesting to the balanced pool and saves its account limit", async () => {
+  it("defaults ticket harvesting to the random proxy pool and saves its account limit", async () => {
     const wrapper = mountView();
     await flushPromises();
     const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
-    expect(mode.element.value).toBe("pool");
+    expect(mode.element.value).toBe("random");
     expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
-    expect(wrapper.text()).toContain("admin.settings.gatewayForwarding.codexTicketHarvestProxyPoolDesc");
+    expect(wrapper.text()).toContain("admin.settings.gatewayForwarding.codexTicketHarvestProxyRandomDesc");
     await wrapper.get("#proxy-pool-max-accounts").setValue(3);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      openai_codex_ticket_harvest_proxy_mode: "pool",
+      openai_codex_ticket_harvest_proxy_mode: "random",
       proxy_pool_max_accounts: 3,
     }));
     wrapper.unmount();
   });
 
-  it("keeps a stored fixed URL when changing between pool and fixed modes", async () => {
-    const maskedURL = "http://user:***@old.example.com:8080";
+  it("preserves the legacy pool mode until the admin chooses a new mode", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       openai_codex_ticket_harvest_proxy_mode: "pool",
+      openai_codex_ticket_harvest_proxy_url: "",
+      openai_codex_ticket_harvest_proxy_configured: false,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode").element.value).toBe("random");
+    expect(wrapper.text()).toContain("admin.settings.gatewayForwarding.codexTicketHarvestProxyPoolDesc");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_harvest_proxy_mode: "pool",
+    }));
+    await wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode").setValue("account");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+      openai_codex_ticket_harvest_proxy_mode: "account",
+    }));
+    wrapper.unmount();
+  });
+
+  it("exposes all four global harvest proxy modes", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
+    expect(Array.from(mode.element.options).map((option) => option.value)).toEqual([
+      "account",
+      "inherit",
+      "random",
+      "fixed",
+    ]);
+
+    await mode.setValue("account");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_harvest_proxy_mode: "account",
+      openai_codex_ticket_harvest_proxy_id: 0,
+    }));
+    wrapper.unmount();
+  });
+
+  it("keeps a stored fixed URL when changing between random and fixed modes", async () => {
+    const maskedURL = "http://user:***@old.example.com:8080";
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_harvest_proxy_mode: "random",
       openai_codex_ticket_harvest_proxy_url: maskedURL,
       openai_codex_ticket_harvest_proxy_configured: true,
       proxy_pool_max_accounts: 5,
@@ -789,7 +840,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
     await flushPromises();
     const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
-    expect(mode.element.value).toBe("pool");
+    expect(mode.element.value).toBe("random");
     expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
     expect(wrapper.get<HTMLInputElement>("#proxy-pool-max-accounts").element.value).toBe("5");
     await mode.setValue("fixed");
@@ -814,12 +865,12 @@ describe("admin SettingsView payment visible method controls", () => {
     const mode = wrapper.get<HTMLSelectElement>("#codex-ticket-harvest-proxy-mode");
     expect(mode.element.value).toBe("fixed");
     expect(wrapper.get<HTMLInputElement>("#codex-ticket-harvest-proxy").element.value).toBe("");
-    await mode.setValue("pool");
+    await mode.setValue("random");
     expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      openai_codex_ticket_harvest_proxy_mode: "pool",
+      openai_codex_ticket_harvest_proxy_mode: "random",
       openai_codex_ticket_harvest_proxy_url: "",
       proxy_pool_max_accounts: 0,
     }));
@@ -1771,6 +1822,7 @@ describe("admin SettingsView wechat connect controls", () => {
     getBetaPolicySettings.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
+    getAllWithCount.mockReset();
     getProviders.mockReset();
     updateProvider.mockReset();
     createProvider.mockReset();
@@ -1828,6 +1880,7 @@ describe("admin SettingsView wechat connect controls", () => {
       rules: [],
     });
     getGroups.mockResolvedValue([]);
+    getAllWithCount.mockResolvedValue([]);
     listProxies.mockResolvedValue({
       items: [],
     });
@@ -2037,6 +2090,7 @@ describe("admin SettingsView platform quota matrix", () => {
     getBetaPolicySettings.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
+    getAllWithCount.mockReset();
     getProviders.mockReset();
     updateProvider.mockReset();
     createProvider.mockReset();
@@ -2062,6 +2116,7 @@ describe("admin SettingsView platform quota matrix", () => {
     getRectifierSettings.mockResolvedValue({});
     getBetaPolicySettings.mockResolvedValue({});
     getGroups.mockResolvedValue([]);
+    getAllWithCount.mockResolvedValue([]);
     listProxies.mockResolvedValue({ items: [] });
     getProviders.mockResolvedValue({ data: [] });
   });

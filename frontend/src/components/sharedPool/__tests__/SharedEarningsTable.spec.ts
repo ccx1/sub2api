@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SharedEarningsTable from '../SharedEarningsTable.vue'
 
-const { userEarnings, adminEarnings } = vi.hoisted(() => ({ userEarnings: vi.fn(), adminEarnings: vi.fn() }))
-vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: { earnings: userEarnings }, adminSharedPoolAPI: { earnings: adminEarnings } }))
+const { userEarnings, adminEarnings, adminUserEarnings } = vi.hoisted(() => ({ userEarnings: vi.fn(), adminEarnings: vi.fn(), adminUserEarnings: vi.fn() }))
+vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: { earnings: userEarnings }, adminSharedPoolAPI: { earnings: adminEarnings, userEarnings: adminUserEarnings } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 
@@ -18,6 +18,7 @@ describe('shared earnings rate snapshots', () => {
     vi.clearAllMocks()
     userEarnings.mockResolvedValue(page)
     adminEarnings.mockResolvedValue(page)
+    adminUserEarnings.mockResolvedValue([])
   })
 
   it('distinguishes billing from independent settlement and retains negative platform margin', async () => {
@@ -48,6 +49,27 @@ describe('shared earnings rate snapshots', () => {
     expect(rows[1].text()).toContain('sharedPool.proxyShare 0%')
     expect(admin ? adminEarnings : userEarnings).toHaveBeenCalledWith(1)
     expect(admin ? userEarnings : adminEarnings).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows administrator earnings grouped by contributor', async () => {
+    adminUserEarnings.mockResolvedValue([{ user_id: 6, email: 'owner@example.com', account_count: 3, account_tiers: [{ tier: 'pro', count: 2 }, { tier: 'team', count: 1 }], earnings_count: 3, total_earned: 12.5, available: 5, pending: 2.5, transferred: 5 }])
+    const wrapper = mount(SharedEarningsTable, { props: { admin: true }, global: { stubs: { Pagination: true } } })
+    await flushPromises()
+    expect(adminUserEarnings).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-test="user-earnings-summary"]').text()).toContain('owner@example.com')
+    expect(wrapper.get('[data-test="user-earnings-summary"]').text()).toContain('$12.500000')
+    expect(wrapper.get('[data-test="user-earnings-summary"]').text()).toContain('3')
+    expect(wrapper.get('[data-test="account-tiers"]').text()).toContain('pro × 2')
+    expect(wrapper.get('[data-test="account-tiers"]').text()).toContain('team × 1')
+    wrapper.unmount()
+  })
+
+  it('keeps the account tier cell usable when older responses omit account_tiers', async () => {
+    adminUserEarnings.mockResolvedValue([{ user_id: 7, email: 'legacy@example.com', account_count: 1, earnings_count: 0, total_earned: 0, available: 0, pending: 0, transferred: 0 }])
+    const wrapper = mount(SharedEarningsTable, { props: { admin: true }, global: { stubs: { Pagination: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="account-tiers"]').text()).toBe('—')
     wrapper.unmount()
   })
 })

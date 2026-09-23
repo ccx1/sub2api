@@ -27,7 +27,7 @@ func TestCodexTicketRetryModelsRequiresConfiguredModel(t *testing.T) {
 	require.ErrorIs(t, err, ErrCodexTicketRetryModel)
 }
 
-func TestCodexTicketRetrySchedulesMissingAndSkipsHealthyTickets(t *testing.T) {
+func TestCodexTicketRetrySchedulesEveryConfiguredModel(t *testing.T) {
 	account := ticketTestAccount(41)
 	account.Status = StatusActive
 	repo := &codexTicketRetryRepo{account: account}
@@ -45,9 +45,9 @@ func TestCodexTicketRetrySchedulesMissingAndSkipsHealthyTickets(t *testing.T) {
 	svc.openaiCodexTicketBackoff.Store(codexTicketBackoffKey(account, "tok", "gpt-6-astra"), &codexTicketBackoffState{Failures: 3, RetryAt: time.Now().Add(time.Hour)})
 	result, err := svc.RetryOpenAICodexTicket(context.Background(), account.ID, "")
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Scheduled)
-	require.Equal(t, 1, result.Skipped)
-	require.Equal(t, []string{"gpt-6-astra"}, result.Models)
+	require.Equal(t, 2, result.Scheduled)
+	require.Zero(t, result.Skipped)
+	require.Equal(t, []string{"gpt-6-astra", "gpt-5.6-sol"}, result.Models)
 	_, exists := svc.openaiCodexTicketBackoff.Load(codexTicketBackoffKey(account, "tok", "gpt-6-astra"))
 	require.False(t, exists)
 }

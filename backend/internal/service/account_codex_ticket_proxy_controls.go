@@ -10,12 +10,16 @@ func (s *OpenAIGatewayService) keepUsableCodexTicketForProxy(ctx context.Context
 		return false
 	}
 	policy, err := s.codexTicketProxyPolicy(ctx, account)
-	return err == nil && policy.mode == "pool"
+	return err == nil && (policy.mode == "pool" || policy.mode == CodexTicketProxyModeRandom || policy.mode == CodexTicketProxyModeAccount)
 }
 
 func (s *OpenAIGatewayService) codexTicketProxyPolicyCurrent(ctx context.Context, input openAICodexTicketProbeInput) bool {
 	if input.HarvestProxyPolicy == nil {
 		return true
+	}
+	if input.HarvestProxyPolicy.followBusiness {
+		policy, err := s.scheduledCodexTicketProxyPolicy(ctx, input.Account)
+		return err == nil && policy == *input.HarvestProxyPolicy
 	}
 	policy, err := s.codexTicketProxyPolicy(ctx, input.Account)
 	return err == nil && policy == *input.HarvestProxyPolicy
@@ -30,5 +34,6 @@ func (s *OpenAIGatewayService) codexTicketAccountCurrentBeforePublish(ctx contex
 		return false
 	}
 	input.Account = account
-	return s.codexTicketProxyPolicyCurrent(ctx, input)
+	// 账号撤销覆盖后必须重新读取全局默认，不能在旧有效配置上继续叠加。
+	return s.openAICodexTicketProbeConfigCurrent(ctx, input) && s.codexTicketProxyPolicyCurrent(ctx, input)
 }

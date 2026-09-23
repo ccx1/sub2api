@@ -490,15 +490,42 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
 	}
-	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL)
 	harvestProxyMode, err := s.resolveCodexTicketHarvestProxyMode(settings.OpenAICodexTicketHarvestProxyMode, settings.OpenAICodexTicketHarvestProxyURL)
 	if err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY_MODE", err.Error())
 	}
+	if settings.OpenAICodexTicketHarvestProxyID < 0 {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY_ID", "打票代理 ID 不能为负数")
+	}
+	legacyConfigURL := ""
+	if s != nil && s.cfg != nil {
+		legacyConfigURL = strings.TrimSpace(s.cfg.Gateway.OpenAICodexTicket.HarvestProxyURL)
+	}
+	if harvestProxyMode == OpenAICodexTicketHarvestProxyModeFixed && settings.OpenAICodexTicketHarvestProxyID == 0 && strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL) == "" && legacyConfigURL == "" {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", "固定打票代理必须选择托管代理或填写代理 URL")
+	}
+	proxyURL := strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL)
+	proxyID := settings.OpenAICodexTicketHarvestProxyID
+	if harvestProxyMode != OpenAICodexTicketHarvestProxyModeFixed {
+		proxyURL = ""
+		proxyID = 0
+	} else if proxyID > 0 {
+		if s.proxyRepo == nil {
+			return nil, infraerrors.BadRequest("CODEX_TICKET_PROXY_UNAVAILABLE", "固定打票代理不可用")
+		}
+		proxy, loadErr := s.proxyRepo.GetByID(ctx, proxyID)
+		if loadErr != nil || !codexTicketProxyAvailable(proxy) || proxy.ID != proxyID {
+			return nil, infraerrors.BadRequest("CODEX_TICKET_PROXY_UNAVAILABLE", "固定打票代理不存在、已停用或已过期")
+		}
+		// 托管代理是唯一来源，避免把前端回显的掩码 URL 持久化成真实配置。
+		proxyURL = ""
+	}
+	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = proxyURL
 	if err := validateProxyPoolMaxAccounts(settings.ProxyPoolMaxAccounts); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_PROXY_POOL_MAX_ACCOUNTS", err.Error())
 	}
 	updates[SettingKeyOpenAICodexTicketHarvestProxyMode] = harvestProxyMode
+	updates[SettingKeyOpenAICodexTicketHarvestProxyID] = strconv.FormatInt(proxyID, 10)
 	updates[SettingKeyProxyPoolMaxAccounts] = strconv.Itoa(settings.ProxyPoolMaxAccounts)
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。

@@ -78,3 +78,25 @@ func TestLockedProtectionIgnoresStaleExtraAndKeepsLatestObservation(t *testing.T
 	require.Equal(t, true, account.Extra["custom"])
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestProtectionEnablePreservesTicketChoiceAfterLockedExtraMerge(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	defer client.Close()
+	original := time.Now().UTC().Truncate(time.Microsecond)
+	mock.ExpectQuery(`SELECT extra, updated_at FROM accounts`).WithArgs(int64(7)).WillReturnRows(
+		sqlmock.NewRows([]string{"extra", "updated_at"}).AddRow([]byte(`{"codex_ticket_enabled":false,"custom":"keep"}`), original))
+	store := &protectionLockedStore{account: &service.Account{
+		ID: 7, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Concurrency: 4, UpdatedAt: original,
+		Extra: map[string]any{service.OpenAICodexTicketEnabledExtraKey: false, "custom": "keep"},
+	}, client: client}
+	account, err := service.NewAntiDegradeService(store).SetProtection(context.Background(), 7, true, false)
+	require.NoError(t, err)
+	require.True(t, account.AntiDegradationEnabled())
+	require.False(t, service.OpenAICodexTicketAccountEnabled(account))
+	require.Equal(t, false, account.Extra[service.OpenAICodexTicketEnabledExtraKey])
+	require.Equal(t, "keep", account.Extra["custom"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}

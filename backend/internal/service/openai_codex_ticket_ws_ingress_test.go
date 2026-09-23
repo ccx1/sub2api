@@ -33,8 +33,15 @@ func TestCodexTicketWSIngressRenewalBetweenTurns(t *testing.T) {
 	for _, scenario := range []struct {
 		name         string
 		renew        bool
+		revoke       bool
 		continuation bool
-	}{{"same ticket", false, false}, {"new ticket", true, false}, {"continuation with new ticket", true, true}} {
+	}{
+		{"same ticket", false, false, false},
+		{"standby preserves primary", true, false, false},
+		{"continuation preserves primary", true, false, true},
+		{"revoked primary switches to standby", true, true, false},
+		{"continuation with revoked primary", true, true, true},
+	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			s, account, receipt := codexTicketWSFixture(t)
 			account.Extra = map[string]any{"responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_enabled": true}
@@ -76,6 +83,11 @@ func TestCodexTicketWSIngressRenewalBetweenTurns(t *testing.T) {
 			if scenario.renew {
 				next.State, next.CapturedAt = "gAAAAA"+strings.Repeat("N", 286), time.Now()
 				require.True(t, s.storeOpenAICodexTicket(context.Background(), account, &next))
+				require.Equal(t, receipt.ticket.State, s.lookupOpenAICodexTicket(account, next.Model).State)
+			}
+			if scenario.revoke {
+				s.invalidateOpenAICodexTicket(context.Background(), account, &receipt.ticket)
+				require.Equal(t, next.State, s.lookupOpenAICodexTicket(account, next.Model).State)
 			}
 			previous := ""
 			if scenario.continuation {
@@ -90,9 +102,13 @@ func TestCodexTicketWSIngressRenewalBetweenTurns(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("ingress did not finish")
 			}
-			if !scenario.renew {
+			if !scenario.revoke {
 				require.Len(t, dialer.headers, 1)
+				require.Equal(t, receipt.ticket.State, dialer.headers[0].Get(openAICodexTurnStateHeader))
 				require.Len(t, first.writes, 2)
+				if scenario.continuation {
+					require.Equal(t, "resp_first", first.writes[1]["previous_response_id"])
+				}
 				return
 			}
 			require.Len(t, dialer.headers, 2)

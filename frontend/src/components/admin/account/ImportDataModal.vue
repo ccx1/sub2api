@@ -6,7 +6,7 @@
     close-on-click-outside
     @close="handleClose"
   >
-    <form id="import-data-form" class="space-y-4" @submit.prevent="handleImport">
+    <form id="import-data-form" class="space-y-4" @submit.prevent="handleImport()">
       <div class="text-sm text-gray-600 dark:text-dark-300">
         {{ t('admin.accounts.dataImportHint') }}
       </div>
@@ -61,6 +61,21 @@
         ></textarea>
       </div>
 
+      <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+        <div class="flex items-center justify-between gap-3">
+          <span id="import-protection-label" class="text-sm text-gray-700 dark:text-dark-200">
+            {{ t('admin.accounts.dataImportProtection') }}
+          </span>
+          <Toggle v-model="protectionEnabled" :disabled="importing" aria-labelledby="import-protection-label" />
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <span id="import-ticket-label" class="text-sm text-gray-700 dark:text-dark-200">
+            {{ t('admin.accounts.dataImportCodexTicket') }}
+          </span>
+          <Toggle v-model="codexTicketEnabled" :disabled="importing" aria-labelledby="import-ticket-label" />
+        </div>
+      </div>
+
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -88,7 +103,7 @@
     </form>
 
     <template #footer>
-      <div class="flex justify-end gap-3">
+      <div class="flex flex-wrap justify-end gap-3">
         <button class="btn btn-secondary" type="button" :disabled="importing" @click="handleClose">
           {{ t('common.cancel') }}
         </button>
@@ -98,7 +113,15 @@
           form="import-data-form"
           :disabled="importing"
         >
-          {{ importing ? t('admin.accounts.dataImporting') : t('admin.accounts.dataImportButton') }}
+          {{ importing && !editAfterImport ? t('admin.accounts.dataImporting') : t('admin.accounts.dataImportButton') }}
+        </button>
+        <button
+          class="btn btn-primary"
+          type="button"
+          :disabled="importing"
+          @click="handleImport(true)"
+        >
+          {{ importing && editAfterImport ? t('admin.accounts.dataImporting') : t('admin.accounts.dataImportAndEdit') }}
         </button>
       </div>
     </template>
@@ -109,6 +132,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type {
@@ -125,6 +149,7 @@ interface Props {
 interface Emits {
   (e: 'close'): void
   (e: 'imported'): void
+  (e: 'imported-and-edit', accountIds: number[]): void
 }
 
 const props = defineProps<Props>()
@@ -134,6 +159,9 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const importing = ref(false)
+const editAfterImport = ref(false)
+const protectionEnabled = ref(true)
+const codexTicketEnabled = ref(true)
 const jsonText = ref('')
 const files = ref<File[]>([])
 const dragDepth = ref(0)
@@ -160,6 +188,8 @@ watch(
   () => props.show,
   (open) => {
     if (open) {
+      protectionEnabled.value = true
+      codexTicketEnabled.value = true
       jsonText.value = ''
       files.value = []
       dragDepth.value = 0
@@ -285,13 +315,13 @@ const hasAccountsArrayOnly = (
 const toBatchImportResult = (res: {
   success: number
   failed: number
-  results: Array<{ success: boolean; account?: { name?: string }; error?: string }>
+  results: Array<{ success: boolean; id?: number; name?: string; account?: { id: number; name?: string }; error?: string }>
 }): AdminDataImportResult => {
   const errors: AdminDataImportError[] = res.results
     .filter((item) => !item.success)
     .map((item) => ({
       kind: 'account',
-      name: item.account?.name,
+      name: item.name ?? item.account?.name,
       message: item.error || t('admin.accounts.dataImportFailed')
     }))
 
@@ -301,6 +331,10 @@ const toBatchImportResult = (res: {
     proxy_failed: 0,
     account_created: res.success,
     account_failed: res.failed,
+    account_ids: res.results.flatMap(item => {
+      const id = item.id ?? item.account?.id
+      return item.success && id !== undefined ? [id] : []
+    }),
     errors
   }
 }
@@ -324,14 +358,15 @@ const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
 
 const importParsedPayload = async (payload: unknown): Promise<AdminDataImportResult> => {
   if (isAccountArrayPayload(payload)) {
-    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload))
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload, importOptions()))
   }
   if (hasAccountsArrayOnly(payload)) {
-    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload.accounts))
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload.accounts, importOptions()))
   }
   return adminAPI.accounts.importData({
     data: payload as AdminDataPayload,
-    skip_default_group_bind: true
+    skip_default_group_bind: true,
+    ...importOptions()
   })
 }
 
@@ -368,11 +403,18 @@ const importSelectedFiles = async (): Promise<AdminDataImportResult | null> => {
 
   return adminAPI.accounts.importData({
     data: dataPayload,
-    skip_default_group_bind: true
+    skip_default_group_bind: true,
+    ...importOptions()
   })
 }
 
-const handleImport = async () => {
+const importOptions = () => ({
+  protection_enabled: protectionEnabled.value,
+  codex_ticket_enabled: codexTicketEnabled.value
+})
+
+const handleImport = async (editAfter = false) => {
+  if (importing.value) return
   const directText = jsonText.value.trim()
   if (!directText && files.value.length === 0) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
@@ -380,6 +422,7 @@ const handleImport = async () => {
   }
 
   importing.value = true
+  editAfterImport.value = editAfter
   try {
     const res = directText ? await importTextPayload() : await importSelectedFiles()
     if (!res) return
@@ -400,7 +443,20 @@ const handleImport = async () => {
       appStore.showError(t('admin.accounts.dataImportCompletedWithErrors', msgParams))
     } else {
       appStore.showSuccess(t('admin.accounts.dataImportSuccess', msgParams))
-      emit('imported')
+      if (!editAfter) emit('imported')
+    }
+    if (editAfter && res.account_created > 0) {
+      const accountIds = [...new Set(res.account_ids ?? [])]
+        .filter(id => Number.isSafeInteger(id) && id > 0)
+      if (accountIds.length !== res.account_created) {
+        hasCreatedData.value = true
+        appStore.showError(t('admin.accounts.dataImportEditUnavailable'))
+        return
+      }
+      hasCreatedData.value = false
+      emit('imported-and-edit', accountIds)
+    } else if (editAfter && res.proxy_created > 0) {
+      hasCreatedData.value = true
     }
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.dataImportFailed'))

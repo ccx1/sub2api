@@ -5,7 +5,7 @@ const { post, get, put } = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), put:
 vi.mock('../client', () => ({ apiClient: { post, get, put }, buildApiUrl: (path: string) => `/api/v1${path}` }))
 
 it('loads the aggregate resource overview without a group or owner filter', async () => {
-  const data = { total_accounts: 10, schedulable_accounts: 7, tiers: [] }
+  const data = { total_accounts: 10, available_accounts: 9, participating_accounts: 7, schedulable_accounts: 7, tiers: [] }
   get.mockResolvedValue({ data })
   expect(await sharedPoolAPI.overview()).toEqual(data)
   expect(get).toHaveBeenLastCalledWith('/shared-pool/overview')
@@ -26,6 +26,23 @@ it('sends administrative scheduling and tier updates without adding dispatch con
   expect(put).toHaveBeenLastCalledWith('/admin/shared-pool/accounts/7', input)
   await adminSharedPoolAPI.allocate(7, { subscription_tier: '' })
   expect(put).toHaveBeenLastCalledWith('/admin/shared-pool/accounts/7', { subscription_tier: '' })
+})
+
+it('loads administrator earnings totals grouped by contributor', async () => {
+  const data = [{ user_id: 6, email: 'owner@example.com', account_count: 2, earnings_count: 3, total_earned: 12.5, available: 5, pending: 2.5, transferred: 5 }]
+  get.mockResolvedValue({ data })
+  expect(await adminSharedPoolAPI.userEarnings()).toEqual(data)
+  expect(get).toHaveBeenLastCalledWith('/admin/shared-pool/user-earnings')
+})
+
+it('reads and saves user auto-transfer settings without sending server-owned fields', async () => {
+  const data = { enabled: false, threshold: 1, daily_time: '00:00', timezone: 'Asia/Shanghai', last_run_date: '2026-09-23' }
+  get.mockResolvedValue({ data })
+  expect(await sharedPoolAPI.autoTransferSettings()).toEqual(data)
+  expect(get).toHaveBeenLastCalledWith('/shared-pool/auto-transfer')
+  put.mockResolvedValue({ data })
+  expect(await sharedPoolAPI.saveAutoTransferSettings(data)).toEqual(data)
+  expect(put).toHaveBeenLastCalledWith('/shared-pool/auto-transfer', { enabled: false, threshold: 1, daily_time: '00:00' })
 })
 
 it('persists the user settlement override including an explicit inheritance reset', async () => {

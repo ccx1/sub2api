@@ -46,7 +46,7 @@ func sharedQuotaProxyFixture() (*OpenAIQuotaService, *sharedQuotaProxyRepository
 		}}
 	repo := &sharedQuotaProxyRepository{stubQuotaAccountRepo: &stubQuotaAccountRepo{accounts: map[int64]*Account{11: account}}}
 	tokens := &sharedQuotaProbeTokens{stubQuotaTokenCache: &stubQuotaTokenCache{tokens: map[string]string{OpenAITokenCacheKey(account): "test-token"}}}
-	svc := NewOpenAIQuotaService(repo, nil, NewOpenAITokenProvider(repo, tokens, nil), func(string) (*req.Client, error) { return nil, errors.New("unexpected network") })
+	svc := NewOpenAIQuotaService(repo, nil, NewOpenAITokenProvider(repo, tokens, nil), func(string) (*req.Client, error) { return nil, errors.New("unexpected network") }, nil)
 	return svc, repo, tokens, account
 }
 

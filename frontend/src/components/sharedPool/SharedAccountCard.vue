@@ -8,7 +8,8 @@
     <p v-if="account.error_message" class="mt-2 break-words text-xs text-red-600 dark:text-red-400">{{ account.error_message }}</p>
     <p v-if="dailyCooldown.enabled" class="mt-2 break-words text-xs text-gray-500 dark:text-dark-400" data-test="daily-cooldown-summary" :title="t('sharedPool.dailyCooldownHint')">{{ t('sharedPool.dailyCooldownSummary', { start: dailyCooldown.start, end: dailyCooldown.end, timezone: dailyCooldown.timezone }) }}</p>
     <div v-if="admin" class="mt-3 flex flex-wrap gap-1.5" data-test="account-groups">
-      <span v-for="group in account.groups" :key="group.id" class="max-w-full break-words rounded border border-gray-200 px-1.5 py-0.5 text-xs dark:border-dark-600">{{ group.name }}</span>
+      <span v-for="group in visibleGroups" :key="group.id" class="max-w-full break-words rounded border border-gray-200 px-1.5 py-0.5 text-xs dark:border-dark-600">{{ group.name }}</span>
+      <span v-if="hiddenGroupCount" data-test="account-groups-more" class="cursor-help rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400" :title="allGroupNames" :aria-label="allGroupNames">+{{ hiddenGroupCount }}</span>
       <span v-if="!account.groups?.length" class="text-xs text-amber-600">{{ t('sharedPool.noGroup') }}</span>
     </div>
     <SharedAccountUsage v-if="!admin && account.type === 'oauth'" :account="account" :busy="busy" @busy-change="usageBusy = $event" @usage-updated="emit('usageUpdated')" />
@@ -30,10 +31,6 @@
           <button type="button" class="btn btn-secondary btn-sm" :disabled="actionBusy" data-test="authorize-dispatch" @click="emit('authorize')">{{ t('sharedPool.authorizeDispatch') }}</button>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-2" :title="t('sharedPool.sharingHint')">
-            <span class="text-xs text-gray-600 dark:text-dark-300">{{ t(account.dispatch_consent ? 'sharedPool.sharing' : 'sharedPool.legacySharing') }}</span>
-            <Toggle :model-value="account.enabled" :aria-label="t(account.dispatch_consent ? 'sharedPool.sharing' : 'sharedPool.legacySharing')" :disabled="actionBusy" class="disabled:cursor-not-allowed disabled:opacity-50" @update:model-value="!actionBusy && emit('enable', $event)" />
-          </div>
           <div class="flex items-center gap-2" :title="t('sharedPool.protectionHint')">
             <span class="text-xs text-gray-600 dark:text-dark-300">{{ t('sharedPool.protection') }}</span>
             <Toggle :model-value="account.protection_enabled" :aria-label="t('sharedPool.protection')" :disabled="actionBusy" class="disabled:cursor-not-allowed disabled:opacity-50" @update:model-value="!actionBusy && emit('protection', $event)" />
@@ -66,11 +63,15 @@ import SharedRevenueSplit from './SharedRevenueSplit.vue'
 import SharedAccountUsage from './SharedAccountUsage.vue'
 import { subscriptionTierOptions, validSettlementMultiplier } from './settlementPolicy'
 const props = defineProps<{ account: SharedAccount; busy?: boolean; admin?: boolean }>()
-const emit = defineEmits<{ enable: [enabled: boolean]; authorize: []; protection: [enabled: boolean]; codexTicket: [enabled: boolean]; edit: []; test: []; remove: []; allocate: []; usageUpdated: [] }>()
+const emit = defineEmits<{ authorize: []; protection: [enabled: boolean]; codexTicket: [enabled: boolean]; edit: []; test: []; remove: []; allocate: []; usageUpdated: [] }>()
 const usageBusy = ref(false)
 const actionBusy = computed(() => props.busy || usageBusy.value)
 const dailyCooldown = computed(() => normalizeDailyCooldown(props.account.daily_cooldown))
 const { t, te } = useI18n()
+const groupPreviewLimit = 3
+const visibleGroups = computed(() => props.account.groups?.slice(0, groupPreviewLimit) || [])
+const hiddenGroupCount = computed(() => Math.max(0, (props.account.groups?.length || 0) - groupPreviewLimit))
+const allGroupNames = computed(() => (props.account.groups || []).map(group => group.name).join('\n'))
 const subscriptionTierLabel = computed(() => {
   const tier = props.account.subscription_tier
   if (!tier) return ''

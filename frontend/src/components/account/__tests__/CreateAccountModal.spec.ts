@@ -200,6 +200,33 @@ async function openCodexImportStep(toggleClicks = 0) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
+  it.each(['session', 'pat'])('keeps billing region matching through Codex %s import without requiring known billing evidence', async method => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('billing')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Region test')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get(`[data-testid="import-codex-${method}"]`).trigger('click')
+    await flushPromises()
+    const mock = method === 'session' ? importCodexSessionMock : createOpenAICodexPATMock
+    expect(mock).toHaveBeenCalledWith(expect.objectContaining({ extra: expect.objectContaining({ proxy_region_mode: 'billing', proxy_region_country: '' }) }))
+    wrapper.unmount()
+  })
+
+  it('preserves a manual proxy region on each refresh token account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('manual')
+    await wrapper.get('[data-testid="proxy-region-country"]').setValue('PH')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Region RT')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('validate-refresh-token', 'rt-first\nrt-second')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(2)
+    for (const [payload] of createAccountMock.mock.calls) expect(payload.extra).toEqual(expect.objectContaining({ proxy_region_mode: 'manual', proxy_region_country: 'PH' }))
+    wrapper.unmount()
+  })
+
   it('defaults new OAuth accounts to their outbound proxy and retains group selection on import', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

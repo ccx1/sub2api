@@ -27,12 +27,18 @@ func ticketTestAccount(id int64) *Account {
 		ID:          id,
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 		Credentials: map[string]any{"access_token": "tok", "chatgpt_account_id": "acc-1"},
 	}
 }
 
 func ticketTestService(t *testing.T, cfg config.OpenAICodexTicketConfig, upstream HTTPUpstream) *OpenAIGatewayService {
 	t.Helper()
+	// 历史回归用例使用一主一备；多票池和默认容量由专门用例覆盖。
+	if cfg.PoolCapacity == 0 {
+		cfg.PoolCapacity = 2
+	}
 	return &OpenAIGatewayService{
 		cfg: &config.Config{
 			Gateway: config.GatewayConfig{OpenAICodexTicket: cfg},
@@ -371,17 +377,18 @@ func (r *codexTicketRefreshRepo) UpdateExtra(_ context.Context, _ int64, updates
 type codexTicketConcurrentUpstream struct {
 	HTTPUpstream
 	started atomic.Int64
-	ready   chan struct{}
+	active  atomic.Int64
+	peak    atomic.Int64
 }
 
 func (u *codexTicketConcurrentUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	if u.started.Add(1) == 2 {
-		close(u.ready)
-	}
-	select {
-	case <-u.ready:
-	case <-req.Context().Done():
-		return nil, req.Context().Err()
+	u.started.Add(1)
+	active := u.active.Add(1)
+	defer u.active.Add(-1)
+	for peak := u.peak.Load(); active > peak; peak = u.peak.Load() {
+		if u.peak.CompareAndSwap(peak, active) {
+			break
+		}
 	}
 	var request struct {
 		Model string `json:"model"`
@@ -391,24 +398,26 @@ func (u *codexTicketConcurrentUpstream) Do(req *http.Request, _ string, _ int64,
 	}
 	return codexTicketCompletedResponse(request.Model, fakeCodexTicketState(292)), nil
 }
-func TestRefreshOpenAICodexTickets_ConcurrentModelsPreserveAccountSnapshot(t *testing.T) {
+func TestRefreshOpenAICodexTickets_QueuedModelsPreserveAccountSnapshot(t *testing.T) {
 	account := ticketTestAccount(41)
 	account.Status = StatusActive
 	account.Extra = map[string]any{"existing": true}
 	repo := &codexTicketRefreshRepo{accounts: []Account{*account}}
-	upstream := &codexTicketConcurrentUpstream{ready: make(chan struct{})}
+	upstream := &codexTicketConcurrentUpstream{}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "socks5h://proxy.example.com:1080"}, upstream)
 	svc.accountRepo = repo
 	svc.refreshOpenAICodexTickets(context.Background())
 	require.Equal(t, int64(4), upstream.started.Load())
+	require.EqualValues(t, 1, upstream.peak.Load(), "同账号的多个模型必须串行采集")
 	require.Equal(t, map[string]any{"existing": true}, account.Extra)
 	require.Len(t, repo.updates, 2)
 	for _, model := range []string{openAICodexTicketDefaultModel, openAICodexTicketDefaultSolModel} {
 		ticket := svc.lookupOpenAICodexTicket(account, model)
 		require.NotNil(t, ticket)
 		require.True(t, ticket.valid(time.Now(), 292))
+		require.True(t, svc.storeOpenAICodexTicket(context.Background(), account, inventoryTestTicket(ticket, "D", time.Second)))
 	}
-	// Valid tickets do not produce another probe on the next cycle.
+	// 完整有效库存不会在下一周期继续采集。
 	svc.refreshOpenAICodexTickets(context.Background())
 	require.Equal(t, int64(4), upstream.started.Load())
 }

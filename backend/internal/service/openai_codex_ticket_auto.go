@@ -37,6 +37,6 @@ func codexTicketCandidateAccepted(state string, account *Account, cfg config.Ope
 }
 
 func (ticket *openAICodexTicket) autoUsable(now time.Time, account *Account) bool {
-	return ticket != nil && ticket.Verified && ticket.AccountBinding != "" &&
+	return ticket != nil && (ticket.Verified || ticket.VerificationSkipped) && ticket.AccountBinding != "" &&
 		ticket.valid(now, ticket.Length) && codexTicketAutoStateShape(ticket.State) && ticket.accountCompatible(account)
 }

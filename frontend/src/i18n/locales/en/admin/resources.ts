@@ -158,6 +158,11 @@ export default {
       // Batch import
       standardAdd: 'Standard Add',
       batchAdd: 'Quick Add',
+      batchSettingsHint: 'The expiry and fallback settings below apply to all newly added proxies. Existing proxies remain unchanged.',
+      batchCountry: 'Proxy country / region (optional)',
+      batchCountryOptional: 'Unspecified (detect after import)',
+      batchCountryHint: 'IPv6 addresses may not reveal an exit country automatically. Set one here for every proxy in this import.',
+      backupProxyRequired: 'Please select a backup proxy',
       batchInput: 'Proxy List',
       batchInputFormat: 'Colon-separated format',
       batchFormatAuto: 'Auto-detect (skip ambiguous lines)',
@@ -170,9 +175,6 @@ export default {
         "Enter one proxy per line in the following formats:\nproxy.example.com:8001:alice:secret\nalice:secret{'@'}proxy.example.com:8001\nalice:secret:proxy.example.com:8001\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080",
       batchInputHint:
         "Supports mixed input: host:port:user:pass, user:pass{'@'}host:port, user:pass:host:port, and full URLs. Entries without a scheme use the default protocol above.",
-      batchCountry: 'Proxy country (optional)',
-      batchCountryOptional: 'No country',
-      batchCountryHint: 'Set this when IPv6 probing cannot identify the proxy country.',
       parsedCount: '{count} valid',
       invalidCount: '{count} invalid',
       duplicateCount: '{count} duplicate',

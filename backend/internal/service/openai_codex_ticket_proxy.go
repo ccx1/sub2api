@@ -18,10 +18,13 @@ type openAICodexTicketProxy struct {
 }
 
 type codexTicketProxyPolicy struct {
-	mode      string
-	proxyID   int64
-	url       string
-	inherited bool
+	strategy       string
+	mode           string
+	proxyID        int64
+	url            string
+	inherited      bool
+	countryCode    string
+	followBusiness bool
 }
 
 type codexTicketProxyLoader interface {
@@ -43,12 +46,33 @@ func (s *OpenAIGatewayService) selectOpenAICodexTicketProxy(ctx context.Context,
 	if err != nil {
 		return openAICodexTicketProxy{}, err
 	}
+	if policy.mode == CodexTicketProxyModeAccount {
+		proxy, err := s.resolveCodexTicketAccountProxy(ctx, account)
+		if err != nil {
+			return openAICodexTicketProxy{}, err
+		}
+		// 全局 account 模式仍需保留全局策略快照，发布前会用它核对
+		// 全局设置是否发生变化。固定/直连业务出口只回填实际出口，
+		// 随机账号继续保留未解析的账号池策略。
+		proxy.policy = policy
+		if !account.IsRandomProxy() {
+			proxy.policy.proxyID, proxy.policy.url = proxy.proxyID, proxy.url
+		}
+		return proxy, nil
+	}
 	if policy.mode == "fixed" {
 		proxy := openAICodexTicketProxy{url: policy.url, proxyID: policy.proxyID, policy: policy}
 		if policy.proxyID > 0 {
-			loaded, err := s.accountRepo.(codexTicketProxyLoader).GetCodexTicketProxy(ctx, policy.proxyID)
+			loader, ok := s.accountRepo.(codexTicketProxyLoader)
+			if !ok {
+				return openAICodexTicketProxy{}, errors.New("codex ticket proxy loader is unavailable")
+			}
+			loaded, err := loader.GetCodexTicketProxy(ctx, policy.proxyID)
 			if err != nil || !codexTicketProxyAvailable(loaded) || loaded.URL() != policy.url {
 				return openAICodexTicketProxy{}, ErrRandomProxyUnavailable
+			}
+			if err := validateProxyRegion(ctx, loaded, policy.countryCode, s.accountRepo); err != nil {
+				return openAICodexTicketProxy{}, err
 			}
 			proxy.proxyName = loaded.Name
 		}
@@ -58,7 +82,7 @@ func (s *OpenAIGatewayService) selectOpenAICodexTicketProxy(ctx context.Context,
 	if !ok {
 		return openAICodexTicketProxy{}, errors.New("codex ticket proxy pool is not configured")
 	}
-	selection := ProxyPoolSelection{AccountID: account.ID}
+	selection := ProxyPoolSelection{AccountID: account.ID, CountryCode: policy.countryCode}
 	if policy.inherited && account.IsRandomProxy() {
 		selection, err = ResolveAccountProxyPoolSelection(ctx, account, s.accountRepo)
 		if err != nil {
@@ -72,6 +96,9 @@ func (s *OpenAIGatewayService) selectOpenAICodexTicketProxy(ctx context.Context,
 	if !codexTicketProxyAvailable(proxy) || (selection.Restricted && !slices.Contains(selection.IDs, proxy.ID)) {
 		return openAICodexTicketProxy{}, ErrRandomProxyUnavailable
 	}
+	if err := validateProxyRegion(ctx, proxy, policy.countryCode, s.accountRepo); err != nil {
+		return openAICodexTicketProxy{}, err
+	}
 	return openAICodexTicketProxy{url: proxy.URL(), accountID: account.ID, proxyID: proxy.ID, proxyName: proxy.Name, policy: policy}, nil
 }
 
@@ -79,9 +106,15 @@ func (s *OpenAIGatewayService) codexTicketProxyPolicy(ctx context.Context, accou
 	if account == nil || ValidateCodexTicketProxyExtra(account.Extra) != nil {
 		return codexTicketProxyPolicy{}, errors.New("invalid codex ticket proxy settings")
 	}
-	policy := codexTicketProxyPolicy{mode: account.CodexTicketProxyMode(), proxyID: account.CodexTicketProxyID()}
+	policy := codexTicketProxyPolicy{mode: account.CodexTicketProxyMode(), proxyID: account.CodexTicketProxyID(), strategy: account.CodexTicketProxyStrategy()}
+	var err error
+	policy.countryCode, err = account.ProxyRegionCountry()
+	if err != nil {
+		return policy, err
+	}
 	if policy.mode == CodexTicketProxyModeAccount {
 		proxy, err := s.resolveCodexTicketAccountProxy(ctx, account)
+		proxy.policy.strategy = policy.strategy
 		return proxy.policy, err
 	}
 	if policy.mode == CodexTicketProxyModeRandom {
@@ -96,29 +129,82 @@ func (s *OpenAIGatewayService) codexTicketProxyPolicy(ctx context.Context, accou
 		if err != nil || !codexTicketProxyAvailable(proxy) || proxy.ID != policy.proxyID {
 			return policy, ErrRandomProxyUnavailable
 		}
+		resolved := cloneOpenAICodexTicketAccount(account)
+		resolved.ProxyID, resolved.Proxy = &proxy.ID, proxy
+		resolved.fixedProxyOrigin = nil
+		if err := resolveFixedProxyTransportFallback(ctx, resolved, s.accountRepo); err != nil {
+			return policy, err
+		}
+		proxy, policy.proxyID = resolved.Proxy, *resolved.ProxyID
+		if err := validateProxyRegion(ctx, proxy, policy.countryCode, s.accountRepo); err != nil {
+			return policy, err
+		}
 		policy.url = proxy.URL()
 		return policy, nil
 	}
-	policy.mode, policy.inherited = "pool", true
-	if strings.TrimSpace(s.openAICodexTicketConfig().HarvestProxyURL) != "" {
-		policy.mode = "fixed"
-	}
+	// 显式全局 random 使用全局均衡池；inherit 和旧版 pool 在回退随机池时
+	// 保留 inherited 标记，以复用随机账号自己的池范围。
+	policy.mode = OpenAICodexTicketHarvestProxyModeRandom
 	if s.settingService != nil {
-		var err error
-		policy.mode, policy.url, err = s.settingService.GetOpenAICodexTicketHarvestProxySettings(ctx)
-		return policy, err
+		var proxyID int64
+		policy.mode, policy.url, proxyID, err = s.settingService.GetOpenAICodexTicketHarvestProxySettingsWithID(ctx)
+		policy.proxyID = proxyID
+		if err != nil {
+			return policy, err
+		}
+	} else {
+		policy.url = strings.TrimSpace(s.openAICodexTicketConfigContext(ctx).HarvestProxyURL)
+		if policy.url != "" {
+			policy.mode = CodexTicketProxyModeFixed
+		} else {
+			// 没有设置服务时仍按旧版“继承/代理池”行为处理随机账号。
+			policy.inherited = true
+		}
+	}
+	if policy.mode == CodexTicketProxyModeInherit {
+		policy.url = strings.TrimSpace(s.openAICodexTicketConfigContext(ctx).HarvestProxyURL)
+		if policy.url != "" {
+			policy.mode = CodexTicketProxyModeFixed
+		} else {
+			policy.mode = CodexTicketProxyModeRandom
+			policy.inherited = true
+		}
+	} else if policy.mode == OpenAICodexTicketHarvestProxyModePool {
+		policy.mode = CodexTicketProxyModeRandom
+		policy.inherited = true
+	} else if policy.mode == CodexTicketProxyModeAccount {
+		policy.inherited, policy.followBusiness = true, true
+	}
+	if policy.mode == CodexTicketProxyModeFixed && policy.proxyID > 0 {
+		loader, ok := s.accountRepo.(codexTicketProxyLoader)
+		if !ok {
+			return policy, errors.New("codex ticket proxy loader is unavailable")
+		}
+		proxy, loadErr := loader.GetCodexTicketProxy(ctx, policy.proxyID)
+		if loadErr != nil || !codexTicketProxyAvailable(proxy) || proxy.ID != policy.proxyID {
+			return policy, ErrRandomProxyUnavailable
+		}
+		if err := validateProxyRegion(ctx, proxy, policy.countryCode, s.accountRepo); err != nil {
+			return policy, err
+		}
+		policy.url = proxy.URL()
 	}
 	if policy.mode == "fixed" {
-		policy.url = strings.TrimSpace(s.openAICodexTicketConfigContext(ctx).HarvestProxyURL)
+		if policy.proxyID == 0 && policy.countryCode != "" {
+			return policy, errors.New("proxy region cannot be verified for the global harvest proxy URL; select a managed proxy")
+		}
 		return policy, nil
 	}
-	if policy.mode != "pool" {
+	if policy.mode != CodexTicketProxyModeRandom && policy.mode != CodexTicketProxyModeAccount {
 		return policy, errors.New("invalid codex ticket proxy mode")
 	}
 	return policy, nil
 }
 
 func (s *OpenAIGatewayService) reportOpenAICodexTicketProxyResult(ctx context.Context, proxy openAICodexTicketProxy, successful bool) {
+	if codexTicketScheduleFrom(ctx) != nil {
+		return
+	}
 	if proxy.accountID <= 0 || proxy.proxyID <= 0 || ctx.Err() != nil {
 		return
 	}
@@ -139,6 +225,9 @@ func (s *OpenAIGatewayService) reportOpenAICodexTicketProxyResult(ctx context.Co
 
 // 打票出口独立于账号的业务出口，故障必须上报本次实际选中的池代理。
 func (s *OpenAIGatewayService) reportOpenAICodexTicketProxyFailure(ctx context.Context, proxy openAICodexTicketProxy, cause error) {
+	if codexTicketScheduleFrom(ctx) != nil {
+		return
+	}
 	var transportError *codexTicketTransportError
 	if proxy.accountID <= 0 || proxy.proxyID <= 0 || ctx.Err() != nil || !errors.As(cause, &transportError) || !isRandomProxyTransportFailure(transportError) {
 		return

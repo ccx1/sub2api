@@ -42,7 +42,7 @@ func TestSharedPoolPostgresSettlementFixedOwnerAndSnapshots(t *testing.T) {
 			entry := page.Items[0]
 			require.Equal(t, paid, entry.BillingAmount)
 			require.Equal(t, 4.7, entry.OwnerAmount)
-			require.InDelta(t, paid-4.7, entry.PlatformAmount, 1e-8)
+			require.InDelta(t, 0.3, entry.PlatformAmount, 1e-8)
 			require.Equal(t, 500, entry.PlatformRateBPS)
 			require.Equal(t, 100, entry.ProxyRateBPS)
 			require.Equal(t, "available", entry.Status)
@@ -54,6 +54,12 @@ func TestSharedPoolPostgresSettlementFixedOwnerAndSnapshots(t *testing.T) {
 			require.Equal(t, .5, *entry.SettlementMultiplier)
 			require.Equal(t, 5.0, *entry.SettlementAmount)
 			require.Equal(t, paid-5, *entry.SpreadAmount)
+			var storedPlatform string
+			require.NoError(t, db.QueryRow(`SELECT platform_amount::text FROM shared_pool_earnings`).Scan(&storedPlatform))
+			require.Equal(t, fmt.Sprintf("%.8f", paid-4.7), storedPlatform)
+			summary, err := NewSharedPoolEarningsRepository(db).Summary(context.Background(), 6)
+			require.NoError(t, err)
+			require.InDelta(t, 0.3, summary.PlatformAmount, 1e-8)
 			requireSettlementConsumerBalance(t, db, 100-paid)
 		})
 	}

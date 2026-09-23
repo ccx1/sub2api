@@ -3,9 +3,9 @@
     <h3 class="break-all text-sm font-semibold text-gray-900 dark:text-gray-100">
       {{ t(`${prefix}.exchangeTitle`) }} · {{ attempt.model }} · {{ formatDateTime(attempt.started_at) }}
     </h3>
-    <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t(`${prefix}.exchangeRedactedHint`) }}</p>
     <section v-for="stage in stages" :key="stage.key" class="min-w-0 space-y-2" :data-testid="`${stage.key}-exchange`">
       <h4 class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t(`${prefix}.${stage.label}`) }}</h4>
+      <p v-if="stage.exchange" class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t(`${prefix}.${stage.exchange.capture_mode === 'raw' ? 'exchangeRawHint' : 'exchangeRedactedHint'}`) }}</p>
       <dl class="space-y-1 break-all text-xs text-gray-700 dark:text-gray-300">
         <div><dt class="inline">{{ t(`${prefix}.requestedModel`) }}: </dt><dd class="inline font-mono">{{ stage.exchange?.requested_model || attempt.model || '—' }}</dd></div>
         <div>
@@ -14,15 +14,16 @@
           <span v-if="stage.exchange?.models_truncated" class="ml-1 text-amber-600 dark:text-amber-400">({{ t(`${prefix}.modelsTruncated`) }})</span>
         </div>
       </dl>
+      <CodexTicketDiagnostics :exchange="stage.exchange" />
       <p v-if="!stage.exchange?.request && !stage.exchange?.response" class="text-xs leading-5 text-gray-500 dark:text-gray-400" data-testid="exchange-unavailable">
         {{ t(`${prefix}.exchangeUnavailable`) }}
       </p>
       <div v-else class="grid min-w-0 gap-3 lg:grid-cols-2">
         <div v-for="kind in messageKinds" :key="kind" class="min-w-0 space-y-2 rounded border border-gray-200 p-3 dark:border-dark-600" :data-testid="`${stage.key}-${kind}`">
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <h5 class="font-medium text-gray-900 dark:text-gray-100">{{ t(`${prefix}.${kind}Message`) }}</h5>
-            <button v-if="stage.exchange?.[kind]" type="button" class="btn btn-secondary px-2 py-1 text-xs" :disabled="copying" @click="copyMessage(stage.key, kind, stage.exchange[kind]!)">
-              {{ t(`${prefix}.copyExchange`) }}
+            <h5 class="font-medium text-gray-900 dark:text-gray-100">{{ t(`${prefix}.${stage.exchange?.capture_mode === 'raw' ? 'raw' : 'redacted'}${kind === 'request' ? 'Request' : 'Response'}`) }}</h5>
+            <button v-if="stage.exchange?.[kind]" type="button" class="btn btn-secondary px-2 py-1 text-xs" :disabled="copying" @click="copyMessage(stage, kind)">
+              {{ t(`${prefix}.${stage.exchange.capture_mode === 'raw' ? 'copyRawExchange' : 'copyExchange'}`) }}
             </button>
           </div>
           <template v-if="stage.exchange?.[kind]">
@@ -38,7 +39,7 @@
             <h6 class="text-xs font-medium text-gray-600 dark:text-gray-400">{{ t(`${prefix}.body`) }}</h6>
             <pre class="max-h-80 max-w-full overflow-y-auto whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-xs text-gray-700 dark:bg-dark-800 dark:text-gray-300">{{ stage.exchange[kind]?.body || t(`${prefix}.${stage.exchange[kind]?.body_truncated ? 'bodyOmitted' : 'emptyBody'}`) }}</pre>
             <p v-if="copyFeedback?.key === `${stage.key}-${kind}`" :role="copyFeedback.success ? 'status' : 'alert'" class="text-xs" :class="copyFeedback.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
-              {{ t(`${prefix}.${copyFeedback.success ? 'exchangeCopied' : 'exchangeCopyFailed'}`) }}
+              {{ t(`${prefix}.${copyFeedback.success ? (stage.exchange.capture_mode === 'raw' ? 'rawExchangeCopied' : 'exchangeCopied') : 'exchangeCopyFailed'}`) }}
             </p>
           </template>
           <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.${kind}NotRecorded`) }}</p>
@@ -54,6 +55,7 @@ import { useI18n } from 'vue-i18n'
 import type { CodexTicketExchange, CodexTicketHistoryAttempt, CodexTicketHTTPMessage } from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatDateTime } from '@/utils/format'
+import CodexTicketDiagnostics from './CodexTicketDiagnostics.vue'
 
 const props = defineProps<{ attempt: CodexTicketHistoryAttempt }>()
 const { t } = useI18n()
@@ -78,18 +80,23 @@ function formatHeaders(message: CodexTicketHTTPMessage): string {
   return Object.entries(message.headers ?? {}).flatMap(([name, values]) => values.map(value => `${name}: ${value}`)).join('\n')
 }
 
-async function copyMessage(stage: string, kind: string, message: CodexTicketHTTPMessage): Promise<void> {
+async function copyMessage(stage: { key: string; exchange?: CodexTicketExchange | null }, kind: 'request' | 'response'): Promise<void> {
+  const message = stage.exchange?.[kind]
+  if (!message) return
   copying.value = true
-  const lines = [t(`${prefix}.exchangeRedactedHint`), [message.method, message.url].filter(Boolean).join(' ')]
+  const raw = stage.exchange?.capture_mode === 'raw'
+  const lines = raw ? [] : [t(`${prefix}.exchangeRedactedHint`)]
+  if (message.method || message.url) lines.push([message.method, message.url].filter(Boolean).join(' '))
   if (message.status_code) lines.push(`HTTP ${message.status_code}`)
-  if (message.headers_truncated) lines.push(t(`${prefix}.headersTruncated`))
-  if (message.body_truncated) lines.push(t(`${prefix}.bodyOmitted`))
-  lines.push(formatHeaders(message), '', message.body || t(`${prefix}.${message.body_truncated ? 'bodyOmitted' : 'emptyBody'}`))
+  if (!raw && message.headers_truncated) lines.push(t(`${prefix}.headersTruncated`))
+  if (!raw && message.body_truncated) lines.push(t(`${prefix}.bodyOmitted`))
+  lines.push(formatHeaders(message), '')
+  const body = raw ? message.body ?? '' : message.body || t(`${prefix}.${message.body_truncated ? 'bodyOmitted' : 'emptyBody'}`)
   try {
-    const success = await copyToClipboard(lines.join('\n'), t(`${prefix}.exchangeCopied`))
-    copyFeedback.value = { key: `${stage}-${kind}`, success }
+    const success = await copyToClipboard(lines.join('\n') + '\n' + body, t(`${prefix}.${raw ? 'rawExchangeCopied' : 'exchangeCopied'}`))
+    copyFeedback.value = { key: `${stage.key}-${kind}`, success }
   } catch {
-    copyFeedback.value = { key: `${stage}-${kind}`, success: false }
+    copyFeedback.value = { key: `${stage.key}-${kind}`, success: false }
   } finally {
     copying.value = false
   }

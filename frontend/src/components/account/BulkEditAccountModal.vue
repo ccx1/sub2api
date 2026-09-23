@@ -686,7 +686,7 @@
         <div id="bulk-edit-proxy-body" :class="!enableProxy && 'pointer-events-none opacity-50'">
           <ProxySelector
             v-model="proxyId"
-            :proxies="proxies"
+            :proxies="filterProxiesByRegion(proxies, enableProxyRegion ? resolveAccountProxyRegion(proxyRegion).country : '', proxyId)"
             :disabled="randomProxyEnabled"
             aria-labelledby="bulk-edit-proxy-label"
           />
@@ -699,6 +699,7 @@
             v-model:policy="randomProxyEmptyPoolPolicy"
             v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
             :proxies="proxies"
+            :region-country="enableProxyRegion ? resolveAccountProxyRegion(proxyRegion).country : ''"
             :disabled="!enableProxy"
             @update:enabled="handleRandomProxyChange"
           />
@@ -727,10 +728,28 @@
         <CodexTicketProxySettings
           v-if="allOpenAIOAuth"
           v-model="codexTicketProxy"
+          :region-enabled="enableProxyRegion && proxyRegion.mode !== 'off'"
+          :region-country="resolveAccountProxyRegion(proxyRegion).country"
           :proxies="proxies"
           :disabled="!enableCodexTicketProxy || submitting"
         />
         <p v-else class="input-hint">{{ t('admin.accounts.codexTicketProxy.bulkUnsupported') }}</p>
+      </div>
+
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="mb-3 flex cursor-pointer items-center justify-between gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+          <span>{{ t('admin.accounts.proxyRegion.bulkApply') }}</span>
+          <input id="bulk-edit-proxy-region-enabled" v-model="enableProxyRegion" type="checkbox" :disabled="submitting" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        </label>
+        <AccountProxyRegionSettings
+          v-model="proxyRegion"
+          :proxies="proxies"
+          :proxy-id="enableProxy ? proxyId : undefined"
+          :random-enabled="enableProxy && randomProxyEnabled"
+          :empty-pool-policy="enableProxy ? randomProxyEmptyPoolPolicy : undefined"
+          :billing-pending="true"
+          :disabled="!enableProxyRegion || submitting"
+        />
       </div>
 
       <!-- Concurrency & Priority -->
@@ -1534,6 +1553,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
+import AccountProxyRegionSettings from '@/components/account/AccountProxyRegionSettings.vue'
+import { accountProxyRegionExtra, accountProxyRegionValidationError, filterProxiesByRegion, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
 import { readCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
@@ -1701,6 +1722,8 @@ const enableCustomErrorCodes = ref(false)
 const enableInterceptWarmup = ref(false)
 const enableHeaderOverride = ref(false)
 const enableProxy = ref(false)
+const enableProxyRegion = ref(false)
+const proxyRegion = ref(readAccountProxyRegion())
 const enableConcurrency = ref(false)
 const enableLoadFactor = ref(false)
 const enablePriority = ref(false)
@@ -2015,6 +2038,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (enableProxyRegion.value) Object.assign(ensureExtra(), accountProxyRegionExtra(proxyRegion.value))
+
   if (enableDailyCooldown.value) {
     updates.extra = withDailyCooldownExtra(ensureExtra(), dailyCooldown.value)
   }
@@ -2276,6 +2301,11 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 
 const handleSubmit = async () => {
   if (submitting.value) return
+  const regionError = enableProxyRegion.value && accountProxyRegionValidationError(proxyRegion.value)
+  if (regionError) {
+    appStore.showError(t(regionError))
+    return
+  }
   const ticketProxyError = enableCodexTicketProxy.value && (!allOpenAIOAuth.value
     ? 'admin.accounts.codexTicketProxy.bulkUnsupported'
     : codexTicketProxyValidationError(codexTicketProxy.value, props.proxies))
@@ -2302,6 +2332,7 @@ const handleSubmit = async () => {
   }
 
   const hasAnyFieldEnabled =
+    enableProxyRegion.value ||
     enableCodexTicketProxy.value ||
     enableDailyCooldown.value ||
     enableBaseUrl.value ||
@@ -2461,6 +2492,8 @@ watch(
       enableInterceptWarmup.value = false
       enableHeaderOverride.value = false
       enableProxy.value = false
+      enableProxyRegion.value = false
+      proxyRegion.value = readAccountProxyRegion()
       enableCodexTicketProxy.value = false
       codexTicketProxy.value = readCodexTicketProxy()
       enableConcurrency.value = false

@@ -16,6 +16,7 @@ var _ service.SharedPoolOverviewSource = (*groupRepository)(nil)
 type sharedOverviewRegistration struct {
 	enabled       bool
 	adminDisabled bool
+	ownerActive   bool
 	groups        []int64
 }
 
@@ -72,9 +73,9 @@ func (r *groupRepository) SharedPoolOverviewAccounts(ctx context.Context) ([]ser
 }
 
 func (r *groupRepository) sharedOverviewRegistrations(ctx context.Context) (map[int64]*sharedOverviewRegistration, []int64, error) {
-	rows, err := r.sql.QueryContext(ctx, `SELECT spa.account_id,spa.enabled,spa.admin_disabled,ag.group_id
+	rows, err := r.sql.QueryContext(ctx, `SELECT spa.account_id,spa.enabled,spa.admin_disabled,ag.group_id,COALESCE(u.status=$1,false)
 		FROM shared_pool_accounts spa JOIN accounts a ON a.id=spa.account_id AND a.deleted_at IS NULL
-		JOIN users u ON u.id=spa.owner_user_id AND u.deleted_at IS NULL AND u.status=$1
+		LEFT JOIN users u ON u.id=spa.owner_user_id AND u.deleted_at IS NULL
 		LEFT JOIN account_groups ag ON ag.account_id=spa.account_id`, service.StatusActive)
 	if err != nil {
 		return nil, nil, err
@@ -84,12 +85,12 @@ func (r *groupRepository) sharedOverviewRegistrations(ctx context.Context) (map[
 	for rows.Next() {
 		var id int64
 		var groupID sql.NullInt64
-		var enabled, disabled bool
-		if err := rows.Scan(&id, &enabled, &disabled, &groupID); err != nil {
+		var enabled, disabled, ownerActive bool
+		if err := rows.Scan(&id, &enabled, &disabled, &groupID, &ownerActive); err != nil {
 			return nil, nil, err
 		}
 		if registrations[id] == nil {
-			registrations[id] = &sharedOverviewRegistration{enabled: enabled, adminDisabled: disabled}
+			registrations[id] = &sharedOverviewRegistration{enabled: enabled, adminDisabled: disabled, ownerActive: ownerActive}
 		}
 		if groupID.Valid {
 			registrations[id].groups = append(registrations[id].groups, groupID.Int64)
@@ -122,10 +123,10 @@ func (s sharedOverviewState) snapshots(accounts []*service.Account) []service.Sh
 	result, now := make([]service.SharedPoolOverviewAccount, 0, len(accounts)), time.Now()
 	for _, acc := range accounts {
 		acc.SharedPoolSettlement = s.terms[acc.ID]
-		registration := s.registrations[acc.ID]
 		result = append(result, service.SharedPoolOverviewAccount{AccountID: acc.ID, Platform: acc.Platform,
 			Tier: service.SharedPoolOverviewTierForAccount(acc), Available: s.available(acc), Concurrency: acc.Mode1EffectiveConcurrency(),
-			Participating:        registration != nil && registration.enabled && !registration.adminDisabled,
+			Valid:                acc.Status == service.StatusActive && (acc.ExpiresAt == nil || now.Before(*acc.ExpiresAt)),
+			TicketRequired:       acc.IsOpenAIOAuthLike() && !acc.IsShadow(),
 			UntrackedConcurrency: acc.Concurrency <= 0, Ticket: service.NewSharedPoolTicketAccountSnapshot(acc, now)})
 	}
 	return result
@@ -133,7 +134,7 @@ func (s sharedOverviewState) snapshots(accounts []*service.Account) []service.Sh
 
 func (s sharedOverviewState) available(account *service.Account) bool {
 	registration := s.registrations[account.ID]
-	if registration == nil || !registration.enabled || registration.adminDisabled || (s.proxies != nil && !s.proxies.usable(account)) {
+	if registration == nil || !registration.enabled || registration.adminDisabled || !registration.ownerActive || (s.proxies != nil && !s.proxies.usable(account)) {
 		return false
 	}
 	for _, id := range registration.groups {

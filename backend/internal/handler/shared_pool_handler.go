@@ -17,6 +17,7 @@ import (
 )
 
 type SharedPoolHandler struct {
+	autoTransfer   *service.SharedPoolAutoTransferService
 	pool           *service.SharedPoolService
 	earnings       service.SharedPoolEarningsRepository
 	keys           *service.APIKeyService
@@ -114,14 +115,19 @@ func (h *SharedPoolHandler) Pools(c *gin.Context) {
 		return
 	}
 	groups, err = h.keys.SharedAccountCatalogGroups(c.Request.Context(), groups)
-	if err != nil { sharedReply(c, nil, err); return }
+	if err != nil {
+		sharedReply(c, nil, err)
+		return
+	}
 	result := make([]sharedPoolCatalogView, 0)
 	cfg, now := h.sharedTicketConfig(c.Request.Context()), time.Now()
 	counts := h.keys.SharedPoolCurrentConcurrency(c.Request.Context(), groups, cfg, now)
 	for _, g := range groups {
 		if g.SharedPoolCapacity != nil {
 			view := newSharedPoolCatalogView(g, cfg, now)
-			if view.AvailableAccounts <= 0 { continue }
+			if view.AvailableAccounts <= 0 {
+				continue
+			}
 			if current, known := counts[g.ID]; known {
 				view.CurrentConcurrency = &current
 			}

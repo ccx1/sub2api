@@ -44,6 +44,9 @@ func NewProxyPoolAllocator(client *dbent.Client, rdb *redis.Client, latencyCache
 }
 
 func (a *ProxyPoolAllocator) Select(ctx context.Context, selection service.ProxyPoolSelection) (*service.Proxy, error) {
+	if reservation := service.CodexTicketBusinessReservationFrom(ctx); reservation != nil {
+		return a.SelectCodexTicketBusinessProxy(ctx, selection, reservation)
+	}
 	if selection.Restricted && len(selection.IDs) == 0 {
 		if a != nil && a.rdb != nil && selection.AccountID > 0 {
 			member := strconv.FormatInt(selection.AccountID, 10)
@@ -155,6 +158,13 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 	if err != nil {
 		return nil, fmt.Errorf("reserve proxy pool association: %w", err)
 	}
+	if selected == "" && len(candidates) > 0 && service.IsCodexTicketProxyResolution(ctx) {
+		reason := "capacity"
+		if len(leases) == 0 {
+			reason = "proxy_unhealthy"
+		}
+		return nil, a.codexSchedulerTemporaryProxyWait(ctx, reason)
+	}
 	return proxies[selected], nil
 }
 
@@ -193,8 +203,8 @@ func proxyPoolQuality(proxy *service.Proxy, info *service.ProxyLatencyInfo) (qua
 	if proxy == nil || !proxy.IsActive() || proxy.IsExpired(time.Now()) {
 		return 0, false, false
 	}
-	// 修改地址、凭据或配置后，旧探测不能继续决定新代理的可用性。
-	if info == nil || info.UpdatedAt.Before(proxy.UpdatedAt) {
+	// 仅出口身份变化使检测失效，名称或分组编辑不改变健康结论。
+	if !service.ProxyLatencyMatchesProxy(info, proxy) {
 		return 2000, false, true
 	}
 	if !info.Success {

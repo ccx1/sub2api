@@ -18,14 +18,14 @@ type Proxy struct {
 	GroupID   *int64
 	GroupName string
 	// 仅显式修改分组时置位，防止普通更新覆盖并发归组。
-	GroupIDSet     bool `json:"-"`
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	Status         string
+	GroupIDSet bool `json:"-"`
+	Name       string
+	Protocol   string
+	Host       string
+	Port       int
+	Username   string
+	Password   string
+	Status     string
 	// CountryCode is the manually configured country used only when a probe
 	// has not produced an egress country for this proxy.
 	CountryCode    string

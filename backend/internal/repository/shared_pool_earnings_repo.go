@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -16,6 +18,10 @@ type sharedPoolEarningsRepository struct{ db *sql.DB }
 const sharedPoolEarningsReadSource = `(SELECT e.*, CASE WHEN e.status = 'pending' AND EXISTS (
 	SELECT 1 FROM users debtor WHERE debtor.id = e.consumer_user_id AND debtor.deleted_at IS NULL AND debtor.balance >= 0
 ) THEN 'available' ELSE e.status END AS effective_status FROM shared_pool_earnings e) visible_earnings`
+
+// 独立结算流水把消费价与供号结算价的差额保存在 platform_amount 里以保持账本守恒。
+// 对外展示的平台收益只显示配置的平台/代理费；旧版流水没有 spread_amount，保持原口径。
+const sharedPoolDisplayedPlatformAmountSQL = `platform_amount - COALESCE(spread_amount, 0)`
 
 func NewSharedPoolEarningsRepository(db *sql.DB) service.SharedPoolEarningsRepository {
 	return &sharedPoolEarningsRepository{db: db}
@@ -41,7 +47,7 @@ func (r *sharedPoolEarningsRepository) List(ctx context.Context, ownerID int64, 
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT id, account_id, owner_user_id, group_id, billing_amount,
-		platform_rate_bps, proxy_rate_bps, uses_platform_proxy, platform_amount, owner_amount, effective_status, transfer_id, created_at,
+		platform_rate_bps, proxy_rate_bps, uses_platform_proxy, `+sharedPoolDisplayedPlatformAmountSQL+` AS platform_amount, owner_amount, effective_status, transfer_id, created_at,
 		base_amount,settlement_multiplier,settlement_amount,spread_amount
 		FROM `+sharedPoolEarningsReadSource+where+` ORDER BY created_at DESC, id DESC LIMIT $4 OFFSET $5`,
 		ownerID, f.AccountID, f.Status, f.PageSize, (int64(f.Page)-1)*int64(f.PageSize))
@@ -74,10 +80,154 @@ func (r *sharedPoolEarningsRepository) Summary(ctx context.Context, ownerID int6
 		COALESCE(SUM(owner_amount) FILTER (WHERE effective_status = 'available'), 0),
 		COALESCE(SUM(owner_amount) FILTER (WHERE effective_status = 'pending'), 0),
 		COALESCE(SUM(owner_amount) FILTER (WHERE effective_status = 'transferred'), 0),
-		COALESCE(SUM(platform_amount), 0), COALESCE(SUM(billing_amount), 0)
+		COALESCE(SUM(`+sharedPoolDisplayedPlatformAmountSQL+`), 0), COALESCE(SUM(billing_amount), 0)
 		FROM `+sharedPoolEarningsReadSource+` WHERE ($1::bigint = 0 OR owner_user_id = $1)`, ownerID).
 		Scan(&result.TotalEarned, &result.Available, &result.Pending, &result.Transferred, &result.PlatformAmount, &result.BillingAmount)
 	return result, err
+}
+
+type sharedPoolUserEarningsAccount struct {
+	UserID      int64
+	Email       string
+	Platform    string
+	AccountType string
+	Credentials []byte
+	Extra       []byte
+}
+
+// UserEarnings 按供号用户聚合账本，并沿用流水和汇总接口的有效状态计算。
+func (r *sharedPoolEarningsRepository) UserEarnings(ctx context.Context) ([]service.SharedPoolUserEarnings, error) {
+	accounts, err := r.listSharedPoolUserAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	byUser := make(map[int64]*service.SharedPoolUserEarnings, len(accounts))
+	mergeSharedPoolUserAccounts(byUser, accounts)
+	if err := r.mergeSharedPoolUserEarnings(ctx, byUser); err != nil {
+		return nil, err
+	}
+	return finalizeSharedPoolUserEarnings(byUser), nil
+}
+
+func mergeSharedPoolUserAccounts(byUser map[int64]*service.SharedPoolUserEarnings, accounts []sharedPoolUserEarningsAccount) {
+	for _, account := range accounts {
+		item := byUser[account.UserID]
+		if item == nil {
+			item = &service.SharedPoolUserEarnings{UserID: account.UserID, Email: account.Email, AccountTiers: []service.SharedPoolUserAccountTier{}}
+			byUser[account.UserID] = item
+		}
+		if item.Email == "" {
+			item.Email = account.Email
+		}
+		item.AccountCount++
+		tier := sharedPoolAccountTier(account)
+		found := false
+		for i := range item.AccountTiers {
+			if item.AccountTiers[i].Tier == tier {
+				item.AccountTiers[i].Count++
+				found = true
+				break
+			}
+		}
+		if !found {
+			item.AccountTiers = append(item.AccountTiers, service.SharedPoolUserAccountTier{Tier: tier, Count: 1})
+		}
+	}
+}
+
+func (r *sharedPoolEarningsRepository) mergeSharedPoolUserEarnings(ctx context.Context, byUser map[int64]*service.SharedPoolUserEarnings) error {
+	rows, err := r.db.QueryContext(ctx, `SELECT visible_earnings.owner_user_id, COALESCE(u.email, ''),
+		COUNT(DISTINCT visible_earnings.account_id), COUNT(*), COALESCE(SUM(visible_earnings.owner_amount), 0),
+		COALESCE(SUM(visible_earnings.owner_amount) FILTER (WHERE visible_earnings.effective_status = 'available'), 0),
+		COALESCE(SUM(visible_earnings.owner_amount) FILTER (WHERE visible_earnings.effective_status = 'pending'), 0),
+		COALESCE(SUM(visible_earnings.owner_amount) FILTER (WHERE visible_earnings.effective_status = 'transferred'), 0)
+		FROM `+sharedPoolEarningsReadSource+`
+		LEFT JOIN users u ON u.id = visible_earnings.owner_user_id
+		GROUP BY visible_earnings.owner_user_id, u.email
+		ORDER BY COALESCE(SUM(visible_earnings.owner_amount), 0) DESC, visible_earnings.owner_user_id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item service.SharedPoolUserEarnings
+		var earningsAccountCount int64
+		if err := rows.Scan(&item.UserID, &item.Email, &earningsAccountCount, &item.EarningsCount,
+			&item.TotalEarned, &item.Available, &item.Pending, &item.Transferred); err != nil {
+			return err
+		}
+		if existing := byUser[item.UserID]; existing != nil {
+			if existing.Email == "" {
+				existing.Email = item.Email
+			}
+			existing.EarningsCount = item.EarningsCount
+			existing.TotalEarned = item.TotalEarned
+			existing.Available = item.Available
+			existing.Pending = item.Pending
+			existing.Transferred = item.Transferred
+			continue
+		}
+		// Keep historical earnings rows whose account was deleted from the
+		// current shared-account registry visible to administrators.
+		item.AccountCount = earningsAccountCount
+		item.AccountTiers = []service.SharedPoolUserAccountTier{}
+		byUser[item.UserID] = &item
+	}
+	return rows.Err()
+}
+
+func finalizeSharedPoolUserEarnings(byUser map[int64]*service.SharedPoolUserEarnings) []service.SharedPoolUserEarnings {
+	result := make([]service.SharedPoolUserEarnings, 0, len(byUser))
+	for _, item := range byUser {
+		sort.Slice(item.AccountTiers, func(i, j int) bool { return item.AccountTiers[i].Tier < item.AccountTiers[j].Tier })
+		result = append(result, *item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].TotalEarned == result[j].TotalEarned {
+			return result[i].UserID < result[j].UserID
+		}
+		return result[i].TotalEarned > result[j].TotalEarned
+	})
+	return result
+}
+
+func (r *sharedPoolEarningsRepository) listSharedPoolUserAccounts(ctx context.Context) ([]sharedPoolUserEarningsAccount, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT spa.owner_user_id, COALESCE(u.email, ''), a.platform, a.type, a.credentials, a.extra
+		FROM shared_pool_accounts spa
+		JOIN accounts a ON a.id = spa.account_id AND a.deleted_at IS NULL
+		LEFT JOIN users u ON u.id = spa.owner_user_id
+		ORDER BY spa.owner_user_id, spa.account_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	accounts := make([]sharedPoolUserEarningsAccount, 0)
+	for rows.Next() {
+		var account sharedPoolUserEarningsAccount
+		if err := rows.Scan(&account.UserID, &account.Email, &account.Platform, &account.AccountType, &account.Credentials, &account.Extra); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, rows.Err()
+}
+
+func sharedPoolAccountTier(account sharedPoolUserEarningsAccount) string {
+	var credentials, extra map[string]any
+	if len(account.Credentials) > 0 {
+		_ = json.Unmarshal(account.Credentials, &credentials)
+	}
+	if len(account.Extra) > 0 {
+		_ = json.Unmarshal(account.Extra, &extra)
+	}
+	tier := service.SharedPoolOverviewTierForAccount(&service.Account{
+		Platform: account.Platform, Type: account.AccountType, Credentials: credentials, Extra: extra,
+	})
+	if tier == "" {
+		return "unknown"
+	}
+	return tier
 }
 
 func (r *sharedPoolEarningsRepository) AccountTotals(ctx context.Context, ownerID int64, ids []int64) (map[int64]service.SharedPoolAccountEarnings, error) {

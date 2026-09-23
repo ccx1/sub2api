@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -47,6 +48,23 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (h *SettingHandler) codexTicketHarvestProxyView(ctx context.Context, settings *service.SystemSettings) (string, string, int64) {
+	if settings == nil {
+		return "", "", 0
+	}
+	proxyURL := settings.OpenAICodexTicketHarvestProxyURL
+	proxyMode := settings.OpenAICodexTicketHarvestProxyMode
+	proxyID := settings.OpenAICodexTicketHarvestProxyID
+	if h != nil && h.settingService != nil {
+		if mode, url, id, err := h.settingService.GetOpenAICodexTicketHarvestProxySettingsWithID(ctx); err == nil {
+			proxyMode = mode
+			proxyURL = url
+			proxyID = id
+		}
+	}
+	return strings.TrimSpace(proxyURL), proxyMode, proxyID
 }
 
 // SettingHandler 系统设置处理器
@@ -131,6 +149,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		paymentCfg = &service.PaymentConfig{}
 	}
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
+	harvestProxyURL, harvestProxyMode, harvestProxyID := h.codexTicketHarvestProxyView(c.Request.Context(), settings)
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    settings.RegistrationEnabled,
@@ -304,9 +323,10 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAICodexClientVersionSynced:                         settings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                      settings.OpenAICodexVersionAutoSyncEnabled,
 		OpenAICodexTicketEnabled:                               settings.OpenAICodexTicketEnabled,
-		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(settings.OpenAICodexTicketHarvestProxyURL),
-		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL) != "",
-		OpenAICodexTicketHarvestProxyMode:                      settings.OpenAICodexTicketHarvestProxyMode,
+		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(harvestProxyURL),
+		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(harvestProxyURL) != "" || harvestProxyID > 0,
+		OpenAICodexTicketHarvestProxyMode:                      harvestProxyMode,
+		OpenAICodexTicketHarvestProxyID:                        harvestProxyID,
 		ProxyPoolMaxAccounts:                                   settings.ProxyPoolMaxAccounts,
 		ClaudeCodeClientVersion:                                settings.ClaudeCodeClientVersion,
 		ClaudeCodeClientVersionSynced:                          settings.ClaudeCodeClientVersionSynced,

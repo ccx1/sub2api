@@ -12,6 +12,39 @@ import (
 var codexTicketTierNamePattern = regexp.MustCompile(`^[a-zA-Z0-9 _-]{1,80}$`)
 
 func validateCodexTicketPolicy(cfg *config.OpenAICodexTicketConfig) error {
+	if err := config.ValidateCodexTicketCredentialConfig(cfg); err != nil {
+		return invalidCodexTicketPolicy(err.Error())
+	}
+	if err := config.ValidateCodexTicketRefreshStrategy(cfg); err != nil {
+		return invalidCodexTicketPolicy(err.Error())
+	}
+	if cfg.PoolCapacity == 0 {
+		cfg.PoolCapacity = config.DefaultCodexTicketPoolCapacity
+	}
+	if cfg.VerifyBusiness == nil {
+		enabled := true
+		cfg.VerifyBusiness = &enabled
+	}
+	if cfg.BusinessVerificationRounds == 0 {
+		cfg.BusinessVerificationRounds = 1
+	}
+	if cfg.SessionMode == "" {
+		cfg.SessionMode = config.CodexTicketSessionRandom
+	}
+	switch cfg.SessionMode {
+	case config.CodexTicketSessionRandom, config.CodexTicketSessionAccount, config.CodexTicketSessionAccountModel:
+	default:
+		return invalidCodexTicketPolicy("打票 Session 模式必须是 random、account 或 account_model")
+	}
+	if cfg.ProxyFailureThreshold == 0 {
+		cfg.ProxyFailureThreshold = 3
+	}
+	if cfg.ProxyFailureThreshold < 1 || cfg.ProxyFailureThreshold > 1000 {
+		return invalidCodexTicketPolicy("打票代理连续失败换绑阈值必须在 1 到 1000 之间")
+	}
+	if err := validateCodexTicketProtection(cfg); err != nil {
+		return err
+	}
 	if cfg.LengthMode == "" {
 		cfg.LengthMode = config.CodexTicketLengthStrict
 	}
@@ -24,9 +57,11 @@ func validateCodexTicketPolicy(cfg *config.OpenAICodexTicketConfig) error {
 	}{
 		{"target_length", cfg.TargetLength, 16, 8192},
 		{"ttl_seconds", cfg.TTLSeconds, 60, 86400},
+		{"pool_capacity", cfg.PoolCapacity, 1, config.MaxCodexTicketPoolCapacity},
 		{"refresh_before_seconds", cfg.RefreshBeforeSeconds, 0, cfg.TTLSeconds - 1},
 		{"harvest_probe_interval_seconds", cfg.HarvestProbeIntervalSeconds, 1, 3600},
 		{"harvest_attempt_timeout_seconds", cfg.HarvestAttemptTimeoutSeconds, 1, 300},
+		{"business_verification_rounds", cfg.BusinessVerificationRounds, 1, 10},
 		{"harvest_concurrency", cfg.HarvestConcurrency, 1, 64},
 		{"retry_max_attempts", cfg.RetryMaxAttempts, 0, 1000},
 		{"retry_exhausted_cooldown_seconds", cfg.RetryExhaustedCooldownSeconds, 1, 86400},

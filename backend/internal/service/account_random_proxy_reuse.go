@@ -34,12 +34,27 @@ func ValidateRandomProxyForReuse(ctx context.Context, account *Account, source a
 		return ErrRandomProxyChanged
 	}
 	if !account.IsRandomProxy() && !current.IsRandomProxy() {
-		return nil
+		if _, enabled := source.(fixedProxyFailoverResolver); enabled {
+			if err := ResolveRandomProxyFromSource(ctx, current, source); err != nil {
+				return err
+			}
+			if !sameRuntimeProxy(current, account) {
+				return ErrRandomProxyChanged
+			}
+		}
+		return validateFixedProxyRegionForReuse(ctx, current, account, source)
 	}
 	if account.IsRandomProxy() != current.IsRandomProxy() {
 		return ErrRandomProxyChanged
 	}
 	return validateRandomProxyReconnect(ctx, current, account, source, repo)
+}
+
+func sameRuntimeProxy(left, right *Account) bool {
+	if left.ProxyID == nil || right.ProxyID == nil {
+		return left.ProxyID == nil && right.ProxyID == nil
+	}
+	return *left.ProxyID == *right.ProxyID && left.Proxy != nil && right.Proxy != nil && left.Proxy.URL() == right.Proxy.URL()
 }
 
 func validateRandomProxyReconnect(ctx context.Context, current, bound *Account, source any, selector RandomProxySelector) error {

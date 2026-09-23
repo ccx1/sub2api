@@ -31,7 +31,26 @@ func (s *OpenAIGatewayService) codexTicketBinding(account *Account) string {
 }
 
 func (s *OpenAIGatewayService) codexTicketBindingForConfig(account *Account, cfg config.OpenAICodexTicketConfig) string {
+	cfg = resolveCodexTicketCredentialConfig(account, cfg)
+	if !config.CodexTicketUsesCookies(cfg) {
+		cfg.CredentialMode, cfg.CookieTTLSeconds, cfg.CookieRefreshBeforeSeconds = "", 0, nil
+	}
+	account = account.ConfiguredProxySnapshot()
 	cfg.Enabled = false
+	// 新调度配置由独立准入版本保护；不能改变旧二进制计算的票据绑定。
+	cfg.Protection = nil
+	cfg.VerifyBusiness = nil
+	cfg.BusinessVerificationRounds = 0
+	// 更新策略只决定采集时机，不改变已发布票据的身份。
+	cfg.RefreshStrategy = ""
+	// 库存容量只控制补票数量，不改变已发布票的身份绑定。
+	cfg.PoolCapacity = 0
+	// 换绑阈值只控制采集调度，保持升级前有效票据的绑定编码。
+	cfg.ProxyFailureThreshold = 0
+	// 默认随机模式保持升级前的绑定编码；固定模式参与在途发布校验。
+	if cfg.SessionMode == config.CodexTicketSessionRandom {
+		cfg.SessionMode = ""
+	}
 	// 采集出口独立核验，不参与业务票据或通用规则绑定。
 	cfg.HarvestProxyURL = ""
 	extra := make(map[string]any)
@@ -64,11 +83,22 @@ func (s *OpenAIGatewayService) codexTicketRevoked(key string, ticket *openAICode
 	if ticket == nil {
 		return false
 	}
-	cutoff, ok := s.openaiCodexTicketRevoked.Load(key)
-	return ok && !ticket.CapturedAt.After(cutoff.(time.Time))
+	if ticket.Revoked {
+		return true
+	}
+	index, ok := s.openaiCodexTicketRevoked.Load(codexTicketRevocationIndexKey(key))
+	if !ok {
+		return false
+	}
+	_, revoked := index.(map[codexTicketRevocationKey]time.Time)[codexTicketExactRevocationKey(ticket)]
+	return revoked
 }
 
 func (s *OpenAIGatewayService) lookupOpenAICodexTicket(account *Account, model string) *openAICodexTicket {
+	return s.lookupOpenAICodexTicketForConfig(account, model, s.openAICodexTicketConfig())
+}
+
+func (s *OpenAIGatewayService) lookupOpenAICodexTicketForConfig(account *Account, model string, cfg config.OpenAICodexTicketConfig) *openAICodexTicket {
 	if s == nil || account == nil || account.ID <= 0 || strings.TrimSpace(model) == "" {
 		return nil
 	}
@@ -77,27 +107,19 @@ func (s *OpenAIGatewayService) lookupOpenAICodexTicket(account *Account, model s
 	lock := s.codexTicketLock(key)
 	lock.Lock()
 	defer lock.Unlock()
-	var mem *openAICodexTicket
-	if raw, ok := s.openaiCodexTickets.Load(key); ok {
-		mem, _ = raw.(*openAICodexTicket)
+	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
+	if inventory == nil {
+		return nil
 	}
-	extra := parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
-	if extra != nil && extra.Revoked && (mem == nil || !mem.CapturedAt.After(extra.CapturedAt)) {
-		// 旧调度快照只能维持或提高撤销水位，不能让更晚撤销的票复活。
-		if !s.codexTicketRevoked(key, extra) {
-			s.openaiCodexTicketRevoked.Store(key, extra.CapturedAt)
+	if selected := selectOpenAICodexTicket(inventory, account, cfg, time.Now()); selected != nil {
+		return selected
+	}
+	for _, slot := range codexTicketSlots(inventory) {
+		if slot != nil && !slot.Revoked && slot.accountCompatible(account) {
+			return codexTicketLeaf(slot)
 		}
-		s.openaiCodexTickets.Delete(key)
-		return nil
 	}
-	if extra != nil && !s.codexTicketRevoked(key, extra) && (mem == nil || extra.CapturedAt.After(mem.CapturedAt)) {
-		mem = extra
-		s.openaiCodexTickets.Store(key, mem)
-	}
-	if s.codexTicketRevoked(key, mem) || mem != nil && !mem.accountCompatible(account) {
-		return nil
-	}
-	return mem
+	return nil
 }
 
 // 返回成功前先持久化，避免写库失败时把旧可用票替换成仅存在于本机的新票。
@@ -106,11 +128,11 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		return false
 	}
 	// 与同实例管理端保存串行，覆盖最终规则核验、数据库写入和本机发布。
-	if ticket.Verified && s.settingService != nil {
+	if (ticket.Verified || ticket.VerificationSkipped) && s.settingService != nil {
 		s.settingService.codexTicketPublishMu.RLock()
 		defer s.settingService.codexTicketPublishMu.RUnlock()
 	}
-	copyTicket := *ticket
+	copyTicket := *codexTicketLeaf(ticket)
 	copyTicket.Model, copyTicket.AccountID = normalizeOpenAICodexTicketModel(ticket.Model), account.ID
 	key := openAICodexTicketKey(account.ID, copyTicket.Model)
 	lock := s.codexTicketLock(key)
@@ -119,21 +141,28 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	if s.codexTicketRevoked(key, &copyTicket) {
 		return false
 	}
-	if copyTicket.Verified {
-		cfg := s.openAICodexTicketConfigContext(ctx)
+	cfg := s.openAICodexTicketConfigForAccount(ctx, account)
+	if copyTicket.Verified || copyTicket.VerificationSkipped {
 		copyTicket.AccountBinding = openAICodexTicketAccountBinding(account)
 		if !cfg.Enabled || !slices.Contains(cfg.Models, copyTicket.Model) || !copyTicket.usable(time.Now(), account, cfg) ||
 			copyTicket.Binding != s.codexTicketBindingForConfig(account, cfg) {
 			return false
 		}
 	}
-	if raw, ok := s.openaiCodexTickets.Load(key); ok && raw.(*openAICodexTicket).CapturedAt.After(copyTicket.CapturedAt) {
+	inventory := s.codexTicketInventoryLocked(account, copyTicket.Model)
+	if codexTicketInventoryTime(inventory).After(copyTicket.CapturedAt) {
 		return false
 	}
-	if !s.persistOpenAICodexTicket(ctx, account, copyTicket.Model, &copyTicket) {
+	available := s.availableCodexTicketInventory(key, inventory)
+	replacement := mergeCodexTicketPublication(available, &copyTicket, account, cfg)
+	snapshot := cloneOpenAICodexTicketAccount(account)
+	if _, conditional := s.accountRepo.(codexTicketCompareAndSwapper); !conditional && inventory != nil {
+		snapshot.Extra[openAICodexTicketExtraKey(copyTicket.Model)] = inventory
+	}
+	if !s.persistOpenAICodexTicket(ctx, snapshot, copyTicket.Model, replacement) {
 		return false
 	}
-	s.openaiCodexTickets.Store(key, &copyTicket)
+	s.openaiCodexTickets.Store(key, replacement)
 	return true
 }
 
@@ -156,6 +185,10 @@ func (s *OpenAIGatewayService) persistOpenAICodexTicketResult(ctx context.Contex
 		return updated, err
 	}
 	// 兼容测试替身及旧仓储；同进程发布/撤销仍由同一分片锁串行。
+	if used, ok := replacement.(*openAICodexTicket); ok && used.Revoked {
+		inventory := parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
+		replacement = revokeCodexTicketSlot(inventory, used)
+	}
 	err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{openAICodexTicketExtraKey(model): replacement})
 	if err != nil {
 		logger.L().Warn("openai_codex_ticket persistence failed", zap.Int64("account_id", account.ID))
@@ -163,7 +196,12 @@ func (s *OpenAIGatewayService) persistOpenAICodexTicketResult(ctx context.Contex
 	return err == nil, err
 }
 
-func (s *OpenAIGatewayService) invalidateOpenAICodexTicket(ctx context.Context, account *Account, used *openAICodexTicket) {
+func (s *OpenAIGatewayService) invalidateOpenAICodexTicket(ctx context.Context, account *Account, used *openAICodexTicket, details ...*CodexTicketInvalidation) {
+	var detail *CodexTicketInvalidation
+	if len(details) > 0 {
+		detail = details[0]
+	}
+	used = codexTicketWithInvalidation(used, detail)
 	// 一次瞬时写库失败可立即重试；每次重试重新加锁核对，不能覆盖期间发布的新票。
 	for range 2 {
 		if !s.invalidateOpenAICodexTicketOnce(ctx, account, used) {
@@ -180,27 +218,21 @@ func (s *OpenAIGatewayService) invalidateOpenAICodexTicketOnce(ctx context.Conte
 	lock := s.codexTicketLock(key)
 	lock.Lock()
 	defer lock.Unlock()
-	if raw, ok := s.openaiCodexTickets.Load(key); ok {
-		current := raw.(*openAICodexTicket)
-		if current.State != used.State || !current.CapturedAt.Equal(used.CapturedAt) {
-			return false
-		}
-	}
-	if cutoff, ok := s.openaiCodexTicketRevoked.Load(key); ok && used.CapturedAt.Before(cutoff.(time.Time)) {
+	inventory := s.codexTicketInventoryLocked(account, used.Model)
+	if !codexTicketInventoryContains(inventory, used) {
 		return false
 	}
-	// 相同水位仍可重试写库；水位只证明本机禁用，不能证明上次持久化成功。
-	s.openaiCodexTicketRevoked.Store(key, used.CapturedAt)
-	s.openaiCodexTickets.Delete(key)
+	// 写库失败仍阻断本机实际被拒绝的票，备用保持独立；同身份允许有界重试。
+	s.rememberCodexTicketRevocation(key, used)
 	snapshot := cloneOpenAICodexTicketAccount(account)
 	keyExtra := openAICodexTicketExtraKey(used.Model)
-	expected := parseOpenAICodexTicketFromAny(account.ID, used.Model, snapshot.Extra[keyExtra])
-	if expected == nil || expected.State != used.State || !expected.CapturedAt.Equal(used.CapturedAt) {
-		snapshot.Extra[keyExtra] = used
-	}
-	tombstone := *used
+	snapshot.Extra[keyExtra] = inventory
+	tombstone := *codexTicketLeaf(used)
 	tombstone.Revoked = true
-	_, err := s.persistOpenAICodexTicketResult(context.WithoutCancel(ctx), snapshot, used.Model, &tombstone)
+	updated, err := s.persistOpenAICodexTicketResult(context.WithoutCancel(ctx), snapshot, used.Model, &tombstone)
+	if updated && err == nil {
+		s.openaiCodexTickets.Store(key, revokeCodexTicketSlot(inventory, used))
+	}
 	return err != nil
 }
 

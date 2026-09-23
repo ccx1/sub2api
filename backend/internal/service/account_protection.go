@@ -146,6 +146,7 @@ func PreserveAccountProtection(ctx context.Context, current *Account, incoming m
 		result["random_proxy_last_used"] = value
 	}
 	if ProtectionManagedWrite(ctx) {
+		preserveProtectionCodexTickets(current, result)
 		return result
 	}
 	keys := ProtectionManagedKeys(current)

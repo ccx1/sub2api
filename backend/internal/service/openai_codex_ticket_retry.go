@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -32,10 +31,9 @@ func isCodexTicketManualRetry(ctx context.Context) bool {
 	return value
 }
 
-// RetryOpenAICodexTicket schedules one probe for each configured model whose
-// ticket is missing or within the configured refresh window. A healthy ticket
-// is deliberately left untouched, and a manual retry only clears the model's
-// in-memory backoff once so a failed click cannot create an endless loop.
+// RetryOpenAICodexTicket schedules one forced probe for every configured model.
+// Manual retry deliberately ignores ticket freshness and retry gates for this
+// one round; normal scheduled harvesting keeps its existing protections.
 func (s *OpenAIGatewayService) RetryOpenAICodexTicket(ctx context.Context, accountID int64, requestedModel string) (CodexTicketRetryResult, error) {
 	result := CodexTicketRetryResult{Models: []string{}}
 	if s == nil || s.accountRepo == nil || accountID <= 0 {
@@ -45,41 +43,30 @@ func (s *OpenAIGatewayService) RetryOpenAICodexTicket(ctx context.Context, accou
 	if err != nil {
 		return result, err
 	}
-	if account == nil || account.Status != StatusActive || !OpenAICodexTicketAccountEnabled(account) ||
+	if !openAICodexTicketHarvestEnabled(account) ||
 		!s.openAICodexTicketEnabledContext(ctx) {
 		return result, ErrCodexTicketRetryUnavailable
 	}
-	cfg := s.openAICodexTicketConfigContext(ctx)
+	cfg := s.openAICodexTicketConfigForAccount(ctx, account)
 	models, err := codexTicketRetryModels(cfg, requestedModel)
 	if err != nil {
 		return result, err
 	}
-	now := time.Now()
-	refreshBefore := time.Duration(cfg.RefreshBeforeSeconds) * time.Second
 	token := account.GetCredential("access_token")
-	if account.IsInDailyCooldown(now) || s.openAICodexTicketCooling(account, token) {
-		result.Skipped = len(models)
-		return result, nil
+	manualCtx := withCodexTicketManualRetry(context.WithoutCancel(ctx))
+	if _, scheduled := s.accountRepo.(CodexTicketScheduler); scheduled {
+		return s.retryScheduledCodexTickets(manualCtx, account, models, cfg), nil
 	}
 	for _, model := range models {
-		ticket := s.lookupOpenAICodexTicket(account, model)
-		if ticket.usable(now, account, cfg) && !ticket.needsRefresh(now, refreshBefore) {
-			result.Skipped++
-			continue
-		}
 		// The button is an explicit, one-shot retry. The next failure starts a
 		// fresh configured backoff sequence instead of inheriting the old one.
 		if key := codexTicketBackoffKey(account, token, model); key != "" {
 			s.openaiCodexTicketBackoff.Delete(key)
 		}
-		acc := *account
-		acc.Extra = cloneAnyMap(account.Extra)
-		acc.Credentials = cloneAnyMap(account.Credentials)
 		result.Scheduled++
 		result.Models = append(result.Models, model)
-		manualCtx := withCodexTicketManualRetry(context.WithoutCancel(ctx))
-		go s.probeOnceOpenAICodexTicket(manualCtx, &acc, model)
 	}
+	s.submitManualCodexTicketProbes(manualCtx, account, result.Models)
 	return result, nil
 }
 

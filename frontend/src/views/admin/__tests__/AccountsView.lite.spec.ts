@@ -4,6 +4,9 @@ import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import CodexTicketAlerts from '@/components/account/CodexTicketAlerts.vue'
+import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
+import { BulkEditAccountModal } from '@/components/account'
 
 const {
   listAccounts,
@@ -68,6 +71,7 @@ const DataTableStub = defineComponent({
   template: `
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
+        <slot name="cell-select" :row="row" />
         <slot name="cell-groups" :row="row" />
         <slot name="cell-proxy" :row="row" />
         <slot name="cell-actions" :row="row" />
@@ -209,6 +213,91 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('opens the full editor for one imported account outside the current page', async () => {
+    const imported = { ...fullAccount, id: 71, name: 'new account' }
+    getById.mockResolvedValue(imported)
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.getComponent(ImportDataModal).vm.$emit('imported-and-edit', [71])
+    await flushPromises()
+
+    expect(getById).toHaveBeenCalledWith(71)
+    expect(wrapper.getComponent(EditAccountModalStub).props()).toMatchObject({ show: true, account: imported })
+    expect(wrapper.getComponent(BulkEditAccountModal).props('show')).toBe(false)
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('opens bulk editing for only the imported IDs and their actual platforms', async () => {
+    getById.mockImplementation((id: number) => Promise.resolve({
+      ...fullAccount, id, platform: id === 71 ? 'openai' : 'anthropic', type: id === 71 ? 'oauth' : 'apikey'
+    }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-account-name="compact row"] input[type="checkbox"]').setValue(true)
+    wrapper.getComponent(ImportDataModal).vm.$emit('imported-and-edit', [71, 72])
+    await flushPromises()
+
+    const bulkEditor = wrapper.getComponent(BulkEditAccountModal)
+    expect(bulkEditor.props('show')).toBe(true)
+    expect(bulkEditor.props('accountIds')).toEqual([71, 72])
+    expect(bulkEditor.props('target')).toEqual({
+      mode: 'selected', accountIds: [71, 72],
+      selectedPlatforms: ['openai', 'anthropic'], selectedTypes: ['oauth', 'apikey']
+    })
+    expect(wrapper.getComponent(EditAccountModalStub).props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not open either editor when import reports no account IDs', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.getComponent(ImportDataModal).vm.$emit('imported-and-edit', [])
+    await flushPromises()
+
+    expect(getById).not.toHaveBeenCalled()
+    expect(wrapper.getComponent(EditAccountModalStub).props('show')).toBe(false)
+    expect(wrapper.getComponent(BulkEditAccountModal).props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps imported data after a detail read fails and does not open an incomplete editor', async () => {
+    getById.mockRejectedValue(new Error('detail unavailable'))
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.getComponent(ImportDataModal).vm.$emit('imported-and-edit', [71, 72])
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalled()
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(wrapper.getComponent(EditAccountModalStub).props('show')).toBe(false)
+    expect(wrapper.getComponent(BulkEditAccountModal).props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['revalidation_required', 'expired'] as const)('refreshes a %s ticket without an account timestamp change', async credential_state => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    localStorage.setItem('codex-ticket-desktop-alerts', 'true')
+    const ticket = { model: 'gpt-6-astra', ready: true, blocked: false, remaining_seconds: 60, credential_state: 'available' }
+    const initial = { ...listRow, updated_at: '2026-09-22T00:00:00Z', codex_turn_tickets: [ticket] }
+    const next = { ...initial, codex_turn_tickets: [{ ...ticket, credential_state, ready: credential_state !== 'expired' }] }
+    const page = { items: [initial], total: 1, page: 1, page_size: 20, pages: 1 }
+    listAccounts.mockResolvedValue(page)
+    listWithEtag.mockResolvedValueOnce({ notModified: false, etag: 'updated-ticket-state', data: { ...page, items: [next] } })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      expect(showWarning).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(6000)
+      await flushPromises()
+      expect(listWithEtag).toHaveBeenCalledOnce()
+      expect(wrapper.findComponent(CodexTicketAlerts).props('accounts')[0].codex_turn_tickets?.[0].credential_state).toBe(credential_state)
+      expect(showWarning).toHaveBeenCalledTimes(credential_state === 'expired' ? 1 : 0)
+    } finally { wrapper.unmount() }
   })
 
   it('keeps lite=1 on the initial list request', async () => {

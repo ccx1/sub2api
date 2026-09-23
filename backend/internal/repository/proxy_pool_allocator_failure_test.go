@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -20,12 +21,17 @@ func TestProxyPoolAllocatorConnectionFailureExcludesOnlyAffectedAccount(t *testi
 	for range 3 {
 		require.NoError(t, a.ReportFailure(ctx, 7, 1))
 	}
-	selected, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
-	require.NoError(t, err)
-	require.Nil(t, selected)
+	require.EqualValues(t, 1, a.rdb.ZCard(ctx, proxyPoolFailureKey("7")).Val())
 	other, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 8})
 	require.NoError(t, err)
 	require.NotNil(t, other)
+	require.EqualValues(t, 1, a.rdb.ZCard(ctx, proxyPoolFailureKey("7")).Val())
+	require.Zero(t, a.rdb.ZCard(ctx, proxyPoolFailureKey("8")).Val())
+	selected, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
+	require.NoError(t, err)
+	require.NotNil(t, selected, "单候选全部冷却时恢复该候选")
+	require.EqualValues(t, 1, selected.ID)
+	require.Zero(t, a.rdb.ZCard(ctx, proxyPoolFailureKey("7")).Val())
 	server.SetTime(now.Add(proxyPoolFailureTTL))
 	selected, err = a.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
 	require.NoError(t, err)
@@ -92,8 +98,10 @@ func TestProxyPoolAllocatorSuccessAndWindowResetFailureStreak(t *testing.T) {
 }
 
 func TestProxyPoolAllocatorLateSuccessDoesNotResetNewProxyFailures(t *testing.T) {
-	a, _ := newProxyPoolAllocatorTest(t, 1, poolCandidate(1), poolCandidate(2))
+	a, server := newProxyPoolAllocatorTest(t, 1, poolCandidate(1), poolCandidate(2))
 	ctx := context.Background()
+	now := time.Now()
+	server.SetTime(now)
 	first, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
 	require.NoError(t, err)
 	for range 3 {
@@ -101,14 +109,20 @@ func TestProxyPoolAllocatorLateSuccessDoesNotResetNewProxyFailures(t *testing.T)
 	}
 	second, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
 	require.NoError(t, err)
+	server.SetTime(now.Add(time.Second))
 	for range 2 {
 		require.NoError(t, a.ReportFailure(ctx, 7, second.ID))
 	}
 	require.NoError(t, a.ReportSuccess(ctx, 7, first.ID))
 	require.NoError(t, a.ReportFailure(ctx, 7, second.ID))
+	require.EqualValues(t, 2, a.rdb.ZCard(ctx, proxyPoolFailureKey("7")).Val(), "旧代理的晚到成功不能清除新代理连续失败")
 	selected, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
 	require.NoError(t, err)
-	require.Nil(t, selected)
+	require.NotNil(t, selected)
+	require.Equal(t, first.ID, selected.ID, "全部冷却后仅恢复最早到期的代理")
+	remaining, err := a.rdb.ZRange(ctx, proxyPoolFailureKey("7"), 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{strconv.FormatInt(second.ID, 10)}, remaining)
 }
 
 func TestProxyPoolAllocatorConcurrentFailuresCountAtomically(t *testing.T) {

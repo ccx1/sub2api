@@ -23,7 +23,7 @@ func recordCodexTicketProbeResponse(input openAICodexTicketProbeInput, response 
 		return
 	}
 	length, status := len(extractOpenAICodexTurnState(response.Header)), response.StatusCode
-	if input.State == "" {
+	if !codexTicketProbeBusiness(input) {
 		input.Attempt.HarvestTicketLength, input.Attempt.HarvestHTTPStatus = &length, &status
 	} else {
 		input.Attempt.BusinessTicketLength, input.Attempt.BusinessHTTPStatus = &length, &status

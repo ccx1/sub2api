@@ -28,7 +28,7 @@ func (r *sharedPoolRepoStub) GetSharedAccount(_ context.Context, ownerID, id int
 }
 func (r *sharedPoolRepoStub) SharedSettings(context.Context) (*SharedPoolSettings, error) {
 	r.settingsRead++
-	return &SharedPoolSettings{MaxConcurrency: 10, DefaultGroupIDs: map[string]int64{PlatformOpenAI: 10}}, nil
+	return &SharedPoolSettings{MaxConcurrency: 10, DefaultGroupIDs: SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}}}, nil
 }
 func (r *sharedPoolRepoStub) SharedUserRates(context.Context) ([]SharedPoolUserRate, error) {
 	return nil, nil

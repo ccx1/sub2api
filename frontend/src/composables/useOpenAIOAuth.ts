@@ -17,6 +17,9 @@ export interface OpenAITokenInfo {
   name?: string
   plan_type?: string
   subscription_expires_at?: string
+  billing_currency?: string
+  price_country?: string
+  billing_metadata_checked?: boolean
   privacy_mode?: string
   // OpenAI specific IDs (extracted from ID Token)
   chatgpt_account_id?: string
@@ -203,6 +206,10 @@ export function useOpenAIOAuth() {
     }
     if (tokenInfo.client_id) {
       creds.client_id = tokenInfo.client_id
+    }
+    if (tokenInfo.billing_metadata_checked === true) {
+      creds.billing_currency = tokenInfo.billing_currency || ''
+      creds.price_country = tokenInfo.price_country || ''
     }
 
     return creds

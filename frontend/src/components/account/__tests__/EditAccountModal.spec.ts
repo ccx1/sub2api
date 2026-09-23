@@ -339,6 +339,75 @@ describe('EditAccountModal', () => {
     apiKeyWrapper.unmount()
   })
 
+  it('filters forwarding proxies by billing region and retains a selected Philippine proxy', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.proxy_id = 2
+    account.extra = { proxy_region_mode: 'billing' }
+    account.credentials = { ...account.credentials, billing_currency: 'JPY' }
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ proxies: [
+      { id: 1, country_code: 'JP' }, { id: 2, country_code: 'PH' }, { id: 3, country_code: 'US' }
+    ] as any })
+    const selector = wrapper.getComponent({ name: 'ProxySelector' })
+    expect(selector.props('proxies').map((proxy: { id: number }) => proxy.id)).toEqual([1, 2])
+    expect(selector.props('modelValue')).toBe(2)
+    expect(wrapper.text()).toContain('admin.accounts.proxyRegion.fixedMismatch')
+    selector.vm.$emit('update:modelValue', 1)
+    await nextTick()
+    expect(selector.props('proxies').map((proxy: { id: number }) => proxy.id)).toEqual([1])
+    wrapper.unmount()
+  })
+
+  it('keeps implicit OAuth region policy omitted until the user explicitly disables it', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.credentials = { ...account.credentials, price_country: 'JP' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-mode"]').element.value).toBe('billing')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra).not.toHaveProperty('proxy_region_mode')
+
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('off')
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBeUndefined()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra).toMatchObject({ proxy_region_mode: 'off', proxy_region_country: '' })
+    wrapper.unmount()
+  })
+
+  it('saves region independently while retaining proxy settings, ticket strategy, and billing evidence', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { custom_flag: 'keep', proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [2], codex_ticket_proxy_strategy: 'round_robin' }
+    account.credentials = { ...account.credentials, billing_currency: 'JPY', price_country: '' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('billing')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      extra: expect.objectContaining({ custom_flag: 'keep', random_proxy_pool_ids: [2], codex_ticket_proxy_strategy: 'round_robin', proxy_region_mode: 'billing', proxy_region_country: '' }),
+      credentials: expect.objectContaining({ billing_currency: 'JPY', price_country: '' })
+    }))
+    wrapper.unmount()
+  })
+
+  it('explicitly disables existing region matching without replacing a fixed proxy', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.proxy_id = 2
+    account.extra = { proxy_region_mode: 'manual', proxy_region_country: 'JP' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="proxy-region-mode"]').setValue('off')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ proxy_id: 2, extra: expect.objectContaining({ proxy_region_mode: 'off', proxy_region_country: '' }) }))
+    wrapper.unmount()
+  })
+
   it.each([
     { proxyId: 7, extra: {} },
     { proxyId: null, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'all' } },
@@ -387,7 +456,7 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
-    expect(wrapper.getComponent(CodexTicketProxySettings).props('modelValue')).toEqual({ mode: 'fixed', proxyId: 99 })
+    expect(wrapper.getComponent(CodexTicketProxySettings).props('modelValue')).toEqual({ mode: 'fixed', proxyId: 99, strategy: 'affinity' })
     await wrapper.get('#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="codex-ticket-proxy-inherit"]').setValue(true)

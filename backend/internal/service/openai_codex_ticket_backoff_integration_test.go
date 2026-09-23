@@ -85,7 +85,7 @@ func TestCodexTicketBackoffIntegrationFailedRenewalPreservesOldTicket(t *testing
 	require.Equal(t, 2, *calls)
 	checkOldTicket := func() {
 		t.Helper()
-		require.Same(t, previous, svc.lookupOpenAICodexTicket(account, previous.Model))
+		require.Equal(t, previous, svc.lookupOpenAICodexTicket(account, previous.Model))
 		headers := http.Header{}
 		require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), account, previous.Model, headers))
 		require.Equal(t, previous.State, headers.Get(openAICodexTurnStateHeader))

@@ -11,6 +11,7 @@ import (
 
 type SharedPoolOverviewMetrics struct {
 	TotalAccounts                     int64  `json:"total_accounts"`
+	AvailableAccounts                 int64  `json:"available_accounts"`
 	SchedulableAccounts               int64  `json:"schedulable_accounts"`
 	ConcurrencyCapacity               int64  `json:"concurrency_capacity"`
 	ConcurrencyUnlimited              bool   `json:"concurrency_unlimited"`
@@ -44,7 +45,8 @@ type SharedPoolOverviewAccount struct {
 	Platform             string                           `json:"-"`
 	Tier                 string                           `json:"-"`
 	Available            bool                             `json:"-"`
-	Participating        bool                             `json:"-"`
+	Valid                bool                             `json:"-"`
+	TicketRequired       bool                             `json:"-"`
 	Concurrency          int                              `json:"-"`
 	UntrackedConcurrency bool                             `json:"-"`
 	Ticket               *SharedPoolTicketAccountSnapshot `json:"-"`
@@ -109,13 +111,13 @@ func buildSharedPoolOverview(accounts []SharedPoolOverviewAccount, cfg config.Op
 		if tiers[key] == nil {
 			tiers[key] = &SharedPoolOverviewTier{Platform: account.Platform, Tier: account.Tier}
 		}
-		result.SharedPoolOverviewMetrics.appendAccount(account)
-		tiers[key].SharedPoolOverviewMetrics.appendAccount(account)
+		result.SharedPoolOverviewMetrics.appendAccount(account, cfg, now)
+		tiers[key].SharedPoolOverviewMetrics.appendAccount(account, cfg, now)
 	}
 	result.SharedPoolOverviewMetrics.finalize(cfg, now)
 	for _, tier := range tiers {
 		tier.SharedPoolOverviewMetrics.finalize(cfg, now)
-		tier.Available = tier.SchedulableAccounts > 0
+		tier.Available = tier.ParticipatingAccounts > 0
 		result.Tiers = append(result.Tiers, *tier)
 	}
 	sort.Slice(result.Tiers, func(i, j int) bool {
@@ -128,9 +130,12 @@ func buildSharedPoolOverview(accounts []SharedPoolOverviewAccount, cfg config.Op
 	return result
 }
 
-func (m *SharedPoolOverviewMetrics) appendAccount(account SharedPoolOverviewAccount) {
+func (m *SharedPoolOverviewMetrics) appendAccount(account SharedPoolOverviewAccount, cfg config.OpenAICodexTicketConfig, now time.Time) {
 	appendSharedOverviewAccount(&m.capacity, account)
-	if account.Participating {
+	if account.Valid {
+		m.AvailableAccounts++
+	}
+	if account.Valid && account.Available && (!account.TicketRequired || account.Ticket.hasReadyModelForParticipation(cfg, now)) {
 		m.ParticipatingAccounts++
 		if account.Concurrency <= 0 {
 			m.ParticipatingConcurrencyUnlimited = true

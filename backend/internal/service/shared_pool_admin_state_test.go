@@ -21,7 +21,7 @@ func (r *sharedAdminStateRepo) GetSharedAccount(_ context.Context, ownerID, id i
 func sharedAdminStateService(account *Account) (*SharedPoolService, *sharedAdminStateRepo) {
 	repo := &sharedAdminStateRepo{}
 	repo.record = SharedPoolAccountRecord{OwnerUserID: 7, AccountID: account.ID}
-	repo.cfg = &SharedPoolSettings{DefaultGroupIDs: map[string]int64{PlatformOpenAI: 10}, SubscriptionGroupIDs: map[string]map[string]int64{PlatformOpenAI: {"pro": 11}}}
+	repo.cfg = &SharedPoolSettings{DefaultGroupIDs: SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}}, SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"pro": {11}}}}
 	return &SharedPoolService{repo: repo, accounts: sharedPoolAccountRepoStub{account: account}, groups: sharedTierGroups{items: map[int64]*Group{
 		10: sharedTierGroup(10, PlatformOpenAI), 11: sharedTierGroup(11, PlatformOpenAI),
 	}}}, repo
@@ -51,9 +51,9 @@ func TestSharedAdminStateEnableRoutesOnlyUnassignedConsentedAccount(t *testing.T
 			require.Nil(t, repo.state.DispatchConsent)
 			require.Nil(t, repo.state.GroupIDs)
 			if tc.wantDefault {
-				require.Equal(t, new(int64(11)), repo.state.DefaultGroupID)
+				require.Equal(t, []int64{11}, repo.state.DefaultGroupIDs)
 			} else {
-				require.Nil(t, repo.state.DefaultGroupID)
+				require.Nil(t, repo.state.DefaultGroupIDs)
 			}
 			require.Equal(t, "pro", *repo.state.SubscriptionTier)
 			require.NotContains(t, a.Extra, SharedPoolSubscriptionTierKey, "service cannot mutate a cached account snapshot")
@@ -65,7 +65,7 @@ func TestSharedAdminStateCannotForgeConsentOrChangeInvalidTier(t *testing.T) {
 	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{SharedPoolDispatchConsentKey: false}}
 	s, repo := sharedAdminStateService(a)
 	for _, state := range []SharedPoolAccountState{
-		{Enabled: new(true)}, {DispatchConsent: new(true)}, {OwnerID: 7}, {DefaultGroupID: new(int64(11))}, {SubscriptionTier: new("invalid-tier")}, {Priority: new(-1)}, {Priority: new(101)},
+		{Enabled: new(true)}, {DispatchConsent: new(true)}, {OwnerID: 7}, {DefaultGroupIDs: []int64{11}}, {SubscriptionTier: new("invalid-tier")}, {Priority: new(-1)}, {Priority: new(101)},
 	} {
 		require.Error(t, s.AdminSetAccountState(context.Background(), 1, state))
 	}

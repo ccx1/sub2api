@@ -30,7 +30,7 @@
           </td>
           <td class="px-4 py-4" data-test="admin-account-tier"><p class="whitespace-nowrap font-medium text-gray-900 dark:text-white">{{ account.type === 'oauth' ? tierLabel(account) : '—' }}</p><p v-if="account.type === 'oauth'" class="mt-2 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ t(account.subscription_tier_override ? 'sharedPool.subscriptionTierManual' : 'sharedPool.subscriptionTierAutomatic') }}</p></td>
           <td class="px-4 py-4"><p class="max-w-48 break-all text-gray-800 dark:text-gray-200">{{ account.owner_email || '—' }}</p><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">#{{ account.owner_user_id }}</p></td>
-          <td class="px-4 py-4"><div class="flex max-w-44 flex-wrap gap-1.5"><span v-for="group in account.groups" :key="group.id" class="rounded border border-cyan-200/70 bg-cyan-50/60 px-2 py-1 text-xs text-cyan-700 dark:border-cyan-800/50 dark:bg-cyan-950/30 dark:text-cyan-300">{{ group.name }}</span><span v-if="!account.groups?.length" class="text-xs text-amber-600 dark:text-amber-400">{{ t('sharedPool.noGroup') }}</span></div></td>
+          <td class="px-4 py-4"><div class="flex max-w-44 flex-wrap gap-1.5"><span v-for="group in visibleGroups(account)" :key="group.id" class="rounded border border-cyan-200/70 bg-cyan-50/60 px-2 py-1 text-xs text-cyan-700 dark:border-cyan-800/50 dark:bg-cyan-950/30 dark:text-cyan-300">{{ group.name }}</span><span v-if="hiddenGroupCount(account)" data-test="admin-account-groups-more" class="cursor-help rounded border border-cyan-200/70 bg-cyan-50/60 px-2 py-1 text-xs text-cyan-700 dark:border-cyan-800/50 dark:bg-cyan-950/30 dark:text-cyan-300" :title="allGroupNames(account)" :aria-label="allGroupNames(account)">+{{ hiddenGroupCount(account) }}</span><span v-if="!account.groups?.length" class="text-xs text-amber-600 dark:text-amber-400">{{ t('sharedPool.noGroup') }}</span></div></td>
           <td class="px-4 py-4">
             <span class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-1 text-xs" :class="statusClass(account)"><span class="h-1.5 w-1.5 rounded-full bg-current"></span>{{ statusLabel(account) }}</span>
             <p class="mt-2 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"><Icon name="shield" size="xs" />{{ t('sharedPool.protection') }} · {{ t(account.protection_enabled ? 'sharedPool.enabled' : 'sharedPool.disabled') }}</p>
@@ -59,7 +59,11 @@ import { formatDateTime } from '@/utils/format'
 defineProps<{ accounts: SharedAccount[]; loading?: boolean; searching?: boolean }>()
 const emit = defineEmits<{ allocate: [account: SharedAccount] }>()
 const { t, te } = useI18n()
+const groupPreviewLimit = 3
 const money = (amount: number) => `$${Number(amount || 0).toFixed(4)}`
+function visibleGroups(account: SharedAccount) { return account.groups?.slice(0, groupPreviewLimit) || [] }
+function hiddenGroupCount(account: SharedAccount) { return Math.max(0, (account.groups?.length || 0) - groupPreviewLimit) }
+function allGroupNames(account: SharedAccount) { return (account.groups || []).map(group => group.name).join('\n') }
 function tierLabel(account: SharedAccount) {
   return subscriptionTierOptions[account.platform]?.find(tier => tier.value === account.subscription_tier)?.label || t('sharedPool.unknownTier')
 }

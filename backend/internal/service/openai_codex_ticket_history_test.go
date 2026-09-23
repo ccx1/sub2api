@@ -58,7 +58,11 @@ func TestCodexTicketHistoryCountsWholeRoundAndRedactsProxy(t *testing.T) {
 			encoded, err := json.Marshal(repo.history)
 			require.NoError(t, err)
 			require.NotContains(t, string(encoded), "private-")
-			require.NotContains(t, string(encoded), fakeCodexTicketState(292))
+			require.Contains(t, string(encoded), fakeCodexTicketState(292))
+			require.Equal(t, "raw", item.HarvestExchange.CaptureMode)
+			if fail != 1 {
+				require.Equal(t, "raw", item.BusinessExchange.CaptureMode)
+			}
 		})
 	}
 }
@@ -86,21 +90,26 @@ func TestCodexTicketHistoryRetainsCumulativeTotalsAndPaginates(t *testing.T) {
 	require.Equal(t, history, merged[OpenAICodexTicketHistoryKey])
 }
 
-func TestCodexTicketRandomValidOldTicketSkipsHarvest(t *testing.T) {
+func TestCodexTicketRandomFullInventorySkipsHarvest(t *testing.T) {
 	for _, verified := range []bool{false, true} {
+		calls := 0
 		svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true, HarvestProxyURL: "http://harvest.example:8080"}, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
-			t.Fatal("valid old ticket must not trigger HTTP")
-			return nil, nil
+			calls++
+			return nil, fmt.Errorf("full ticket inventory must not trigger HTTP")
 		}})
 		repo := &codexTicketHistoryRepo{}
 		svc.accountRepo = repo
 		account := ticketTestAccount(41)
 		account.Extra = map[string]any{ProxyModeExtraKey: ProxyModeRandom}
 		old := &openAICodexTicket{Model: "gpt-6-astra", State: "gAAAAA" + strings.Repeat("A", 286), Length: 292,
-			CapturedAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(time.Second * 20), Verified: verified, Binding: svc.codexTicketBinding(account)}
+			CapturedAt: time.Now().Add(-20 * time.Minute), ExpiresAt: time.Now().Add(40 * time.Minute), Verified: verified, Binding: svc.codexTicketBinding(account)}
 		require.True(t, svc.storeOpenAICodexTicket(context.Background(), account, old))
+		standby := inventoryTestTicket(old, "D", time.Second)
+		standby.ExpiresAt = time.Now().Add(time.Hour)
+		require.True(t, svc.storeOpenAICodexTicket(context.Background(), account, standby))
 		account.Extra[RandomProxyPoolIDsExtraKey] = []int64{8, 9}
 		svc.probeOnceOpenAICodexTicket(context.Background(), account, old.Model)
+		require.Zero(t, calls)
 		require.Zero(t, repo.history.Summary.Total)
 		require.Equal(t, old.State, svc.lookupOpenAICodexTicket(account, old.Model).State)
 	}

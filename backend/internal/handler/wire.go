@@ -243,7 +243,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
-	NewSharedPoolHandler,
+	ProvideSharedPoolHandler,
 	NewSharedPoolOAuthHandler,
 	// Top-level handlers
 	NewAuthHandler,

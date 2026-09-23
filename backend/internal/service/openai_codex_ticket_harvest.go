@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -15,61 +16,83 @@ type codexTicketAccountReloader interface {
 	GetCodexTicketAccountSnapshot(context.Context, int64) (*Account, error)
 }
 
-// 候选票只有完整响应模型匹配，并在同账号业务出口复验通过后才能发布。
+// 候选票必须完成模型检查；业务出口复验由管理端策略控制。
 func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, account *Account, model string) {
-	if s == nil || s.httpUpstream == nil || !OpenAICodexTicketAccountEnabled(account) || ctx.Err() != nil || !s.openAICodexTicketEnabledContext(ctx) {
+	if s == nil || s.httpUpstream == nil || !s.openAICodexTicketProbeAllowed(ctx, account, "") {
 		return
 	}
 	key := openAICodexTicketKey(account.ID, model)
-	_, _, _ = s.openaiCodexTicketFlight.Do(key, func() (any, error) {
-		s.harvestVerifiedOpenAICodexTicket(ctx, cloneOpenAICodexTicketAccount(account), model)
+	execute := func() (any, error) {
+		s.enqueueCodexTicketProbe(ctx, account, model, isCodexTicketManualRetry(ctx))
 		return nil, nil
-	})
+	}
+	if !isCodexTicketManualRetry(ctx) {
+		_, _, _ = s.openaiCodexTicketFlight.Do(key, execute)
+		return
+	}
+	// 每次手动点击独立排队，不能与自动采集合并而丢失请求。
+	_, _ = execute()
 }
 
 func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Context, account *Account, model string) {
+	ctx = withCodexTicketHarvestProbe(ctx)
 	account = s.reloadOpenAICodexTicketProbeAccount(ctx, account)
 	if account == nil {
 		return
 	}
-	cfg := s.openAICodexTicketConfigContext(ctx)
+	cfg := s.openAICodexTicketConfigForAccount(ctx, account)
 	if !s.openAICodexTicketGatedModelContext(ctx, model) {
 		return
 	}
 	now := time.Now()
-	current := s.lookupOpenAICodexTicket(account, model)
-	// 开关恢复和已排队任务都复查当前票，避免固定出口重复采集仍有效的旧票。
-	if current.usable(now, account, cfg) && (!current.needsRefresh(now, time.Duration(cfg.RefreshBeforeSeconds)*time.Second) ||
-		!isCodexTicketManualRetry(ctx) && s.keepUsableCodexTicketForProxy(ctx, account)) {
+	// 自动任务只补不足或临期的库存，主票仍然服务当前业务。
+	if !isCodexTicketManualRetry(ctx) && !s.codexTicketInventoryNeedsRefresh(account, model, cfg, now) {
 		return
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil || strings.TrimSpace(token) == "" {
 		return
 	}
-	if s.openAICodexTicketCooling(account, token) || (!isCodexTicketManualRetry(ctx) && s.openAICodexTicketBackoffActive(account, token, model)) {
+	if !s.usesSharedCodexProtection(ctx) && !isCodexTicketManualRetry(ctx) &&
+		(s.openAICodexTicketCooling(account, token) || s.openAICodexTicketBackoffActive(account, token, model)) {
 		return
 	}
-	proxy, err := s.selectOpenAICodexTicketProxy(ctx, account)
+	ctx, proxy, err := s.reserveCodexTicketHarvest(ctx, account, model, cfg)
 	if err != nil || (proxy.url == "" && proxy.policy.mode != CodexTicketProxyModeAccount) {
 		return
 	}
 	binding, captured := s.codexTicketBindingForConfig(account, cfg), time.Now()
 	attempt := newCodexTicketAttempt(model)
+	var harvestSessionID string
 	captureCodexTicketAttemptPolicy(attempt, account, cfg)
+	if config.CodexTicketBusinessVerificationEnabled(cfg) {
+		attempt.BusinessVerificationRounds = max(1, cfg.BusinessVerificationRounds)
+	}
 	attempt.HarvestProxy = codexTicketProxySnapshot(proxy.url, proxy.proxyID, proxy.proxyName)
 	input := openAICodexTicketProbeInput{Account: account, Token: token, Model: model, ProxyURL: proxy.url,
 		Timeout: time.Duration(cfg.HarvestAttemptTimeoutSeconds) * time.Second, CheckControls: true, Attempt: attempt,
-		Config: &cfg, SubscriptionTier: openAICodexTicketSubscriptionTier(account), HarvestProxyPolicy: &proxy.policy}
+		Config: &cfg, SubscriptionTier: openAICodexTicketSubscriptionTier(account), HarvestProxyPolicy: &proxy.policy,
+		CookieJar: newOpenAICodexTicketCookieJar(), SessionID: &harvestSessionID, HarvestProxy: &proxy}
+	if schedule := codexTicketScheduleFrom(ctx); schedule != nil {
+		input.SessionEpoch = &schedule.reservation.SessionEpoch
+	}
 	defer s.finishOpenAICodexTicketHarvest(ctx, &input)
+	if !isCodexTicketManualRetry(ctx) && cfg.RefreshStrategy != config.CodexTicketRefreshReplace && s.revalidateExistingCodexTicket(ctx, &input) {
+		return
+	}
 	state, status, err := s.probeOpenAICodexTicket(ctx, input)
+	if !s.recordScheduledCodexHarvest(ctx, input, state, status, err) {
+		return
+	}
 	if err != nil {
 		attempt.canceled = errors.Is(err, context.Canceled)
 		if errors.Is(err, errOpenAICodexTicketControlsChanged) {
 			attempt.Reason = "controls_changed"
 			return
 		}
-		s.coolOpenAICodexTicket(account, token, err)
+		if !codexTicketScheduledProtected(ctx) {
+			s.coolOpenAICodexTicket(account, token, err)
+		}
 		s.reportOpenAICodexTicketProxyFailure(ctx, proxy, err)
 		var transport *codexTicketTransportError
 		var rejected *openAICodexTicketProbeRejected
@@ -82,102 +105,108 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 		attempt.Reason = codexTicketAttemptErrorReason("harvest", err)
 		return
 	}
-	if status != http.StatusOK || !codexTicketCandidateAccepted(state, account, cfg) {
+	if status != http.StatusOK || !codexTicketProbeCandidateAccepted(input, state) {
 		attempt.Reason = codexTicketCandidateFailureReason(state, account, cfg)
 		s.reportOpenAICodexTicketProxyResult(ctx, proxy, false)
 		return
 	}
 	attempt.Reason = "controls_changed"
+	var cookieCandidate openAICodexTicketCookieCandidate
+	if config.CodexTicketUsesCookies(cfg) {
+		input.CookieCandidate = &cookieCandidate
+	}
 	if !s.verifyOpenAICodexTicketBusiness(ctx, &input, state) {
 		return
+	}
+	// A Set-Cookie received while verifying the old snapshot is only a
+	// candidate. Re-run the business probe with that candidate before it can be
+	// published, and keep any newer response cookies for a later cycle.
+	if !input.FreezeCredentials && input.CookieCandidate != nil && cookieCandidate.Jar != nil {
+		if cookieCandidate.HeaderChanged {
+			input.CookieJar = cookieCandidate.Jar
+			input.BusinessCredentialSnapshot = nil
+			input.SkipSchedulerAdmission = true
+			input.CookieCandidate = &openAICodexTicketCookieCandidate{}
+			if !s.verifyOpenAICodexTicketBusiness(ctx, &input, state) {
+				return
+			}
+			if input.CookieCandidate.HeaderChanged {
+				attempt.Reason = "business_ticket_rejected"
+				return
+			}
+			if input.CookieCandidate.Jar != nil {
+				input.CookieJar = input.CookieCandidate.Jar
+			}
+		} else {
+			input.CookieJar = cookieCandidate.Jar
+		}
 	}
 	if !s.openAICodexTicketProbeAllowed(ctx, input.Account, input.Token) || !s.openAICodexTicketProbeConfigCurrent(ctx, input) ||
 		binding != s.codexTicketBindingForConfig(input.Account, s.openAICodexTicketConfigContext(ctx)) || !s.codexTicketAccountCurrentBeforePublish(ctx, input) {
 		return
 	}
-	ticket := &openAICodexTicket{AccountID: account.ID, Model: model, State: state, Length: len(state), CapturedAt: captured,
-		ExpiresAt: captured.Add(time.Duration(cfg.TTLSeconds) * time.Second), Attempts: 1, Verified: true, Binding: binding,
-		Egress: openAICodexTicketEgress(input.ProxyURL)}
+	if schedule := codexTicketScheduleFrom(ctx); schedule != nil {
+		if err := schedule.scheduler.ValidateCodexTicket(ctx, schedule.reservation); err != nil {
+			return
+		}
+	}
+	verified := config.CodexTicketBusinessVerificationEnabled(cfg)
+	ttl := time.Duration(cfg.TTLSeconds) * time.Second
+	ticket := &openAICodexTicket{AttemptID: attempt.ID, AccountID: account.ID, Model: model, State: state, Length: len(state), CapturedAt: captured,
+		ExpiresAt: captured.Add(ttl), RevalidateAt: captured.Add(ttl), Attempts: 1, Verified: verified, VerificationSkipped: !verified, Binding: binding,
+		Egress: openAICodexTicketEgress(input.ProxyURL), HarvestProxyID: proxy.proxyID, HarvestProxyName: proxy.proxyName,
+		SessionID: harvestSessionID, HarvestEgress: openAICodexTicketEgress(proxy.url)}
+	if metadata, metadataErr := parseOpenAICodexTicketStateMetadata(state); metadataErr == nil && cfg.CredentialMode != config.CodexTicketCredentialCookie {
+		ticket.IssuedAt = metadata.IssuedAt
+		ticket.StateExpiresAt = codexTicketStateExpiresAt(metadata)
+		ticket.ExpiresAt = ticket.StateExpiresAt
+	}
+	if config.CodexTicketUsesCookies(cfg) {
+		ticket.CredentialMode = cfg.CredentialMode
+		ticket.CookieSessionKeys = snapshotCodexTicketCookieSessionKeys(input.CookieJar)
+		cookieTTL := probeCookieTTL(input)
+		var cookieExpires time.Time
+		ticket.Cookies, ticket.CapturedAt, cookieExpires = snapshotCodexTicketCookieLifetime(input.CookieJar, cookieTTL)
+		if ticket.CapturedAt.IsZero() {
+			ticket.CapturedAt = captured
+		}
+		if !cookieExpires.IsZero() {
+			// A server supplied Cookie expiry is authoritative. The configured
+			// Cookie TTL is only the fallback for session cookies without one.
+			ticket.ExpiresAt = cookieExpires
+		}
+		revalidateTTL := ttl
+		if cookieTTL > 0 && cookieTTL < revalidateTTL {
+			revalidateTTL = cookieTTL
+		}
+		ticket.RevalidateAt = ticket.CapturedAt.Add(revalidateTTL)
+		if !ticket.StateExpiresAt.IsZero() && ticket.StateExpiresAt.Before(ticket.ExpiresAt) {
+			ticket.ExpiresAt = ticket.StateExpiresAt
+		}
+		if cfg.CredentialMode == config.CodexTicketCredentialCookieState && ticket.StateExpiresAt.IsZero() {
+			ticket.ExpiresAt = earlierCodexTicketExpiry(ticket.ExpiresAt, captured.Add(ttl))
+		}
+		if !ticket.StateExpiresAt.IsZero() && ticket.StateExpiresAt.Before(ticket.RevalidateAt) {
+			ticket.RevalidateAt = ticket.StateExpiresAt
+		}
+		if cfg.CredentialMode == config.CodexTicketCredentialCookie {
+			ticket.State, ticket.Length = "", 0
+			ticket.IssuedAt, ticket.StateExpiresAt = time.Time{}, time.Time{}
+		}
+	}
 	attempt.Reason = "publish_failed"
 	if s.storeOpenAICodexTicket(ctx, input.Account, ticket) {
 		attempt.Success, attempt.Reason = true, "verified"
+		if !verified {
+			attempt.Reason = "verification_skipped"
+		}
+		attempt.TicketCapturedAt, attempt.TicketExpiresAt = &ticket.CapturedAt, &ticket.ExpiresAt
 		s.reportOpenAICodexTicketProxyResult(ctx, proxy, true)
-		ReportRandomProxySuccess(ctx, input.Account, s.accountRepo)
-		logger.L().Info("openai_codex_ticket verified", zap.Int64("account_id", account.ID), zap.String("model", model))
-	}
-}
-
-func (s *OpenAIGatewayService) verifyOpenAICodexTicketBusiness(ctx context.Context, input *openAICodexTicketProbeInput, state string) bool {
-	if input.Config == nil {
-		cfg := s.openAICodexTicketConfigContext(ctx)
-		input.Config, input.SubscriptionTier = &cfg, openAICodexTicketSubscriptionTier(input.Account)
-	}
-	if !s.openAICodexTicketProbeConfigCurrent(ctx, *input) {
-		return false
-	}
-	account := s.reloadOpenAICodexTicketProbeAccount(ctx, input.Account)
-	if account == nil {
-		return false
-	}
-	if s.codexTicketBindingForConfig(account, *input.Config) != s.codexTicketBindingForConfig(input.Account, *input.Config) ||
-		openAICodexTicketSubscriptionTier(account) != input.SubscriptionTier ||
-		account.GetCredential("access_token") != input.Account.GetCredential("access_token") ||
-		account.GetCredential("refresh_token") != input.Account.GetCredential("refresh_token") {
-		logger.L().Debug("openai_codex_ticket probe skipped", zap.Int64("account_id", account.ID), zap.String("reason", "account_identity_changed"))
-		return false
-	}
-	currentInput := *input
-	currentInput.Account = account
-	if !s.codexTicketProxyPolicyCurrent(ctx, currentInput) {
-		return false
-	}
-	if err := ResolveRandomProxyFromSource(ctx, account, s.accountRepo); err != nil {
-		if input.Attempt != nil {
-			input.Attempt.Reason = "business_proxy_unavailable"
+		if verified {
+			ReportRandomProxySuccess(ctx, input.Account, s.accountRepo)
 		}
-		_ = DisableRandomProxyAccountOnUnavailable(ctx, account, s.accountRepo, err)
-		return false
+		logger.L().Info("openai_codex_ticket published", zap.Int64("account_id", account.ID), zap.String("model", model), zap.Bool("business_verified", verified))
 	}
-	// 固定代理未加载时禁止把缺失关联误判成直连。
-	if account.ProxyID != nil && account.Proxy == nil {
-		if input.Attempt != nil {
-			input.Attempt.Reason = "business_proxy_unavailable"
-		}
-		return false
-	}
-	input.Account, input.ProxyURL, input.State = account, resolveAccountProxyURL(account), state
-	input.CheckControls = true
-	returned, status, err := s.probeOpenAICodexTicket(ctx, *input)
-	if err != nil {
-		if input.Attempt != nil {
-			input.Attempt.Reason = codexTicketAttemptErrorReason("business", err)
-			input.Attempt.canceled = errors.Is(err, context.Canceled)
-			if errors.Is(err, errOpenAICodexTicketControlsChanged) {
-				input.Attempt.Reason = "controls_changed"
-			}
-		}
-		s.coolOpenAICodexTicket(account, input.Token, err)
-		var rejected *openAICodexTicketProbeRejected
-		var transport *codexTicketTransportError
-		if errors.As(err, &rejected) {
-			if rejected.Status >= 500 || rejected.Status == http.StatusProxyAuthRequired {
-				reportRandomProxyResult(ctx, account, s.accountRepo, false)
-			}
-		} else if errors.As(err, &transport) {
-			ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, err)
-		} else if status > 0 && s.openAICodexTicketProbeAllowed(ctx, account, input.Token) {
-			reportRandomProxyResult(ctx, account, s.accountRepo, false)
-		}
-		return false
-	}
-	if status != http.StatusOK || codexTicketStateRejected(returned, *input.Config) {
-		if input.Attempt != nil {
-			input.Attempt.Reason = "business_ticket_rejected"
-		}
-		reportRandomProxyResult(ctx, account, s.accountRepo, false)
-		return false
-	}
-	return true
 }
 
 func (s *OpenAIGatewayService) reloadOpenAICodexTicketProbeAccount(ctx context.Context, account *Account) *Account {
@@ -190,10 +219,6 @@ func (s *OpenAIGatewayService) reloadOpenAICodexTicketProbeAccount(ctx context.C
 			logger.L().Debug("openai_codex_ticket probe skipped", zap.Int64("account_id", account.ID), zap.String("reason", "account_snapshot_unavailable"))
 			return nil
 		}
-		// 不使用 schedulable 或临时限流状态，保留恢复采集能力。
-		if latest.Status != StatusActive || latest.AutoPauseOnExpired && latest.ExpiresAt != nil && !time.Now().Before(*latest.ExpiresAt) {
-			return nil
-		}
 		account = latest
 	}
 	if !s.openAICodexTicketProbeAllowed(ctx, account, "") {
@@ -203,7 +228,16 @@ func (s *OpenAIGatewayService) reloadOpenAICodexTicketProbeAccount(ctx context.C
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketProbeAllowed(ctx context.Context, account *Account, token string) bool {
-	return s != nil && ctx.Err() == nil && OpenAICodexTicketAccountEnabled(account) &&
-		!account.IsInDailyCooldown(time.Now()) && s.openAICodexTicketEnabledContext(ctx) &&
-		(token == "" || !s.openAICodexTicketCooling(account, token))
+	return s != nil && ctx.Err() == nil && openAICodexTicketHarvestEnabled(account) &&
+		(!account.IsInDailyCooldown(time.Now()) || isCodexTicketManualRetry(ctx)) && s.openAICodexTicketEnabledContext(ctx) &&
+		(token == "" || isCodexTicketManualRetry(ctx) || s.usesSharedCodexProtection(ctx) || !s.openAICodexTicketCooling(account, token))
+}
+
+func openAICodexTicketHarvestEnabled(account *Account) bool {
+	if account == nil || account.Status != StatusActive || !account.Schedulable ||
+		!SharedPoolSharingAllowed(account) || !OpenAICodexTicketAccountEnabled(account) {
+		return false
+	}
+	// 人工停用必须停止采集；临时业务限流不阻断后续恢复所需的打票。
+	return !account.AutoPauseOnExpired || account.ExpiresAt == nil || time.Now().Before(*account.ExpiresAt)
 }

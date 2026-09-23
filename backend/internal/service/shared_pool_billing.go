@@ -59,6 +59,26 @@ type SharedPoolEarningsSummary struct {
 	BillingAmount  float64 `json:"billing_amount"`
 }
 
+// SharedPoolUserAccountTier describes the subscription tier distribution of a
+// contributor's shared accounts.
+type SharedPoolUserAccountTier struct {
+	Tier  string `json:"tier"`
+	Count int64  `json:"count"`
+}
+
+// SharedPoolUserEarnings 按供号用户聚合共享收益，供管理员查看每个用户的实际收益。
+type SharedPoolUserEarnings struct {
+	UserID        int64                       `json:"user_id"`
+	Email         string                      `json:"email"`
+	AccountCount  int64                       `json:"account_count"`
+	AccountTiers  []SharedPoolUserAccountTier `json:"account_tiers"`
+	EarningsCount int64                       `json:"earnings_count"`
+	TotalEarned   float64                     `json:"total_earned"`
+	Available     float64                     `json:"available"`
+	Pending       float64                     `json:"pending"`
+	Transferred   float64                     `json:"transferred"`
+}
+
 type SharedPoolEarningsTransfer struct {
 	ID      int64   `json:"id"`
 	Amount  float64 `json:"amount"`
@@ -78,6 +98,7 @@ type SharedPoolAccountWindowEarnings struct {
 type SharedPoolEarningsRepository interface {
 	List(context.Context, int64, SharedPoolEarningsFilter) (*SharedPoolEarningsPage, error)
 	Summary(context.Context, int64) (*SharedPoolEarningsSummary, error)
+	UserEarnings(context.Context) ([]SharedPoolUserEarnings, error)
 	Transfer(context.Context, int64) (*SharedPoolEarningsTransfer, error)
 	AccountTotals(context.Context, int64, []int64) (map[int64]SharedPoolAccountEarnings, error)
 	AccountWindow(context.Context, int64, int64, time.Time) (*SharedPoolAccountWindowEarnings, error)

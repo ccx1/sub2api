@@ -2102,7 +2102,9 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 // POST /api/v1/admin/accounts/batch
 func (h *AccountHandler) BatchCreate(c *gin.Context) {
 	var req struct {
-		Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
+		Accounts           []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
+		ProtectionEnabled  *bool                  `json:"protection_enabled"`
+		CodexTicketEnabled *bool                  `json:"codex_ticket_enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -2171,6 +2173,8 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				ExpiresAt:             item.ExpiresAt,
 				AutoPauseOnExpired:    item.AutoPauseOnExpired,
 				SkipMixedChannelCheck: skipCheck,
+				ProtectionEnabled:     req.ProtectionEnabled,
+				CodexTicketEnabled:    req.CodexTicketEnabled,
 			})
 			if err != nil {
 				failed++

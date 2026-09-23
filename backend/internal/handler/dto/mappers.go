@@ -475,7 +475,7 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		ProtectionMode:  a.ProtectionMode,
 		ID:              a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
-		OllamaCloudUsage: a.OllamaCloudUsage, CodexTurnTickets: a.CodexTurnTickets,
+		CodexTurnTickets:         a.CodexTurnTickets,
 		CodexTicketGlobalEnabled: a.CodexTicketGlobalEnabled, CodexTicketEnabled: a.CodexTicketEnabled,
 		OllamaCloudUsage: a.OllamaCloudUsage, OpenCodeGoUsage: a.OpenCodeGoUsage,
 		ProxyID: a.ProxyID, ProxyFallbackOriginID: a.ProxyFallbackOriginID, ProxyFallbackOriginName: a.ProxyFallbackOriginName,
@@ -544,6 +544,7 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		Port:           p.Port,
 		Username:       p.Username,
 		Status:         p.Status,
+		CountryCode:    p.CountryCode,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
 		ExpiresAt:      p.ExpiresAt,
@@ -557,6 +558,10 @@ func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWi
 	if p == nil {
 		return nil
 	}
+	countryCode := p.CountryCode
+	if countryCode == "" {
+		countryCode = p.Proxy.CountryCode
+	}
 	return &ProxyWithAccountCount{
 		Proxy:          *ProxyFromService(&p.Proxy),
 		AccountCount:   p.AccountCount,
@@ -565,7 +570,7 @@ func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWi
 		LatencyMessage: p.LatencyMessage,
 		IPAddress:      p.IPAddress,
 		Country:        p.Country,
-		CountryCode:    p.CountryCode,
+		CountryCode:    countryCode,
 		Region:         p.Region,
 		City:           p.City,
 		QualityStatus:  p.QualityStatus,
@@ -602,6 +607,10 @@ func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *Ad
 	if admin == nil {
 		return nil
 	}
+	countryCode := p.CountryCode
+	if countryCode == "" {
+		countryCode = p.Proxy.CountryCode
+	}
 	return &AdminProxyWithAccountCount{
 		AdminProxy:     *admin,
 		AccountCount:   p.AccountCount,
@@ -610,7 +619,7 @@ func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *Ad
 		LatencyMessage: p.LatencyMessage,
 		IPAddress:      p.IPAddress,
 		Country:        p.Country,
-		CountryCode:    p.CountryCode,
+		CountryCode:    countryCode,
 		Region:         p.Region,
 		City:           p.City,
 		QualityStatus:  p.QualityStatus,

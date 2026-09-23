@@ -86,7 +86,7 @@ func (h *AntiDegradeHandler) Apply(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, protectionAccountResponse(account))
 }
 
 // Revert 一键还原快照旧值。
@@ -113,7 +113,7 @@ func (h *AntiDegradeHandler) Revert(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, protectionAccountResponse(account))
 }
 
 // SetProtection handles the explicit, administrator-confirmed ON/OFF control.
@@ -140,7 +140,16 @@ func (h *AntiDegradeHandler) SetProtection(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, protectionAccountResponse(account))
+}
+
+func protectionAccountResponse(account *service.Account) *dto.Account {
+	out := dto.AccountFromService(account)
+	if account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow() {
+		enabled := service.OpenAICodexTicketAccountEnabled(account)
+		out.CodexTicketEnabled = &enabled
+	}
+	return out
 }
 
 // EnableBatch deliberately has no disable branch.

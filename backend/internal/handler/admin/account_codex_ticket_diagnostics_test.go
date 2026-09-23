@@ -18,7 +18,7 @@ func TestGetCodexTicketHistoryPreservesObservedZeroAndUnknown(t *testing.T) {
 			{ID: "observed", StartedAt: time.Now(), Reason: "ticket_length_mismatch", LengthMode: "strict",
 				TargetLength: &target, RejectedLengths: []int{312}, HarvestTicketLength: &length,
 				BusinessTicketLength: &missing, HarvestHTTPStatus: &status, BusinessHTTPStatus: &status,
-				HarvestExchange: &service.CodexTicketExchange{RequestedModel: "requested", ReportedModels: []string{"actual"},
+				HarvestExchange: &service.CodexTicketExchange{CaptureMode: "raw", RequestedModel: "requested", ReportedModels: []string{"actual"},
 					Response: &service.CodexTicketHTTPMessage{StatusCode: 200, Body: `{"model":"actual"}`}}},
 			{ID: "legacy", Reason: "harvest_failed"},
 		},
@@ -39,6 +39,7 @@ func TestGetCodexTicketHistoryPreservesObservedZeroAndUnknown(t *testing.T) {
 	require.Equal(t, float64(0), observed["business_ticket_length"])
 	require.Equal(t, float64(200), observed["harvest_http_status"])
 	exchange := observed["harvest_exchange"].(map[string]any)
+	require.Equal(t, "raw", exchange["capture_mode"])
 	require.Equal(t, "requested", exchange["requested_model"])
 	require.Equal(t, []any{"actual"}, exchange["reported_models"])
 	require.NotContains(t, legacy, "harvest_exchange")

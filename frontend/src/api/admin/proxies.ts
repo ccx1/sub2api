@@ -209,9 +209,7 @@ export async function batchCreate(
     port: number
     username?: string
     password?: string
-    group_id?: number | null
-    country_code?: string | null
-  }>
+  } & Pick<CreateProxyRequest, 'group_id' | 'country_code' | 'expires_at' | 'fallback_mode' | 'backup_proxy_id' | 'expiry_warn_days'>>
 ): Promise<{
   created: number
   skipped: number

@@ -9,8 +9,8 @@ vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { listGroups } } }))
 beforeEach(() => { listGroups.mockReset().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }]) })
 
 const proxies = [
-  { id: 1, name: 'Tokyo', account_count: 7, protocol: 'http', host: 'tokyo.example.com', port: 8080, country: 'Japan', region: 'Tokyo' },
-  { id: 2, name: 'Berlin', protocol: 'socks5', host: '2001:db8::1', port: 1080, country: 'Germany' }
+  { id: 1, name: 'Tokyo', account_count: 7, protocol: 'http', host: 'tokyo.example.com', port: 8080, country: 'Japan', country_code: 'JP', region: 'Tokyo' },
+  { id: 2, name: 'Berlin', protocol: 'socks5', host: '2001:db8::1', port: 1080, country: 'Germany', country_code: 'DE' }
 ] as Proxy[]
 
 function mountSettings(ids: number[] = [], regionCountry?: string) {
@@ -111,6 +111,16 @@ describe('RandomProxySettings', () => {
   it.each(['', 'unknown', 'off', 'all'])('shows the full pool when the subscription country is %s', regionCountry => {
     const wrapper = mountSettings([], regionCountry)
     expect(wrapper.text()).toContain('Tokyo')
+    expect(wrapper.text()).toContain('Berlin')
+  })
+
+  it('limits random candidates to the account region and keeps an existing cross-region selection visible', async () => {
+    const wrapper = mountSettings()
+    await wrapper.setProps({ regionCountry: 'JP' })
+    expect(wrapper.text()).toContain('Tokyo')
+    expect(wrapper.text()).not.toContain('Berlin')
+
+    await wrapper.setProps({ ids: [2] })
     expect(wrapper.text()).toContain('Berlin')
   })
 

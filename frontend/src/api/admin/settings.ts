@@ -640,9 +640,10 @@ export interface SystemSettings {
   openai_codex_client_version_synced: string;
   openai_codex_version_auto_sync_enabled: boolean;
   openai_codex_ticket_enabled: boolean;
-  openai_codex_ticket_harvest_proxy_mode: "fixed" | "pool";
+  openai_codex_ticket_harvest_proxy_mode: "account" | "inherit" | "random" | "fixed" | "pool";
   openai_codex_ticket_harvest_proxy_url: string;
   openai_codex_ticket_harvest_proxy_configured: boolean;
+  openai_codex_ticket_harvest_proxy_id?: number;
   proxy_pool_max_accounts: number;
   claude_code_client_version: string;
   claude_code_client_version_synced: string;
@@ -968,8 +969,9 @@ export interface UpdateSettingsRequest {
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;
   openai_codex_ticket_enabled?: boolean;
-  openai_codex_ticket_harvest_proxy_mode?: "fixed" | "pool";
+  openai_codex_ticket_harvest_proxy_mode?: "account" | "inherit" | "random" | "fixed" | "pool";
   openai_codex_ticket_harvest_proxy_url?: string;
+  openai_codex_ticket_harvest_proxy_id?: number;
   proxy_pool_max_accounts?: number;
   claude_code_client_version?: string;
   claude_code_version_auto_sync_enabled?: boolean;

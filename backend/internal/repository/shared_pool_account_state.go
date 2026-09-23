@@ -64,8 +64,8 @@ func (r *sharedPoolRepository) SetSharedAccountState(ctx context.Context, id int
 	if err != nil {
 		return err
 	}
-	if groups == nil && state.DefaultGroupID != nil && !assigned && len(oldGroups) == 0 && consented && enabled != nil && *enabled {
-		ids := []int64{*state.DefaultGroupID}
+	if groups == nil && len(state.DefaultGroupIDs) > 0 && !assigned && len(oldGroups) == 0 && consented && enabled != nil && *enabled {
+		ids := append([]int64(nil), state.DefaultGroupIDs...)
 		groups = &ids
 	}
 	if state.Priority != nil {

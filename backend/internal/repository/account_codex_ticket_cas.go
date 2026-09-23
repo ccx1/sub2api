@@ -64,10 +64,11 @@ func (r *accountRepository) commitCodexTicketCAS(ctx context.Context, request co
 }
 
 type codexTicketCASRequest struct {
-	account *service.Account
-	args    []any
-	publish bool
-	revoke  bool
+	account          *service.Account
+	args             []any
+	publish          bool
+	revoke           bool
+	withInvalidation bool
 }
 
 func prepareCodexTicketCAS(account *service.Account, model string, replacement any) (codexTicketCASRequest, error) {
@@ -107,8 +108,9 @@ func prepareCodexTicketCAS(account *service.Account, model string, replacement a
 	}
 	var proxyID any
 	// 随机出口只存在于本次请求中，不可拿运行时关联对比持久化 proxy_id。
-	if !account.IsRandomProxy() && account.ProxyID != nil {
-		proxyID = *account.ProxyID
+	configured := account.ConfiguredProxySnapshot()
+	if !account.IsRandomProxy() && configured.ProxyID != nil {
+		proxyID = *configured.ProxyID
 	}
 	request.args = []any{key, encoded[0], account.ID, account.Platform, account.Type, encoded[1], proxyID, encoded[2], encoded[3]}
 	request.publish = encoded[0] != "null" && string(marker.Revoked) != "true"
@@ -117,7 +119,11 @@ func prepareCodexTicketCAS(account *service.Account, model string, replacement a
 
 func executeCodexTicketCAS(ctx context.Context, client *dbent.Client, request codexTicketCASRequest) (bool, error) {
 	if request.revoke {
-		result, err := client.ExecContext(ctx, codexTicketRevocationSQL, request.args...)
+		query := codexTicketRevocationSQL
+		if request.withInvalidation {
+			query = codexTicketRevocationWithInvalidationSQL
+		}
+		result, err := client.ExecContext(ctx, query, request.args...)
 		if err != nil {
 			return false, err
 		}
@@ -129,6 +135,12 @@ func executeCodexTicketCAS(ctx context.Context, client *dbent.Client, request co
 	}
 	if request.account.ProxyID != nil {
 		matches, err := lockAndMatchProbeProxyIdentity(ctx, client, request.account)
+		if err != nil || !matches {
+			return false, err
+		}
+	}
+	if configured := request.account.ConfiguredProxySnapshot(); configured != request.account {
+		matches, err := lockAndMatchProbeProxyIdentity(ctx, client, configured)
 		if err != nil || !matches {
 			return false, err
 		}
@@ -147,25 +159,29 @@ func executeCodexTicketCAS(ctx context.Context, client *dbent.Client, request co
 
 func prepareCodexTicketRevocation(account *service.Account, key string, replacementJSON []byte) (codexTicketCASRequest, error) {
 	request := codexTicketCASRequest{account: account, revoke: true}
-	type ticketIdentity struct {
-		State      string `json:"state"`
-		CapturedAt string `json:"captured_at"`
-	}
-	var used, expected ticketIdentity
+	var used, expected codexTicketRevocationIdentity
 	expectedJSON, err := json.Marshal(account.Extra[key])
 	if err != nil {
 		return request, err
 	}
-	if json.Unmarshal(replacementJSON, &used) != nil || json.Unmarshal(expectedJSON, &expected) != nil ||
-		used.State == "" || expected.State != used.State {
+	if json.Unmarshal(replacementJSON, &used) != nil || json.Unmarshal(expectedJSON, &expected) != nil || !codexTicketRevocationHasCredentials(used) {
 		return request, errors.New("codex ticket revocation identity does not match the sent ticket")
 	}
-	captured, err := time.Parse(time.RFC3339Nano, used.CapturedAt)
-	expectedTime, expectedErr := time.Parse(time.RFC3339Nano, expected.CapturedAt)
-	if err != nil || expectedErr != nil || captured.IsZero() || !captured.Equal(expectedTime) {
+	matched, ok := matchCodexTicketRevocationIdentity(used, expected)
+	if !ok {
 		return request, errors.New("codex ticket revocation capture time is required")
 	}
+	expected = matched
 	request.args = []any{key, account.ID, account.Platform, account.Type, used.State, expected.CapturedAt}
+	if len(used.Invalidation) > 0 && string(used.Invalidation) != "null" {
+		payload, err := prepareCodexTicketInvalidation(key, used, expected)
+		if err != nil {
+			// 诊断不是撤销票据的前置条件，异常元数据不能阻止原有撤票行为。
+			return request, nil
+		}
+		request.withInvalidation = true
+		request.args = append(request.args, string(payload), service.OpenAICodexTicketInvalidationsKey, service.OpenAICodexTicketInvalidationsLimit)
+	}
 	return request, nil
 }
 
@@ -174,13 +190,15 @@ func codexTicketCASPublicationBlocked(request codexTicketCASRequest) bool {
 		return false
 	}
 	account, now := request.account, time.Now()
-	return account.Status != service.StatusActive || account.IsInDailyCooldown(now) ||
+	return account.Status != service.StatusActive || !account.Schedulable || !service.SharedPoolSharingAllowed(account) || account.IsInDailyCooldown(now) ||
 		(account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt))
 }
 
 func codexTicketCASConfig(extra map[string]any) map[string]any {
 	keys := []string{service.OpenAICodexTicketEnabledExtraKey, service.ProxyModeExtraKey,
-		service.CodexTicketProxyModeExtraKey, service.CodexTicketProxyIDExtraKey,
+		service.SharedPoolOwnerKey, service.SharedPoolEnabledKey, service.SharedPoolAdminDisabledKey,
+		service.CodexTicketCredentialPolicyExtraKey,
+		service.CodexTicketProxyModeExtraKey, service.CodexTicketProxyIDExtraKey, service.CodexTicketProxyStrategyExtraKey,
 		service.RandomProxyEmptyPoolPolicyExtraKey, service.RandomProxyPoolScopeExtraKey,
 		service.RandomProxyPoolIDsExtraKey, service.RandomProxyGroupIDExtraKey, service.RandomProxyMaxReuseMinutesExtraKey, service.DailyCooldownExtraKey,
 		"enable_tls_fingerprint", "tls_fingerprint_builtin", "tls_fingerprint_profile_id",
@@ -205,15 +223,14 @@ WHERE id = $3 AND platform = $4 AND type = $5
   SELECT 1 FROM jsonb_each($9::jsonb) AS expected(key, value)
   WHERE COALESCE(extra -> expected.key, 'null'::jsonb) <> expected.value
  )
- AND ($2::jsonb = 'null'::jsonb OR $2::jsonb @> '{"revoked":true}'::jsonb OR (status = 'active'
+ AND ($2::jsonb = 'null'::jsonb OR $2::jsonb @> '{"revoked":true}'::jsonb OR (status = 'active' AND schedulable = true
   AND (NOT auto_pause_on_expired OR expires_at IS NULL OR expires_at > NOW())))
  AND deleted_at IS NULL`
 
 // 撤票只归属实际发送的票据版本，不依赖可能已经刷新的 OAuth 凭据和出口配置。
-const codexTicketRevocationSQL = `UPDATE accounts
+var codexTicketRevocationSQL = `UPDATE accounts
 SET extra = COALESCE(extra, '{}'::jsonb) ||
- jsonb_build_object($1::text, (extra -> $1) || '{"revoked":true}'::jsonb), updated_at = NOW()
+ jsonb_build_object($1::text, ` + codexTicketUpdatedInventorySQL(`'{"revoked":true}'::jsonb`) + `), updated_at = NOW()
 WHERE id = $2 AND platform = $3 AND type = $4
- AND (extra -> $1 ->> 'state') = $5
- AND (extra -> $1 ->> 'captured_at') = $6
+ AND (` + codexTicketPrimaryMatchesSQL + ` OR ` + codexTicketStandbyMatchesSQL + ` OR ` + codexTicketReserveMatchesSQL + `)
  AND deleted_at IS NULL`

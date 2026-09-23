@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"slices"
 	"strings"
@@ -152,7 +153,15 @@ func selectAccountRandomProxy(ctx context.Context, a *Account, selector RandomPr
 		if selection.Restricted && proxy != nil && !slices.Contains(selection.IDs, proxy.ID) {
 			return nil, nil
 		}
+		if proxy != nil {
+			if err := validateProxyRegion(ctx, proxy, selection.CountryCode, selector); err != nil {
+				return nil, err
+			}
+		}
 		return proxy, err
+	}
+	if selection.CountryCode != "" {
+		return nil, errors.New("proxy region selection requires a region-aware proxy pool")
 	}
 	if !selection.Restricted {
 		return selector.SelectRandomActiveProxy(ctx)
@@ -179,6 +188,11 @@ func selectAccountRandomProxy(ctx context.Context, a *Account, selector RandomPr
 // 空组及无法解析的组仍为受限空池，不能退化成全局随机。
 func ResolveAccountProxyPoolSelection(ctx context.Context, a *Account, source any) (ProxyPoolSelection, error) {
 	selection := ProxyPoolSelection{AccountID: a.ID, MaxReuseDuration: a.RandomProxyMaxReuseDuration()}
+	country, err := a.ProxyRegionCountry()
+	if err != nil {
+		return selection, err
+	}
+	selection.CountryCode = country
 	switch a.RandomProxyPoolScope() {
 	case RandomProxyPoolSelected:
 		selection.Restricted, selection.IDs = true, a.RandomProxyPoolIDs()

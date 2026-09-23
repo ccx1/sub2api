@@ -14,14 +14,19 @@ type SharedPoolTicketAccountSnapshot struct {
 	Available        bool
 	Concurrency      int
 	subscriptionTier string
+	credentialMode   string
 	tickets          map[string]sharedPoolTicketMetadata
 }
 
 type sharedPoolTicketMetadata struct {
-	length    int
-	expiresAt time.Time
-	verified  bool
-	autoReady bool
+	length              int
+	expiresAt           time.Time
+	credentialMode      string
+	cookieReady         bool
+	verified            bool
+	verificationSkipped bool
+	autoReady           bool
+	standby             *sharedPoolTicketMetadata
 }
 
 func NewSharedPoolTicketAccountSnapshot(account *Account, now time.Time) *SharedPoolTicketAccountSnapshot {
@@ -29,6 +34,9 @@ func NewSharedPoolTicketAccountSnapshot(account *Account, now time.Time) *Shared
 		return nil
 	}
 	snapshot := &SharedPoolTicketAccountSnapshot{AccountID: account.ID, subscriptionTier: openAICodexTicketSubscriptionTier(account), tickets: make(map[string]sharedPoolTicketMetadata)}
+	if policy, err := parseCodexTicketCredentialPolicy(account.Extra[CodexTicketCredentialPolicyExtraKey]); err == nil {
+		snapshot.credentialMode = policy.Mode
+	}
 	for key, raw := range account.Extra {
 		if !strings.HasPrefix(key, openAICodexTicketExtraKeyPrefix) {
 			continue
@@ -37,14 +45,52 @@ func NewSharedPoolTicketAccountSnapshot(account *Account, now time.Time) *Shared
 		if key != openAICodexTicketExtraKey(model) {
 			continue
 		}
-		ticket := parseOpenAICodexTicketFromAny(account.ID, model, raw)
-		// 此处验证票据形状，目标长度留给请求使用的运行配置判断。
-		if model != "" && ticket != nil && ticket.valid(now, ticket.Length) && ticket.accountCompatible(account) {
-			snapshot.tickets[model] = sharedPoolTicketMetadata{length: ticket.Length, expiresAt: ticket.ExpiresAt,
-				verified: ticket.Verified, autoReady: ticket.autoUsable(now, account)}
+		inventory := parseOpenAICodexTicketFromAny(account.ID, model, raw)
+		var metadata, tail *sharedPoolTicketMetadata
+		for _, ticket := range codexTicketSlots(inventory) {
+			// 保留完整库存的脱敏元数据，目标长度与复核开关由展示时的运行配置判断。
+			candidate := sharedPoolTicketMetadataFor(account, ticket, now)
+			if model == "" || candidate == nil {
+				continue
+			}
+			if metadata == nil {
+				metadata = candidate
+			} else {
+				tail.standby = candidate
+			}
+			tail = candidate
+		}
+		if metadata != nil {
+			snapshot.tickets[model] = *metadata
 		}
 	}
 	return snapshot
+}
+
+func sharedPoolTicketMetadataFor(account *Account, ticket *openAICodexTicket, now time.Time) *sharedPoolTicketMetadata {
+	if ticket == nil || ticket.Revoked || !ticket.accountCompatible(account) {
+		return nil
+	}
+	mode := ticket.CredentialMode
+	if mode == "" {
+		mode = config.CodexTicketCredentialState
+	}
+	cookieReady := ticket.usesCookies() && ticket.cookieUsable(now, config.OpenAICodexTicketConfig{CredentialMode: mode})
+	if ticket.usesCookies() && !cookieReady || !ticket.usesCookies() && !ticket.valid(now, ticket.Length) {
+		return nil
+	}
+	return &sharedPoolTicketMetadata{length: ticket.Length, expiresAt: ticket.hardExpiresAt(), credentialMode: mode,
+		cookieReady: cookieReady, verified: ticket.Verified, verificationSkipped: ticket.VerificationSkipped,
+		autoReady: ticket.autoUsable(now, account)}
+}
+
+// 参与调度的统计要求持有有效票，独立于路由允许无票请求的 FailClosed 策略。
+func (a *SharedPoolTicketAccountSnapshot) hasReadyModelForParticipation(cfg config.OpenAICodexTicketConfig, now time.Time) bool {
+	if a == nil || !cfg.Enabled {
+		return false
+	}
+	cfg = config.NormalizeOpenAICodexTicketConfig(cfg)
+	return a.hasReadyModelForConfig(sharedPoolTicketModels(cfg.Models), cfg, now)
 }
 
 // 展示打票目标模型的可用容量，不改写调度状态或各模型的真实门控。
@@ -94,22 +140,56 @@ func GetSharedPoolCatalogCapacity(capacity *SharedPoolCapacity, cfg config.OpenA
 }
 
 func (a SharedPoolTicketAccountSnapshot) hasReadyModelForConfig(models []string, cfg config.OpenAICodexTicketConfig, now time.Time) bool {
-	if cfg.LengthMode != config.CodexTicketLengthAuto {
-		targetLength := codexTicketTierTargetLength(a.subscriptionTier, cfg)
-		return !slices.Contains(cfg.RejectedLengths, targetLength) && a.hasReadyModel(models, targetLength, now)
+	cfg = config.NormalizeCodexTicketCredentialConfig(cfg)
+	if a.credentialMode != "" && a.credentialMode != "inherit" {
+		cfg.CredentialMode = a.credentialMode
 	}
+	targetLength := codexTicketTierTargetLength(a.subscriptionTier, cfg)
 	for _, model := range models {
-		if ticket, exists := a.tickets[model]; exists && ticket.verified && ticket.autoReady && now.Before(ticket.expiresAt) {
-			return true
+		ticket, exists := a.tickets[model]
+		if !exists {
+			continue
+		}
+		for slot := &ticket; slot != nil; slot = slot.standby {
+			if slot.readyForConfig(cfg, targetLength, now) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
+func (ticket *sharedPoolTicketMetadata) readyForConfig(cfg config.OpenAICodexTicketConfig, targetLength int, now time.Time) bool {
+	if ticket == nil || !now.Before(ticket.expiresAt) ||
+		(ticket.verificationSkipped && config.CodexTicketBusinessVerificationEnabled(cfg)) {
+		return false
+	}
+	mode := ticket.credentialMode
+	if mode == "" {
+		mode = config.CodexTicketCredentialState
+	}
+	if mode != cfg.CredentialMode {
+		return false
+	}
+	if config.CodexTicketUsesCookies(cfg) {
+		return ticket.cookieReady
+	}
+	if cfg.LengthMode == config.CodexTicketLengthAuto {
+		return (ticket.verified || ticket.verificationSkipped) && ticket.autoReady
+	}
+	return ticket.length == targetLength && !slices.Contains(cfg.RejectedLengths, targetLength)
+}
+
 func (a SharedPoolTicketAccountSnapshot) hasReadyModel(models []string, targetLength int, now time.Time) bool {
 	for _, model := range models {
-		if ticket, exists := a.tickets[model]; exists && ticket.length == targetLength && now.Before(ticket.expiresAt) {
-			return true
+		ticket, exists := a.tickets[model]
+		if !exists {
+			continue
+		}
+		for slot := &ticket; slot != nil; slot = slot.standby {
+			if slot.length == targetLength && now.Before(slot.expiresAt) {
+				return true
+			}
 		}
 	}
 	return false

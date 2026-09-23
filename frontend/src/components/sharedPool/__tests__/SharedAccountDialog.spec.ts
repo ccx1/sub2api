@@ -35,7 +35,7 @@ describe('shared account creation and edit boundaries', () => {
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: false, dispatch_consent: false, credentials: { access_token: 'fixture-token' }, confirm_disable: false, codex_ticket_enabled: true })
+    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, codex_ticket_enabled: true })
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('group_ids')
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('rate_multiplier')
   })
@@ -49,15 +49,26 @@ describe('shared account creation and edit boundaries', () => {
 
   it('accepts zero settlement and prevents authorization when settlement is unavailable', async () => {
     const wrapper = render()
+    wrapper.getComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.setProps({ config: { ...config, platforms: [...config.platforms], settlement_multiplier: 0 } })
-    const sharing = wrapper.get('[role="switch"][aria-label="sharedPool.sharing"]')
-    expect(sharing.attributes('disabled')).toBeUndefined()
-    await sharing.trigger('click')
-    expect(sharing.attributes('aria-checked')).toBe('true')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, dispatch_consent: true }))
+    create.mockClear()
     await wrapper.setProps({ config: { ...config, platforms: [...config.platforms], settlement_multiplier: undefined } })
-    expect(sharing.attributes('disabled')).toBeDefined()
-    expect(sharing.attributes('aria-checked')).toBe('false')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(create).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('sharedPool.settlementRequired')
     expect(wrapper.text()).toContain('sharedPool.settlementUnconfigured')
+    await wrapper.setProps({ config: { ...config, platforms: [...config.platforms] } })
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, dispatch_consent: true }))
+  })
+
+  it('preserves disabled scheduling when editing an existing account', async () => {
+    const wrapper = render(true, { enabled: false, dispatch_consent: false })
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(update).toHaveBeenCalledWith(7, { ...unchangedFields, enabled: false, concurrency: 2 })
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('dispatch_consent')
   })
 
   it('exposes concurrency, proxy and cooldown without identity or authorization changes when editing', async () => {
@@ -94,11 +105,12 @@ describe('shared account creation and edit boundaries', () => {
     expect(update).toHaveBeenLastCalledWith(7, { ...unchangedFields, concurrency: 2 })
   })
 
-  it('still allows choosing sharing and protection when creating an account', async () => {
+  it('automatically enables scheduling without a switch and still allows choosing protection', async () => {
     const wrapper = render()
     await wrapper.get('#shared-name').setValue('New shared account')
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
-    await wrapper.get('[role="switch"][aria-label="sharedPool.sharing"]').trigger('click')
+    expect(wrapper.find('[role="switch"][aria-label="sharedPool.sharing"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('sharedPool.autoDispatchHint')
     await wrapper.get('input[type="checkbox"]').setValue(false)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -120,7 +132,7 @@ describe('shared account creation and edit boundaries', () => {
     await wrapper.get('#shared-concurrency').setValue(3)
     await wrapper.get('#shared-proxy').setValue('http://fixture.example:8080')
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
-    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: false, dispatch_consent: false, protection_enabled: true, codex_ticket_enabled: true }])
+    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true }])
     expect(wrapper.find('select').exists()).toBe(false)
   })
 

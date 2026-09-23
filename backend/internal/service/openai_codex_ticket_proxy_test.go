@@ -88,3 +88,29 @@ func TestCodexTicketPoolHonorsAccountAffinityConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 9}, Restricted: true, MaxReuseDuration: 30 * time.Minute}}, repo.selections)
 }
+
+func TestCodexTicketGlobalRandomAndInheritKeepDifferentPoolScopes(t *testing.T) {
+	for _, tc := range []struct {
+		mode          string
+		wantMode      string
+		wantInherited bool
+	}{
+		{mode: OpenAICodexTicketHarvestProxyModeRandom, wantMode: CodexTicketProxyModeRandom},
+		{mode: OpenAICodexTicketHarvestProxyModeInherit, wantMode: CodexTicketProxyModeRandom, wantInherited: true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			account := ticketTestAccount(42)
+			settings := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{
+				SettingKeyOpenAICodexTicketHarvestProxyMode: tc.mode,
+			}}}
+			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, nil)
+			svc.accountRepo = &balancedAccountProxyStub{}
+			svc.settingService = NewSettingService(settings, svc.cfg)
+
+			policy, err := svc.codexTicketProxyPolicy(context.Background(), account)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantMode, policy.mode)
+			require.Equal(t, tc.wantInherited, policy.inherited)
+		})
+	}
+}
