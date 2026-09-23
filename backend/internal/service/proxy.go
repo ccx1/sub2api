@@ -26,6 +26,9 @@ type Proxy struct {
 	Username       string
 	Password       string
 	Status         string
+	// CountryCode is the manually configured country used only when a probe
+	// has not produced an egress country for this proxy.
+	CountryCode    string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	ExpiresAt      *time.Time

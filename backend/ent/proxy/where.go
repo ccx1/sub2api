@@ -110,6 +110,11 @@ func Status(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldStatus, v))
 }
 
+// CountryCode applies equality check predicate on the "country_code" field. It's identical to CountryCodeEQ.
+func CountryCode(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldCountryCode, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiresAt, v))
@@ -738,6 +743,81 @@ func StatusEqualFold(v string) predicate.Proxy {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// CountryCodeEQ applies the EQ predicate on the "country_code" field.
+func CountryCodeEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldCountryCode, v))
+}
+
+// CountryCodeNEQ applies the NEQ predicate on the "country_code" field.
+func CountryCodeNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldCountryCode, v))
+}
+
+// CountryCodeIn applies the In predicate on the "country_code" field.
+func CountryCodeIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldCountryCode, vs...))
+}
+
+// CountryCodeNotIn applies the NotIn predicate on the "country_code" field.
+func CountryCodeNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldCountryCode, vs...))
+}
+
+// CountryCodeGT applies the GT predicate on the "country_code" field.
+func CountryCodeGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldCountryCode, v))
+}
+
+// CountryCodeGTE applies the GTE predicate on the "country_code" field.
+func CountryCodeGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldCountryCode, v))
+}
+
+// CountryCodeLT applies the LT predicate on the "country_code" field.
+func CountryCodeLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldCountryCode, v))
+}
+
+// CountryCodeLTE applies the LTE predicate on the "country_code" field.
+func CountryCodeLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldCountryCode, v))
+}
+
+// CountryCodeContains applies the Contains predicate on the "country_code" field.
+func CountryCodeContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldCountryCode, v))
+}
+
+// CountryCodeHasPrefix applies the HasPrefix predicate on the "country_code" field.
+func CountryCodeHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldCountryCode, v))
+}
+
+// CountryCodeHasSuffix applies the HasSuffix predicate on the "country_code" field.
+func CountryCodeHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldCountryCode, v))
+}
+
+// CountryCodeIsNil applies the IsNil predicate on the "country_code" field.
+func CountryCodeIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldCountryCode))
+}
+
+// CountryCodeNotNil applies the NotNil predicate on the "country_code" field.
+func CountryCodeNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldCountryCode))
+}
+
+// CountryCodeEqualFold applies the EqualFold predicate on the "country_code" field.
+func CountryCodeEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldCountryCode, v))
+}
+
+// CountryCodeContainsFold applies the ContainsFold predicate on the "country_code" field.
+func CountryCodeContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldCountryCode, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

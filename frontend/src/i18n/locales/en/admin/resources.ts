@@ -170,6 +170,9 @@ export default {
         "Enter one proxy per line in the following formats:\nproxy.example.com:8001:alice:secret\nalice:secret{'@'}proxy.example.com:8001\nalice:secret:proxy.example.com:8001\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080",
       batchInputHint:
         "Supports mixed input: host:port:user:pass, user:pass{'@'}host:port, user:pass:host:port, and full URLs. Entries without a scheme use the default protocol above.",
+      batchCountry: 'Proxy country (optional)',
+      batchCountryOptional: 'No country',
+      batchCountryHint: 'Set this when IPv6 probing cannot identify the proxy country.',
       parsedCount: '{count} valid',
       invalidCount: '{count} invalid',
       duplicateCount: '{count} duplicate',

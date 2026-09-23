@@ -20,6 +20,10 @@ type ProxyLatencyInfo struct {
 	QualitySummary   string    `json:"quality_summary,omitempty"`
 	QualityCheckedAt *int64    `json:"quality_checked_at,omitempty"`
 	QualityCFRay     string    `json:"quality_cf_ray,omitempty"`
+	// ProxyIdentity binds observations to the proxy egress configuration that
+	// produced them. Empty is retained for legacy cache entries and uses the
+	// UpdatedAt compatibility gate.
+	ProxyIdentity    string    `json:"proxy_identity,omitempty"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 

@@ -583,6 +583,25 @@
           </p>
         </div>
 
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ProxyGroupSelect
+            v-model="createForm.group_id"
+            :groups="proxyGroups"
+            :disabled="groupsLoading || !!groupsError"
+            data-testid="batch-proxy-group"
+          />
+          <label class="block">
+            <span class="input-label">{{ t('admin.proxies.batchCountry') }}</span>
+            <select v-model="createForm.country_code" class="input" data-testid="batch-proxy-country">
+              <option value="">{{ t('admin.proxies.batchCountryOptional') }}</option>
+              <option v-for="country in countryOptions" :key="country.code" :value="country.code">
+                {{ country.label }}
+              </option>
+            </select>
+            <span class="input-hint">{{ t('admin.proxies.batchCountryHint') }}</span>
+          </label>
+        </div>
+
         <!-- Parse Result -->
         <div v-if="batchParseResult.total > 0" class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700">
             <div class="flex items-center gap-4 text-sm">
@@ -874,6 +893,7 @@
 
     <ImportDataModal
       :show="showImportData"
+      :groups="proxyGroups"
       @close="showImportData = false"
       @imported="handleDataImported"
     />
@@ -1034,7 +1054,7 @@ import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { proxyOptionLabel } from '@/utils/proxyLabel'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
@@ -1205,8 +1225,15 @@ const batchParseResult = reactive({
   }>
 })
 
+const countryOptions = computed(() => {
+  const codes = 'AD AE AF AG AI AL AM AO AR AT AU AZ BA BB BD BE BF BG BH BI BJ BN BO BR BS BT BW BY BZ CA CD CF CG CH CI CL CM CN CO CR CU CV CY CZ DE DJ DK DM DO DZ EC EE EG ES ET FI FJ FM FR GA GB GD GE GH GL GM GN GQ GR GT GW GY HK HN HR HT HU ID IE IL IN IQ IR IS IT JM JO JP KE KG KH KI KM KN KR KW KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MG MH MK ML MM MN MO MR MT MU MV MW MX MY MZ NA NE NG NI NL NO NP NR NZ OM PA PE PG PH PK PL PR PS PT PW PY QA RO RS RU RW SA SB SC SD SE SG SI SK SL SM SN SO SR ST SV SY SZ TD TG TH TJ TL TM TN TO TR TT TV TW TZ UA UG US UY UZ VC VE VN VU WS YE ZA ZM ZW'.split(' ')
+  const displayNames = new Intl.DisplayNames([locale.value || 'zh-CN'], { type: 'region' })
+  return codes.map(code => ({ code, label: `${code} · ${displayNames.of(code) || code}` }))
+})
+
 const createForm = reactive({
   group_id: null as number | null,
+  country_code: '' as string,
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
@@ -1345,6 +1372,7 @@ const closeCreateModal = () => {
   createMode.value = 'standard'
   createForm.name = ''
   createForm.group_id = null
+  createForm.country_code = ''
   createForm.protocol = 'http'
   createForm.host = ''
   createForm.port = 8080
@@ -1412,7 +1440,11 @@ const handleBatchCreate = async () => {
 
   submitting.value = true
   try {
-    const result = await adminAPI.proxies.batchCreate(batchParseResult.proxies)
+    const result = await adminAPI.proxies.batchCreate(batchParseResult.proxies.map(proxy => ({
+      ...proxy,
+      group_id: createForm.group_id,
+      country_code: createForm.country_code || null
+    })))
     const created = result.created || 0
     const skipped = result.skipped || 0
 

@@ -532,6 +532,7 @@ type BulkUpdateAccountsResult struct {
 
 type CreateProxyInput struct {
 	GroupID        *int64
+	CountryCode    string
 	Name           string
 	Protocol       string
 	Host           string
@@ -549,6 +550,8 @@ type CreateProxyInput struct {
 type UpdateProxyInput struct {
 	GroupID        *int64
 	ClearGroupID   bool
+	CountryCode    *string
+	ClearCountryCode bool
 	Name           string
 	Protocol       string
 	Host           string

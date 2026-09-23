@@ -96,6 +96,7 @@ type Config struct {
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
+	SimpleMode              SimpleModeConfig              `mapstructure:"simple_mode" yaml:"simple_mode"`
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
@@ -104,6 +105,14 @@ type Config struct {
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
 	Plugins                 PluginConfig                  `mapstructure:"plugins"`
+
+	// Enforce only API-key spending windows in simple mode.
+	SimpleModeKeyRateLimitEnabled bool `mapstructure:"simple_mode_key_rate_limit_enabled" yaml:"simple_mode_key_rate_limit_enabled"`
+}
+
+// SimpleModeConfig controls startup behavior in simple mode.
+type SimpleModeConfig struct {
+	AutoCreateDefaultGroups bool `mapstructure:"auto_create_default_groups" yaml:"auto_create_default_groups"`
 }
 
 // PluginConfig 控制管理员手动上传的本地进程插件。
@@ -1225,25 +1234,29 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 // 采集代理使用固定地址或代理池，候选票通过账号业务出口复验后才发布。
 // 后台设置优先于启动配置；随机代理账号持续复用未过期的合格票据。
 type OpenAICodexTicketConfig struct {
-	Enabled                       bool                  `mapstructure:"enabled" json:"enabled"`
-	LengthMode                    string                `mapstructure:"length_mode" json:"length_mode"`
-	TargetLength                  int                   `mapstructure:"target_length" json:"target_length"`
-	TTLSeconds                    int                   `mapstructure:"ttl_seconds" json:"ttl_seconds"`
-	RefreshBeforeSeconds          int                   `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
-	HarvestProxyURL               string                `mapstructure:"harvest_proxy_url" json:"-"`
-	HarvestProbeIntervalSeconds   int                   `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
-	HarvestAttemptTimeoutSeconds  int                   `mapstructure:"harvest_attempt_timeout_seconds" json:"harvest_attempt_timeout_seconds"`
-	FailClosed                    bool                  `mapstructure:"fail_closed" json:"fail_closed"`
-	Models                        []string              `mapstructure:"models" json:"models"`
-	TierRules                     []CodexTicketTierRule `mapstructure:"tier_rules" json:"tier_rules"`
-	RejectedLengths               []int                 `mapstructure:"rejected_lengths" json:"rejected_lengths"`
-	HarvestConcurrency            int                   `mapstructure:"harvest_concurrency" json:"harvest_concurrency"`
-	RetryBackoffSeconds           []int                 `mapstructure:"retry_backoff_seconds" json:"retry_backoff_seconds"`
-	RetryMaxAttempts              int                   `mapstructure:"retry_max_attempts" json:"retry_max_attempts"`
-	RetryExhaustedCooldownSeconds int                   `mapstructure:"retry_exhausted_cooldown_seconds" json:"retry_exhausted_cooldown_seconds"`
-	AuthCooldownSeconds           int                   `mapstructure:"auth_cooldown_seconds" json:"auth_cooldown_seconds"`
-	RateLimitCooldownSeconds      int                   `mapstructure:"rate_limit_cooldown_seconds" json:"rate_limit_cooldown_seconds"`
-	RespectRetryAfter             bool                  `mapstructure:"respect_retry_after" json:"respect_retry_after"`
+	Enabled                       bool                         `mapstructure:"enabled" json:"enabled"`
+	Protection                    *CodexTicketProtectionConfig `mapstructure:"protection" json:"protection"`
+	CredentialMode                string                       `mapstructure:"credential_mode" json:"credential_mode"`
+	LengthMode                    string                       `mapstructure:"length_mode" json:"length_mode"`
+	TargetLength                  int                          `mapstructure:"target_length" json:"target_length"`
+	TTLSeconds                    int                          `mapstructure:"ttl_seconds" json:"ttl_seconds"`
+	CookieTTLSeconds              int                          `mapstructure:"cookie_ttl_seconds" json:"cookie_ttl_seconds"`
+	CookieRefreshBeforeSeconds    *int                         `mapstructure:"cookie_refresh_before_seconds" json:"cookie_refresh_before_seconds"`
+	RefreshBeforeSeconds          int                          `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
+	HarvestProxyURL               string                       `mapstructure:"harvest_proxy_url" json:"-"`
+	HarvestProbeIntervalSeconds   int                          `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
+	HarvestAttemptTimeoutSeconds  int                          `mapstructure:"harvest_attempt_timeout_seconds" json:"harvest_attempt_timeout_seconds"`
+	FailClosed                    bool                         `mapstructure:"fail_closed" json:"fail_closed"`
+	Models                        []string                     `mapstructure:"models" json:"models"`
+	TierRules                     []CodexTicketTierRule        `mapstructure:"tier_rules" json:"tier_rules"`
+	RejectedLengths               []int                        `mapstructure:"rejected_lengths" json:"rejected_lengths"`
+	HarvestConcurrency            int                          `mapstructure:"harvest_concurrency" json:"harvest_concurrency"`
+	RetryBackoffSeconds           []int                        `mapstructure:"retry_backoff_seconds" json:"retry_backoff_seconds"`
+	RetryMaxAttempts              int                          `mapstructure:"retry_max_attempts" json:"retry_max_attempts"`
+	RetryExhaustedCooldownSeconds int                          `mapstructure:"retry_exhausted_cooldown_seconds" json:"retry_exhausted_cooldown_seconds"`
+	AuthCooldownSeconds           int                          `mapstructure:"auth_cooldown_seconds" json:"auth_cooldown_seconds"`
+	RateLimitCooldownSeconds      int                          `mapstructure:"rate_limit_cooldown_seconds" json:"rate_limit_cooldown_seconds"`
+	RespectRetryAfter             bool                         `mapstructure:"respect_retry_after" json:"respect_retry_after"`
 }
 
 type CodexTicketTierRule struct {
@@ -2026,6 +2039,8 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
+	viper.SetDefault("simple_mode.auto_create_default_groups", true)
+	viper.SetDefault("simple_mode_key_rate_limit_enabled", false)
 
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")

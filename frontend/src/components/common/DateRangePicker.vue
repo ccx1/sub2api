@@ -119,14 +119,7 @@ const localStartDate = ref(props.startDate)
 const localEndDate = ref(props.endDate)
 const activePreset = ref<string | null>('last24Hours')
 
-const today = computed(() => {
-  // Use local timezone to avoid UTC timezone issues
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-})
+const today = computed(() => formatDateToString(new Date()))
 
 // Tomorrow's date - used for max date to handle timezone differences
 // When user is in a timezone behind the server, "today" on server might be "tomorrow" locally
@@ -350,6 +343,14 @@ function removePositionListeners() {
   window.removeEventListener('scroll', updateDropdownPosition, true)
   window.removeEventListener('resize', updateDropdownPosition)
 }
+
+// Restore the applied range after dismissal, including parent updates from Apply.
+watch(isOpen, (open) => {
+  if (open) return
+  localStartDate.value = props.startDate
+  localEndDate.value = props.endDate
+  onDateChange()
+}, { flush: 'post' })
 
 // Sync local state with props
 watch(

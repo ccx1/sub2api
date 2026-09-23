@@ -57,6 +57,7 @@ vi.mock('vue-i18n', async () => {
 
 import EditAccountModal from '../EditAccountModal.vue'
 import CodexTicketProxySettings from '../CodexTicketProxySettings.vue'
+import RandomProxySettings from '../RandomProxySettings.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -326,6 +327,18 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('passes the resolved subscription country only for OAuth accounts', () => {
+    const oauth = buildOpenAIOAuthParentAccount()
+    oauth.credentials = { access_token: 'oauth-token', price_country: ' jp ' }
+    const oauthWrapper = mountModal(oauth)
+    expect(oauthWrapper.getComponent(RandomProxySettings).props('regionCountry')).toBe('JP')
+    oauthWrapper.unmount()
+
+    const apiKeyWrapper = mountModal(buildAccount())
+    expect(apiKeyWrapper.getComponent(RandomProxySettings).props('regionCountry')).toBeUndefined()
+    apiKeyWrapper.unmount()
+  })
+
   it.each([
     { proxyId: 7, extra: {} },
     { proxyId: null, extra: { proxy_mode: 'random', random_proxy_pool_scope: 'all' } },

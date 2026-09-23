@@ -59,6 +59,10 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	if err := s.validateProxyGroup(ctx, input.GroupID); err != nil {
 		return nil, err
 	}
+	countryCode, err := NormalizeProxyCountryCode(input.CountryCode)
+	if err != nil {
+		return nil, err
+	}
 	if !isJSONTimeInRange(input.ExpiresAt) {
 		return nil, infraerrors.BadRequest("PROXY_EXPIRY_INVALID", "proxy expiry year must be between 0 and 9999")
 	}
@@ -77,6 +81,7 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 
 	proxy := &Proxy{
 		GroupID:        input.GroupID,
+		CountryCode:    countryCode,
 		Name:           input.Name,
 		Protocol:       input.Protocol,
 		Host:           input.Host,
@@ -112,6 +117,16 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
+	if input.CountryCode != nil || input.ClearCountryCode {
+		countryCode := ""
+		if input.CountryCode != nil {
+			countryCode, err = NormalizeProxyCountryCode(*input.CountryCode)
+			if err != nil {
+				return nil, err
+			}
+		}
+		proxy.CountryCode = countryCode
+	}
 
 	// Merge only supplied fields, then validate the resulting fallback configuration.
 	mode := proxy.FallbackMode
@@ -131,6 +146,13 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 
 	if input.Name != "" {
 		proxy.Name = input.Name
+	}
+	if input.CountryCode != nil || input.ClearCountryCode {
+		if input.CountryCode == nil {
+			proxy.CountryCode = ""
+		} else {
+			proxy.CountryCode = *input.CountryCode
+		}
 	}
 	proxy.GroupIDSet = input.GroupID != nil || input.ClearGroupID
 	if proxy.GroupIDSet {

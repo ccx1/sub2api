@@ -40,6 +40,18 @@
         />
       </div>
 
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ProxyGroupSelect v-model="defaultGroupId" :groups="groups || []" :disabled="importing" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.proxies.batchCountry') }}</span>
+          <select v-model="defaultCountryCode" class="input" :disabled="importing">
+            <option value="">{{ t('admin.proxies.batchCountryOptional') }}</option>
+            <option v-for="country in countryOptions" :key="country.code" :value="country.code">{{ country.label }}</option>
+          </select>
+          <span class="input-hint">{{ t('admin.proxies.batchCountryHint') }}</span>
+        </label>
+      </div>
+
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -91,9 +103,12 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { AdminDataImportResult } from '@/types'
+import type { ProxyGroup } from '@/types'
+import ProxyGroupSelect from '@/components/admin/proxy/ProxyGroupSelect.vue'
 
 interface Props {
   show: boolean
+  groups?: ProxyGroup[]
 }
 
 interface Emits {
@@ -104,13 +119,20 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appStore = useAppStore()
 
 const importing = ref(false)
 const hasImportedData = ref(false)
 const file = ref<File | null>(null)
 const result = ref<AdminDataImportResult | null>(null)
+const defaultGroupId = ref<number | null>(null)
+const defaultCountryCode = ref('')
+const countryOptions = computed(() => {
+  const codes = 'AD AE AF AG AI AL AM AO AR AT AU AZ BA BB BD BE BF BG BH BI BJ BN BO BR BS BT BW BY BZ CA CD CF CG CH CI CL CM CN CO CR CU CV CY CZ DE DJ DK DM DO DZ EC EE EG ES ET FI FJ FM FR GA GB GD GE GH GL GM GN GQ GR GT GW GY HK HN HR HT HU ID IE IL IN IQ IR IS IT JM JO JP KE KG KH KI KM KN KR KW KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MG MH MK ML MM MN MO MR MT MU MV MW MX MY MZ NA NE NG NI NL NO NP NR NZ OM PA PE PG PH PK PL PR PS PT PW PY QA RO RS RU RW SA SB SC SD SE SG SI SK SL SM SN SO SR ST SV SY SZ TD TG TH TJ TL TM TN TO TR TT TV TW TZ UA UG US UY UZ VC VE VN VU WS YE ZA ZM ZW'.split(' ')
+  const displayNames = new Intl.DisplayNames([locale.value || 'zh-CN'], { type: 'region' })
+  return codes.map(code => ({ code, label: `${code} · ${displayNames.of(code) || code}` }))
+})
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileName = computed(() => file.value?.name || '')
@@ -124,6 +146,8 @@ watch(
       file.value = null
       hasImportedData.value = false
       result.value = null
+      defaultGroupId.value = null
+      defaultCountryCode.value = ''
       if (fileInput.value) {
         fileInput.value.value = ''
       }
@@ -177,6 +201,13 @@ const handleImport = async () => {
   try {
     const text = await readFileAsText(file.value)
     const dataPayload = JSON.parse(text)
+    if (Array.isArray(dataPayload?.proxies)) {
+      dataPayload.proxies = dataPayload.proxies.map((proxy: Record<string, unknown>) => ({
+        ...proxy,
+        ...(proxy.group_id == null && defaultGroupId.value ? { group_id: defaultGroupId.value } : {}),
+        ...(proxy.country_code == null && defaultCountryCode.value ? { country_code: defaultCountryCode.value } : {})
+      }))
+    }
 
     const res = await adminAPI.proxies.importData({ data: dataPayload })
 

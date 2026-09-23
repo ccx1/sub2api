@@ -13,8 +13,8 @@ const proxies = [
   { id: 2, name: 'Berlin', protocol: 'socks5', host: '2001:db8::1', port: 1080, country: 'Germany' }
 ] as Proxy[]
 
-function mountSettings(ids: number[] = []) {
-  return mount(RandomProxySettings, { props: { proxies, enabled: true, scope: 'selected', ids, policy: 'reject' } })
+function mountSettings(ids: number[] = [], regionCountry?: string) {
+  return mount(RandomProxySettings, { props: { proxies, enabled: true, scope: 'selected', ids, policy: 'reject', regionCountry } })
 }
 
 describe('RandomProxySettings', () => {
@@ -100,6 +100,18 @@ describe('RandomProxySettings', () => {
     await wrapper.get('input[type="search"]').setValue('Japan')
     expect(wrapper.text()).toContain('Tokyo')
     expect(wrapper.text()).not.toContain('Berlin')
+  })
+
+  it('filters by OAuth subscription country while preserving selected proxies', () => {
+    const wrapper = mountSettings([2], 'JP')
+    expect(wrapper.text()).toContain('Tokyo')
+    expect(wrapper.text()).toContain('Berlin')
+  })
+
+  it.each(['', 'unknown', 'off', 'all'])('shows the full pool when the subscription country is %s', regionCountry => {
+    const wrapper = mountSettings([], regionCountry)
+    expect(wrapper.text()).toContain('Tokyo')
+    expect(wrapper.text()).toContain('Berlin')
   })
 
   it('preserves unavailable selections when selecting another proxy', async () => {

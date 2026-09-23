@@ -37600,6 +37600,7 @@ type ProxyMutation struct {
 	username               *string
 	password               *string
 	status                 *string
+	country_code           *string
 	expires_at             *time.Time
 	fallback_mode          *string
 	expiry_warn_days       *int
@@ -38186,6 +38187,55 @@ func (m *ProxyMutation) ResetStatus() {
 	m.status = nil
 }
 
+// SetCountryCode sets the "country_code" field.
+func (m *ProxyMutation) SetCountryCode(s string) {
+	m.country_code = &s
+}
+
+// CountryCode returns the value of the "country_code" field in the mutation.
+func (m *ProxyMutation) CountryCode() (r string, exists bool) {
+	v := m.country_code
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCountryCode returns the old "country_code" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldCountryCode(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCountryCode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCountryCode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCountryCode: %w", err)
+	}
+	return oldValue.CountryCode, nil
+}
+
+// ClearCountryCode clears the value of the "country_code" field.
+func (m *ProxyMutation) ClearCountryCode() {
+	m.country_code = nil
+	m.clearedFields[proxy.FieldCountryCode] = struct{}{}
+}
+
+// CountryCodeCleared returns if the "country_code" field was cleared in this mutation.
+func (m *ProxyMutation) CountryCodeCleared() bool {
+	_, ok := m.clearedFields[proxy.FieldCountryCode]
+	return ok
+}
+
+// ResetCountryCode resets all changes to the "country_code" field.
+func (m *ProxyMutation) ResetCountryCode() {
+	m.country_code = nil
+	delete(m.clearedFields, proxy.FieldCountryCode)
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (m *ProxyMutation) SetExpiresAt(t time.Time) {
 	m.expires_at = &t
@@ -38572,7 +38622,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 15)
+	fields := make([]string, 0, 16)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -38605,6 +38655,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, proxy.FieldStatus)
+	}
+	if m.country_code != nil {
+		fields = append(fields, proxy.FieldCountryCode)
 	}
 	if m.expires_at != nil {
 		fields = append(fields, proxy.FieldExpiresAt)
@@ -38648,6 +38701,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.Password()
 	case proxy.FieldStatus:
 		return m.Status()
+	case proxy.FieldCountryCode:
+		return m.CountryCode()
 	case proxy.FieldExpiresAt:
 		return m.ExpiresAt()
 	case proxy.FieldFallbackMode:
@@ -38687,6 +38742,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPassword(ctx)
 	case proxy.FieldStatus:
 		return m.OldStatus(ctx)
+	case proxy.FieldCountryCode:
+		return m.OldCountryCode(ctx)
 	case proxy.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
 	case proxy.FieldFallbackMode:
@@ -38780,6 +38837,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStatus(v)
+		return nil
+	case proxy.FieldCountryCode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCountryCode(v)
 		return nil
 	case proxy.FieldExpiresAt:
 		v, ok := value.(time.Time)
@@ -38878,6 +38942,9 @@ func (m *ProxyMutation) ClearedFields() []string {
 	if m.FieldCleared(proxy.FieldPassword) {
 		fields = append(fields, proxy.FieldPassword)
 	}
+	if m.FieldCleared(proxy.FieldCountryCode) {
+		fields = append(fields, proxy.FieldCountryCode)
+	}
 	if m.FieldCleared(proxy.FieldExpiresAt) {
 		fields = append(fields, proxy.FieldExpiresAt)
 	}
@@ -38909,6 +38976,9 @@ func (m *ProxyMutation) ClearField(name string) error {
 		return nil
 	case proxy.FieldPassword:
 		m.ClearPassword()
+		return nil
+	case proxy.FieldCountryCode:
+		m.ClearCountryCode()
 		return nil
 	case proxy.FieldExpiresAt:
 		m.ClearExpiresAt()
@@ -38956,6 +39026,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case proxy.FieldCountryCode:
+		m.ResetCountryCode()
 		return nil
 	case proxy.FieldExpiresAt:
 		m.ResetExpiresAt()

@@ -146,6 +146,20 @@ func (_c *ProxyCreate) SetNillableStatus(v *string) *ProxyCreate {
 	return _c
 }
 
+// SetCountryCode sets the "country_code" field.
+func (_c *ProxyCreate) SetCountryCode(v string) *ProxyCreate {
+	_c.mutation.SetCountryCode(v)
+	return _c
+}
+
+// SetNillableCountryCode sets the "country_code" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableCountryCode(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetCountryCode(*v)
+	}
+	return _c
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_c *ProxyCreate) SetExpiresAt(v time.Time) *ProxyCreate {
 	_c.mutation.SetExpiresAt(v)
@@ -361,6 +375,11 @@ func (_c *ProxyCreate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.CountryCode(); ok {
+		if err := proxy.CountryCodeValidator(v); err != nil {
+			return &ValidationError{Name: "country_code", err: fmt.Errorf(`ent: validator failed for field "Proxy.country_code": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.FallbackMode(); !ok {
 		return &ValidationError{Name: "fallback_mode", err: errors.New(`ent: missing required field "Proxy.fallback_mode"`)}
 	}
@@ -438,6 +457,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.CountryCode(); ok {
+		_spec.SetField(proxy.FieldCountryCode, field.TypeString, value)
+		_node.CountryCode = &value
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
@@ -716,6 +739,24 @@ func (u *ProxyUpsert) SetStatus(v string) *ProxyUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *ProxyUpsert) UpdateStatus() *ProxyUpsert {
 	u.SetExcluded(proxy.FieldStatus)
+	return u
+}
+
+// SetCountryCode sets the "country_code" field.
+func (u *ProxyUpsert) SetCountryCode(v string) *ProxyUpsert {
+	u.Set(proxy.FieldCountryCode, v)
+	return u
+}
+
+// UpdateCountryCode sets the "country_code" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateCountryCode() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldCountryCode)
+	return u
+}
+
+// ClearCountryCode clears the value of the "country_code" field.
+func (u *ProxyUpsert) ClearCountryCode() *ProxyUpsert {
+	u.SetNull(proxy.FieldCountryCode)
 	return u
 }
 
@@ -1002,6 +1043,27 @@ func (u *ProxyUpsertOne) SetStatus(v string) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateStatus() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetCountryCode sets the "country_code" field.
+func (u *ProxyUpsertOne) SetCountryCode(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetCountryCode(v)
+	})
+}
+
+// UpdateCountryCode sets the "country_code" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateCountryCode() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateCountryCode()
+	})
+}
+
+// ClearCountryCode clears the value of the "country_code" field.
+func (u *ProxyUpsertOne) ClearCountryCode() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearCountryCode()
 	})
 }
 
@@ -1465,6 +1527,27 @@ func (u *ProxyUpsertBulk) SetStatus(v string) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateStatus() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetCountryCode sets the "country_code" field.
+func (u *ProxyUpsertBulk) SetCountryCode(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetCountryCode(v)
+	})
+}
+
+// UpdateCountryCode sets the "country_code" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateCountryCode() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateCountryCode()
+	})
+}
+
+// ClearCountryCode clears the value of the "country_code" field.
+func (u *ProxyUpsertBulk) ClearCountryCode() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearCountryCode()
 	})
 }
 

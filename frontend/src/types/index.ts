@@ -1227,6 +1227,46 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
+export type OpenCodeGoUsageStatus = 'ok' | 'unauthorized' | 'failed'
+
+export interface OpenCodeGoUsageWindow {
+  status?: string
+  percent: number
+  resets_at?: string
+}
+
+export interface OpenCodeGoUsageData {
+  rolling?: OpenCodeGoUsageWindow
+  weekly?: OpenCodeGoUsageWindow
+  monthly?: OpenCodeGoUsageWindow
+}
+
+export interface OpenCodeGoUsageSnapshot {
+  status: OpenCodeGoUsageStatus
+  data?: OpenCodeGoUsageData
+  fetched_at?: string
+  last_attempt_at?: string
+  next_refresh_at?: string
+  failure_count?: number
+  http_status?: number
+  last_error?: string
+}
+
+export interface OpenCodeGoUsageState {
+  account_id: number
+  eligible: boolean
+  auto_refresh_enabled: boolean
+  snapshot?: OpenCodeGoUsageSnapshot
+}
+
+export interface OpenCodeGoUsageSettings {
+  enabled: boolean
+  /** Max wait while model requests keep arriving (minutes). */
+  interval_minutes: number
+  /** Trailing quiet period after the latest model request (minutes). */
+  debounce_minutes: number
+}
+
 export interface Account {
   id: number
   name: string
@@ -1253,6 +1293,7 @@ export interface Account {
   anti_degradation?: boolean
   protection_scope?: string
   protection_mode?: string
+  opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     proxy_mode?: 'random'
@@ -1276,6 +1317,11 @@ export interface Account {
       available_count?: number
       credits?: { expires_at?: string }[]
     }
+    codex_credits_snapshot?: {
+      credits: { has_credits: boolean; unlimited: boolean; balance: string | null } | null
+      fetched_at: number
+    }
+    codex_referral_snapshot?: import('./openaiReferrals').OpenAIReferralEligibility | null
     auto_reset_credit_enabled?: boolean
     auto_reset_credit_5h_threshold?: number
     auto_reset_credit_7d_threshold?: number
@@ -1638,6 +1684,7 @@ export interface CheckMixedChannelResponse {
 
 export interface CreateProxyRequest {
   group_id?: number | null
+  country_code?: string | null
   name: string
   protocol: ProxyProtocol
   host: string
@@ -1652,6 +1699,7 @@ export interface CreateProxyRequest {
 
 export interface UpdateProxyRequest {
   group_id?: number | null
+  country_code?: string | null
   name?: string
   protocol?: ProxyProtocol
   host?: string
@@ -1681,6 +1729,8 @@ export interface AdminDataProxy {
   protocol: ProxyProtocol
   host: string
   port: number
+  group_id?: number | null
+  country_code?: string | null
   username?: string | null
   password?: string | null
   status: 'active' | 'inactive'

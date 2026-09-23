@@ -85,7 +85,7 @@ import type { Proxy, ProxyGroup } from '@/types'
 import { type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import { proxyOptionLabel } from '@/utils/proxyLabel'
 
-const props = defineProps<{ proxies: Proxy[]; disabled?: boolean }>()
+const props = defineProps<{ proxies: Proxy[]; disabled?: boolean; regionCountry?: string }>()
 const enabled = defineModel<boolean>('enabled', { required: true })
 const scope = defineModel<RandomProxyPoolScope>('scope', { required: true })
 const ids = defineModel<number[]>('ids', { required: true })
@@ -129,9 +129,27 @@ watch(() => enabled.value && scope.value === 'group', active => {
 }, { immediate: true })
 watch(groupValidationError, error => { groupError.value = error }, { immediate: true })
 const location = (proxy: Proxy) => [...new Set([proxy.country || proxy.country_code, proxy.region, proxy.city].filter(Boolean))].join(' / ')
+const countryName = (countryCode: string) => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(countryCode)?.trim().toUpperCase() || ''
+  } catch {
+    return ''
+  }
+}
 const filteredProxies = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return props.proxies.filter(proxy => `${proxyOptionLabel(proxy)} ${location(proxy)}`.toLowerCase().includes(query))
+  const targetCountry = props.regionCountry?.trim().toUpperCase() || ''
+  const hasCountryFilter = !['', 'UNKNOWN', 'OFF', 'ALL'].includes(targetCountry)
+  return props.proxies.filter(proxy => {
+    const selected = ids.value.includes(proxy.id)
+    const countryMatches = !hasCountryFilter || [proxy.country_code, proxy.country]
+      .filter((value): value is string => typeof value === 'string')
+      .some(value => {
+        const normalized = value.trim().toUpperCase()
+        return normalized === targetCountry || normalized === countryName(targetCountry)
+      })
+    return (selected || countryMatches) && `${proxyOptionLabel(proxy)} ${location(proxy)}`.toLowerCase().includes(query)
+  })
 })
 const missingIds = computed(() => ids.value.filter(id => !props.proxies.some(proxy => proxy.id === id)))
 </script>

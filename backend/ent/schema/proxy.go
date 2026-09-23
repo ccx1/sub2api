@@ -53,6 +53,11 @@ func (Proxy) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default("active"),
+		field.String("country_code").
+			MaxLen(2).
+			Optional().
+			Nillable().
+			Comment("Manually configured country fallback when egress probe has no country."),
 		field.Time("expires_at").
 			Optional().Nillable().
 			Comment("Proxy expiration time (NULL means never expires)."),

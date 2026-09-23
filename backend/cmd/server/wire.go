@@ -99,6 +99,7 @@ func provideCleanup(
 	accountExpiry *service.AccountExpiryService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
+	claudeCodeVersionSync *service.ClaudeCodeVersionSyncService,
 	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
@@ -125,6 +126,7 @@ func provideCleanup(
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	spendGuard *service.SpendGuardService,
+	opencodeGoUsage *service.OpenCodeGoUsageService,
 	auditLog *service.AuditLogService,
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
@@ -273,6 +275,10 @@ func provideCleanup(
 				codexVersionSync.Stop()
 				return nil
 			}},
+			{"ClaudeCodeVersionSyncService", func() error {
+				claudeCodeVersionSync.Stop()
+				return nil
+			}},
 			{"ProxyExpiryService", func() error {
 				proxyExpiry.Stop()
 				return nil
@@ -390,6 +396,12 @@ func provideCleanup(
 			{"SpendGuardService", func() error {
 				if spendGuard != nil {
 					spendGuard.Stop()
+				}
+				return nil
+			}},
+			{"OpenCodeGoUsageService", func() error {
+				if opencodeGoUsage != nil {
+					opencodeGoUsage.Stop()
 				}
 				return nil
 			}},

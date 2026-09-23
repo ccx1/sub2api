@@ -137,6 +137,7 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 	if err != nil {
 		return nil, fmt.Errorf("read proxy pool health: %w", err)
 	}
+	candidates = filterProxyPoolRegion(candidates, health, selection.CountryCode)
 	// Lua 按输入次序打破同档平局，每次独立打散，避免代理 ID 形成固定优先级。
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 	keys, leases, proxies := prepareProxyPoolLeases(candidates, health)

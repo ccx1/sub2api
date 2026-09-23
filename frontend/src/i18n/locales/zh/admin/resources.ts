@@ -170,6 +170,9 @@ export default {
       batchInputPlaceholder:
         "每行输入一个代理，支持以下格式：\nproxy.example.com:8001:alice:secret\nalice:secret{'@'}proxy.example.com:8001\nalice:secret:proxy.example.com:8001\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080",
       batchInputHint: "支持混合输入：主机:端口:用户名:密码、用户名:密码{'@'}主机:端口、用户名:密码:主机:端口，以及带协议的 URL。未写协议头时按上方选项自动补全。",
+      batchCountry: '代理国家（可选）',
+      batchCountryOptional: '不指定国家',
+      batchCountryHint: 'IPv6 无法自动识别地区时，可手动指定国家。',
       parsedCount: '有效 {count} 个',
       invalidCount: '无效 {count} 个',
       duplicateCount: '重复 {count} 个',

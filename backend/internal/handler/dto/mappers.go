@@ -245,6 +245,10 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	if state := service.OllamaCloudUsageStateFromAccount(a); state.Eligible {
 		ollamaCloudUsage = state
 	}
+	var openCodeGoUsage *service.OpenCodeGoUsageState
+	if state := service.OpenCodeGoUsageStateFromAccount(a); state.Eligible {
+		openCodeGoUsage = state
+	}
 	out := &Account{
 		AntiDegradation:         a.AntiDegradationEnabled(),
 		ProtectionScope:         a.ProtectionScope(),
@@ -258,6 +262,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		CredentialsStatus:       credsStatus,
 		Extra:                   extra,
 		OllamaCloudUsage:        ollamaCloudUsage,
+		OpenCodeGoUsage:         openCodeGoUsage,
 		ProxyID:                 a.ProxyID,
 		ProxyFallbackOriginID:   a.ProxyFallbackOriginID,
 		ProxyFallbackOriginName: a.ProxyFallbackOriginName,
@@ -472,6 +477,7 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
 		OllamaCloudUsage: a.OllamaCloudUsage, CodexTurnTickets: a.CodexTurnTickets,
 		CodexTicketGlobalEnabled: a.CodexTicketGlobalEnabled, CodexTicketEnabled: a.CodexTicketEnabled,
+		OllamaCloudUsage: a.OllamaCloudUsage, OpenCodeGoUsage: a.OpenCodeGoUsage,
 		ProxyID: a.ProxyID, ProxyFallbackOriginID: a.ProxyFallbackOriginID, ProxyFallbackOriginName: a.ProxyFallbackOriginName,
 		Concurrency: a.Concurrency, LoadFactor: a.LoadFactor, Priority: a.Priority, RateMultiplier: a.RateMultiplier,
 		Status: a.Status, ErrorMessage: a.ErrorMessage, LastUsedAt: a.LastUsedAt, ExpiresAt: a.ExpiresAt,

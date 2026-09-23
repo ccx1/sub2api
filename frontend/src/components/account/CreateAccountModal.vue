@@ -3013,6 +3013,7 @@
           v-model:policy="randomProxyEmptyPoolPolicy"
           v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
           :proxies="proxies"
+          :region-country="randomProxyRegionCountry"
           @update:enabled="handleRandomProxyChange"
         />
       </div>
@@ -3957,6 +3958,7 @@ import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vu
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
+import { resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -4771,6 +4773,10 @@ const randomProxyPoolIds = ref<number[]>([])
 const randomProxyGroupId = ref<number | null>(null)
 const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
+const randomProxyRegionCountry = computed(() => {
+  if (form.type !== 'oauth') return undefined
+  return resolveAccountProxyRegion({ mode: 'billing', country: '' }, form.credentials).country || undefined
+})
 const dailyCooldown = ref(normalizeDailyCooldown())
 
 const handleRandomProxyChange = (enabled: boolean) => {
@@ -6032,6 +6038,7 @@ const createAccountAndFinish = async (
   credentials: Record<string, unknown>,
   extra?: Record<string, unknown>
 ) => {
+  form.credentials = credentials
   if (!applyTempUnschedConfig(credentials)) {
     return
   }
@@ -6409,6 +6416,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     if (!tokenInfo) return
 
     const credentials = oauthClient.buildCredentials(tokenInfo)
+    form.credentials = credentials
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
     const extra = buildOpenAIExtra(oauthExtra)
     const shouldCreateOpenAI = form.platform === 'openai'
@@ -6692,6 +6700,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         }
 
         const credentials = oauthClient.buildCredentials(tokenInfo)
+        form.credentials = credentials
         if (clientId) {
           credentials.client_id = clientId
         }

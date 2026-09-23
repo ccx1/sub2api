@@ -193,6 +193,26 @@ func (_u *ProxyUpdate) SetNillableStatus(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetCountryCode sets the "country_code" field.
+func (_u *ProxyUpdate) SetCountryCode(v string) *ProxyUpdate {
+	_u.mutation.SetCountryCode(v)
+	return _u
+}
+
+// SetNillableCountryCode sets the "country_code" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableCountryCode(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetCountryCode(*v)
+	}
+	return _u
+}
+
+// ClearCountryCode clears the value of the "country_code" field.
+func (_u *ProxyUpdate) ClearCountryCode() *ProxyUpdate {
+	_u.mutation.ClearCountryCode()
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdate) SetExpiresAt(v time.Time) *ProxyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -441,6 +461,11 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CountryCode(); ok {
+		if err := proxy.CountryCodeValidator(v); err != nil {
+			return &ValidationError{Name: "country_code", err: fmt.Errorf(`ent: validator failed for field "Proxy.country_code": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.FallbackMode(); ok {
 		if err := proxy.FallbackModeValidator(v); err != nil {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
@@ -499,6 +524,12 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CountryCode(); ok {
+		_spec.SetField(proxy.FieldCountryCode, field.TypeString, value)
+	}
+	if _u.mutation.CountryCodeCleared() {
+		_spec.ClearField(proxy.FieldCountryCode, field.TypeString)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
@@ -846,6 +877,26 @@ func (_u *ProxyUpdateOne) SetNillableStatus(v *string) *ProxyUpdateOne {
 	return _u
 }
 
+// SetCountryCode sets the "country_code" field.
+func (_u *ProxyUpdateOne) SetCountryCode(v string) *ProxyUpdateOne {
+	_u.mutation.SetCountryCode(v)
+	return _u
+}
+
+// SetNillableCountryCode sets the "country_code" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableCountryCode(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetCountryCode(*v)
+	}
+	return _u
+}
+
+// ClearCountryCode clears the value of the "country_code" field.
+func (_u *ProxyUpdateOne) ClearCountryCode() *ProxyUpdateOne {
+	_u.mutation.ClearCountryCode()
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdateOne) SetExpiresAt(v time.Time) *ProxyUpdateOne {
 	_u.mutation.SetExpiresAt(v)
@@ -1107,6 +1158,11 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CountryCode(); ok {
+		if err := proxy.CountryCodeValidator(v); err != nil {
+			return &ValidationError{Name: "country_code", err: fmt.Errorf(`ent: validator failed for field "Proxy.country_code": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.FallbackMode(); ok {
 		if err := proxy.FallbackModeValidator(v); err != nil {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
@@ -1182,6 +1238,12 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CountryCode(); ok {
+		_spec.SetField(proxy.FieldCountryCode, field.TypeString, value)
+	}
+	if _u.mutation.CountryCodeCleared() {
+		_spec.ClearField(proxy.FieldCountryCode, field.TypeString)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
