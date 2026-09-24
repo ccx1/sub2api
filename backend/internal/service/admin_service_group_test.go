@@ -32,15 +32,16 @@ type groupRepoStubForAdmin struct {
 	bindAccountsToGroupFn          func(groupID int64, accountIDs []int64) error
 	getAccountIDsByGroupIDsFn      func(groupIDs []int64) ([]int64, error)
 
-	listWithFiltersCalls       int
-	listWithFiltersParams      pagination.PaginationParams
-	listWithFiltersPlatform    string
-	listWithFiltersStatus      string
-	listWithFiltersSearch      string
-	listWithFiltersIsExclusive *bool
-	listWithFiltersGroups      []Group
-	listWithFiltersResult      *pagination.PaginationResult
-	listWithFiltersErr         error
+	listWithFiltersCalls        int
+	listWithFiltersParams       pagination.PaginationParams
+	listWithFiltersPlatform     string
+	listWithFiltersStatus       string
+	listWithFiltersSearch       string
+	listWithFiltersIsExclusive  *bool
+	listWithFiltersGroups       []Group
+	listWithFiltersGroupsByPage map[int][]Group
+	listWithFiltersResult       *pagination.PaginationResult
+	listWithFiltersErr          error
 }
 
 func (s *groupRepoStubForAdmin) Create(_ context.Context, g *Group) error {
@@ -110,16 +111,20 @@ func (s *groupRepoStubForAdmin) ListWithFilters(_ context.Context, params pagina
 		return nil, nil, s.listWithFiltersErr
 	}
 
+	groups := s.listWithFiltersGroups
+	if s.listWithFiltersGroupsByPage != nil {
+		groups = s.listWithFiltersGroupsByPage[params.Page]
+	}
 	result := s.listWithFiltersResult
 	if result == nil {
 		result = &pagination.PaginationResult{
-			Total:    int64(len(s.listWithFiltersGroups)),
+			Total:    int64(len(groups)),
 			Page:     params.Page,
 			PageSize: params.PageSize,
 		}
 	}
 
-	return s.listWithFiltersGroups, result, nil
+	return groups, result, nil
 }
 
 func (s *groupRepoStubForAdmin) ListBindableWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]Group, *pagination.PaginationResult, error) {
@@ -292,6 +297,25 @@ func TestAdminServiceSimpleModeListUsesRepositoryFilteredTotal(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	require.EqualValues(t, 11, total)
+}
+
+func TestAdminServiceGetAllGroupsIncludingInactiveFetchesAllPages(t *testing.T) {
+	firstPage := make([]Group, 1000)
+	for i := range firstPage {
+		firstPage[i] = Group{ID: int64(i + 1), Platform: PlatformOpenAI}
+	}
+	repo := &groupRepoStubForAdmin{
+		listWithFiltersGroupsByPage: map[int][]Group{1: firstPage, 2: {{ID: 1001, Platform: PlatformGemini}}},
+		listWithFiltersResult:       &pagination.PaginationResult{Total: 1001, PageSize: 1000},
+	}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	groups, err := svc.GetAllGroupsIncludingInactive(context.Background())
+	require.NoError(t, err)
+	require.Len(t, groups, 1001)
+	require.Equal(t, int64(1001), groups[len(groups)-1].ID)
+	require.Equal(t, 2, repo.listWithFiltersCalls)
+	require.Equal(t, 2, repo.listWithFiltersParams.Page)
 }
 
 func (s *groupRepoStubForAdmin) ListActive(_ context.Context) ([]Group, error) {

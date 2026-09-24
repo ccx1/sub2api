@@ -133,6 +133,7 @@
               </label>
             </div>
           </section>
+          <CodexTicketIPProtection v-model="protection" :disabled="saving" />
           <section class="card space-y-4 p-5" data-testid="rejection-retry-settings" aria-labelledby="ticket-rejection-retry-title">
             <h2 id="ticket-rejection-retry-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.rejectionRetryTitle') }}</h2>
             <p id="ticket-rejection-retry-hint" class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.rejectionRetryHint') }}</p>
@@ -177,6 +178,7 @@
           <div class="flex justify-end"><button type="submit" class="btn btn-primary" data-testid="save-settings" :disabled="saving || !!validationError">{{ t(saving ? 'codexTicketSettings.saving' : 'codexTicketSettings.save') }}</button></div>
         </footer>
       </form>
+      <CodexModelQuality :models="savedModels" />
     </div>
   </AppLayout>
 </template>
@@ -187,6 +189,8 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
+import CodexTicketIPProtection from '@/components/admin/CodexTicketIPProtection.vue'
+import CodexModelQuality from '@/components/admin/CodexModelQuality.vue'
 import { getCodexTicketSettings, saveCodexTicketSettings, type CodexTicketSettings } from '@/api/admin/codexTicketSettings'
 import { defaultTicketProtection, readTicketProtection, splitTicketList, ticketCookieFields, ticketNumericGroups, ticketProtectionFields, ticketRejectionRetryFields, validateTicketSettings } from '@/components/admin/codexTicketSettingsForm'
 import { readTicketTierSelections, writeTicketTierSelections, ticketTierOptions, ticketModelOptions, type TicketTierRow } from '@/components/admin/codexTicketSelections'

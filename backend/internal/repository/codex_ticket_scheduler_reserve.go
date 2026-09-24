@@ -61,7 +61,7 @@ if q.action == 'reserve' then
   local harvestPin=q.pool and eligiblepin(role,q.candidates) or nil
   if harvestPin then
     local ok,half,_,why=guard(harvestPin,true)
-    if (not ok and why=='proxy_silent') or (ok and half) then harvestPin=nil end
+    if (not ok and (why=='proxy_silent' or why=='ip_cooling' or why=='ip_disabled')) or (ok and half) then harvestPin=nil end
   end
   if #q.candidates == 0 then return waiting('pool_empty', 0) end
   if not a.active then

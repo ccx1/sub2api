@@ -370,3 +370,14 @@ func TestOpenAIWSConnPoolUsesRoutingHintAsSoftDialAffinity(t *testing.T) {
 
 	require.Equal(t, 4, dialer.DialCount())
 }
+
+func TestOpenAIWSRouteFingerprint(t *testing.T) {
+	first := openAIWSRouteFingerprint(http.Header{"Set-Cookie": {"__oailb=route-a; Path=/", "__cflb=edge-a; Path=/"}})
+	second := openAIWSRouteFingerprint(http.Header{"Set-Cookie": {"__cflb=edge-a; Secure", "__oailb=route-a; HttpOnly"}})
+	other := openAIWSRouteFingerprint(http.Header{"Set-Cookie": {"__oailb=route-b; Path=/"}})
+	require.NotEmpty(t, first)
+	require.Equal(t, first, second)
+	require.NotEqual(t, first, other)
+	require.NotContains(t, first, "route-a")
+	require.Empty(t, openAIWSRouteFingerprint(http.Header{"Server": {"cloudflare"}, "Via": {"proxy"}}))
+}

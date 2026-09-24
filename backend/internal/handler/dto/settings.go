@@ -214,6 +214,7 @@ type SystemSettings struct {
 	EnableClientDatelineNormalization       bool   `json:"enable_client_dateline_normalization"`
 	AntigravityUserAgentVersion             string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                    string `json:"openai_codex_user_agent"`
+	OpenAIRequestTimezone                   string `json:"openai_request_timezone"`
 	OpenAICodexClientVersion                string `json:"openai_codex_client_version"`
 	OpenAICodexClientVersionSynced          string `json:"openai_codex_client_version_synced"`
 	OpenAICodexVersionAutoSyncEnabled       bool   `json:"openai_codex_version_auto_sync_enabled"`
@@ -341,8 +342,9 @@ type SystemSettings struct {
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
-	CyberSessionBlockEnabled    bool `json:"cyber_session_block_enabled"`
-	CyberSessionBlockTTLSeconds int  `json:"cyber_session_block_ttl_seconds"`
+	CyberSessionBlockEnabled          bool `json:"cyber_session_block_enabled"`
+	CyberSessionBlockTTLSeconds       int  `json:"cyber_session_block_ttl_seconds"`
+	CyberSessionIdentityStrictEnabled bool `json:"cyber_session_identity_strict_enabled"`
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled bool `json:"affiliate_enabled"`

@@ -293,6 +293,10 @@ func (s *OpenAIQuotaService) cacheResetCreditsSnapshot(ctx context.Context, acco
 		updates = make(map[string]any, 1)
 	}
 	updates[openaiQuotaResetCreditsKey] = credits
+	if _, hasUsage := updates["codex_usage_updated_at"]; hasUsage {
+		unlock := lockOpenAICodexSnapshotWrite(accountID)
+		defer unlock()
+	}
 	if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
 		return infraerrors.New(
 			http.StatusInternalServerError,

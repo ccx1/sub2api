@@ -64,6 +64,7 @@ type cachedGatewayForwardingSettings struct {
 	anthropicCacheTTL1hInjection     bool
 	rewriteMessageCacheControl       bool
 	clientDatelineNormalization      bool
+	requestTimezone                  string
 	expiresAt                        int64 // unix nano
 }
 
@@ -156,6 +157,7 @@ type cachedCodexRestrictionPolicy struct {
 // GetCyberSessionBlockRuntime 在网关请求热路径上被调用，避免每次访问 DB。
 type cachedCyberSessionBlockRuntime struct {
 	enabled   bool
+	strict    bool
 	ttl       time.Duration
 	expiresAt int64 // unix nano
 }
@@ -191,6 +193,7 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 
 		enabledVal, enabledErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionBlockEnabled)
 		ttlVal, ttlErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionBlockTTLSeconds)
+		strictVal, strictErr := s.settingRepo.GetValue(dbCtx, SettingKeyCyberSessionIdentityStrictEnabled)
 
 		if enabledErr != nil && !errors.Is(enabledErr, ErrSettingNotFound) {
 			slog.Warn("failed to get cyber_session_block_enabled setting", "error", enabledErr)
@@ -211,9 +214,11 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 				ttl = time.Duration(n) * time.Second
 			}
 		}
+		strict := strictErr == nil && strings.TrimSpace(strictVal) == "true"
 
 		entry := &cachedCyberSessionBlockRuntime{
 			enabled:   enabled,
+			strict:    strict,
 			ttl:       ttl,
 			expiresAt: time.Now().Add(cyberSessionBlockRuntimeCacheTTL).UnixNano(),
 		}
@@ -224,6 +229,22 @@ func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool,
 		return entry.enabled, entry.ttl
 	}
 	return false, time.Hour
+}
+
+// GetCyberSessionIdentityStrictEnabled 返回是否要求请求携带明确会话身份。
+// 该开关仅在 Cyber 会话屏蔽开启时由网关使用，默认关闭以兼容旧客户端。
+func (s *SettingService) GetCyberSessionIdentityStrictEnabled(ctx context.Context) bool {
+	if s == nil {
+		return false
+	}
+	if cached, ok := s.cyberSessionBlockRuntimeCache.Load().(*cachedCyberSessionBlockRuntime); ok && cached != nil && time.Now().UnixNano() < cached.expiresAt {
+		return cached.strict
+	}
+	_, _ = s.GetCyberSessionBlockRuntime(ctx)
+	if cached, ok := s.cyberSessionBlockRuntimeCache.Load().(*cachedCyberSessionBlockRuntime); ok && cached != nil {
+		return cached.strict
+	}
+	return false
 }
 
 // GetAntigravityUserAgentVersion 返回 Antigravity 上游请求使用的版本号。
@@ -1037,6 +1058,7 @@ type gatewayForwardingSettingsResult struct {
 	openAITTFTMode                                                                        string
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	clientDatelineNormalization                                                           bool
+	requestTimezone                                                                       string
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
 
@@ -1054,6 +1076,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 				clientDatelineNormalization:      cached.clientDatelineNormalization,
+				requestTimezone:                  cached.requestTimezone,
 			}
 		}
 	}
@@ -1071,6 +1094,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 					clientDatelineNormalization:      cached.clientDatelineNormalization,
+					requestTimezone:                  cached.requestTimezone,
 				}, nil
 			}
 		}
@@ -1087,6 +1111,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
 			SettingKeyEnableClientDatelineNormalization,
+			SettingKeyOpenAIRequestTimezone,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -1125,6 +1150,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if v, ok := values[SettingKeyEnableClientDatelineNormalization]; ok && v != "" {
 			clientDatelineNormalization = v == "true"
 		}
+		requestTimezone, _ := NormalizeOpenAIRequestTimezone(values[SettingKeyOpenAIRequestTimezone])
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 			openAITTFTMode:                   ttftMode,
 			fingerprintUnification:           fp,
@@ -1136,6 +1162,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
+			requestTimezone:                  requestTimezone,
 			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -1149,6 +1176,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			cacheTTL1h:                       cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
+			requestTimezone:                  requestTimezone,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
@@ -1168,6 +1196,12 @@ func (s *SettingService) GetOpenAITTFTMode(ctx context.Context) string {
 func (s *SettingService) GetGatewayForwardingSettings(ctx context.Context) (fingerprintUnification, metadataPassthrough, cchSigning bool) {
 	result := s.getGatewayForwardingSettingsCached(ctx)
 	return result.fp, result.mp, result.cch
+}
+
+// GetOpenAIRequestTimezone returns the configured explicit timezone override.
+// Empty means outbound request metadata is left unchanged.
+func (s *SettingService) GetOpenAIRequestTimezone(ctx context.Context) string {
+	return s.getGatewayForwardingSettingsCached(ctx).requestTimezone
 }
 
 // IsAnthropicCacheTTL1hInjectionEnabled 检查是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl。

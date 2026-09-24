@@ -26,7 +26,7 @@ vi.mock('vue-i18n', async () => ({
 async function render(withImportDialog = false, initialTab = 'myAccounts') {
   const wrapper = mount(SharedPoolView, { global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' }, SharedPoolCatalog: true, SharedAccountDialog: true, SharedAccountImportDialog: !withImportDialog,
-    BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+    BaseDialog: { props: ['show'], template: '<div v-if="show" role="dialog"><slot /><slot name="footer" /></div>' },
     SharedAccountCard: true, SharedAccountTestDialog: true, SharedEarningsTable: true, Pagination: true,
     ConfirmDialog: { props: ['show', 'title'], template: '<button v-if="show" data-test="confirm" @click="$emit(\'confirm\')">{{ title }}</button>' }
   } } })
@@ -57,11 +57,26 @@ describe('shared earnings transfer', () => {
     autoTransferSettings.mockRejectedValueOnce(new Error('Settings offline'))
     const wrapper = await render()
     await flushPromises()
-    expect(wrapper.getComponent(SharedAutoTransferSettings).text()).toContain('sharedPool.autoTransferLoadFailed')
+    expect(wrapper.getComponent(SharedAutoTransferSettings).text()).toContain('sharedPool.autoTransferStatusUnavailable')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.findAll('button').find(button => button.text() === 'sharedPool.transfer')!.attributes('disabled')).toBeUndefined()
     expect(wrapper.findAll('button').find(button => button.text() === 'sharedPool.create')!.attributes('disabled')).toBeUndefined()
     expect(wrapper.text()).toContain('$10.0000')
     expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps automatic transfer settings compact beside manual transfer until opened', async () => {
+    const wrapper = await render()
+    await flushPromises()
+    const settingsButton = wrapper.get('[data-test="auto-transfer-settings"]')
+    const manualButton = wrapper.findAll('button').find(button => button.text() === 'sharedPool.transfer')!
+    expect(manualButton.element.parentElement?.contains(settingsButton.element)).toBe(true)
+    expect(wrapper.find('#shared-auto-transfer-form').exists()).toBe(false)
+    await settingsButton.trigger('click')
+    expect(wrapper.get('[role="dialog"]').find('#shared-auto-transfer-form').exists()).toBe(true)
+    expect(manualButton.attributes('disabled')).toBeUndefined()
+    expect(transfer).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

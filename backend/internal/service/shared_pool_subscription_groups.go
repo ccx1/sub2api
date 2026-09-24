@@ -86,6 +86,13 @@ func validSharedAssignmentGroup(g *Group, platform string) bool {
 		g.IsActive() && !g.IsExclusive && g.SubscriptionType == SubscriptionTypeStandard
 }
 
+// 订阅档位路由可在账号所有者明确授权调度后指向专属分组；默认分组仍使用
+// validSharedAssignmentGroup 的严格公开分组规则。
+func validSharedSubscriptionGroup(g *Group, platform string) bool {
+	return g != nil && sharedPlatformSupported(platform) && g.Platform == platform &&
+		g.IsActive() && g.SubscriptionType == SubscriptionTypeStandard
+}
+
 func (s *SharedPoolService) sharedAssignmentGroup(ctx context.Context, a *Account, id int64) (*Group, error) {
 	if id <= 0 {
 		return nil, nil
@@ -103,6 +110,25 @@ func (s *SharedPoolService) sharedAssignmentGroup(ctx context.Context, a *Accoun
 	return g, nil
 }
 
+func (s *SharedPoolService) sharedSubscriptionAssignmentGroup(ctx context.Context, a *Account, id int64) (*Group, error) {
+	if id <= 0 {
+		return nil, nil
+	}
+	g, err := s.groups.GetByID(ctx, id)
+	if errors.Is(err, ErrGroupNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !validSharedSubscriptionGroup(g, a.Platform) ||
+		(!SharedPoolDispatchConsented(a) && (g.IsExclusive || !g.IsSharedPool)) ||
+		(g.RequireOAuthOnly && a.Type == AccountTypeAPIKey) {
+		return nil, nil
+	}
+	return g, nil
+}
+
 func (s *SharedPoolService) initialSharedGroups(ctx context.Context, cfg *SharedPoolSettings, a *Account) ([]int64, error) {
 	if tier := sharedAccountSubscriptionTier(a); tier != "" {
 		ids := make([]int64, 0, len(cfg.SubscriptionGroupIDs[a.Platform][tier]))
@@ -111,7 +137,7 @@ func (s *SharedPoolService) initialSharedGroups(ctx context.Context, cfg *Shared
 			if seen[id] {
 				continue
 			}
-			g, err := s.sharedAssignmentGroup(ctx, a, id)
+			g, err := s.sharedSubscriptionAssignmentGroup(ctx, a, id)
 			if err != nil {
 				return nil, err
 			}
@@ -181,7 +207,7 @@ func (s *SharedPoolService) validateSharedGroupSettings(ctx context.Context, cfg
 			}
 			for _, id := range normalizedIDs {
 				g, err := s.groups.GetByID(ctx, id)
-				if err != nil || !validSharedAssignmentGroup(g, platform) {
+				if err != nil || !validSharedSubscriptionGroup(g, platform) {
 					return infraerrors.BadRequest("INVALID_SHARED_SUBSCRIPTION_GROUP", "订阅档位无效、重复或目标共享分组不可用")
 				}
 			}

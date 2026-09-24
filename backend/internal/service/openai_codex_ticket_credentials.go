@@ -39,6 +39,10 @@ func (t *openAICodexTicket) credentialIdentity() string {
 }
 
 func (t *openAICodexTicket) cookiesForURL(u *url.URL) []*http.Cookie {
+	return filterCodexCookies(t.rawCookiesForURL(u), t.CookieMode)
+}
+
+func (t *openAICodexTicket) rawCookiesForURL(u *url.URL) []*http.Cookie {
 	if !t.usesCookies() || u == nil || u.Hostname() != "chatgpt.com" || u.Scheme != "https" && u.Scheme != "wss" {
 		return nil
 	}
@@ -61,6 +65,9 @@ func (t *openAICodexTicket) cookieUsable(now time.Time, cfg config.OpenAICodexTi
 		len(t.Cookies) == 0 || len(t.Cookies) > 32 || !t.Verified && !t.VerificationSkipped {
 		return false
 	}
+	if !t.cookieProjectionVerified() {
+		return false
+	}
 	if t.CredentialMode == config.CodexTicketCredentialCookieState && !codexTicketAutoStateShape(t.State) {
 		return false
 	}
@@ -70,7 +77,7 @@ func (t *openAICodexTicket) cookieUsable(now time.Time, cfg config.OpenAICodexTi
 		}
 	}
 	u, _ := url.Parse(chatgptCodexURL)
-	return len(t.cookiesForURL(u)) == len(t.Cookies)
+	return len(t.rawCookiesForURL(u)) == len(t.Cookies)
 }
 
 func (t *openAICodexTicket) effectiveExpiresAt(cfg config.OpenAICodexTicketConfig) time.Time {
@@ -110,6 +117,9 @@ func (t *openAICodexTicket) matchesHeaders(h http.Header) bool {
 	if !t.usesCookies() {
 		return h.Get(openAICodexTurnStateHeader) == t.State
 	}
+	if len(t.Cookies) == 0 || !t.cookieProjectionVerified() {
+		return false
+	}
 	if t.CredentialMode == config.CodexTicketCredentialCookie && h.Get(openAICodexTurnStateHeader) != "" {
 		return false
 	}
@@ -118,13 +128,17 @@ func (t *openAICodexTicket) matchesHeaders(h http.Header) bool {
 	}
 	request := &http.Request{Header: h}
 	actual := request.Cookies()
-	if len(actual) != len(t.Cookies) {
+	// 核对握手实际发送的快照，不因观察响应时的时钟变化删减旧凭据。
+	expected := filterCodexCookies(t.Cookies, t.CookieMode)
+	if len(actual) != len(expected) {
 		return false
 	}
-	for _, expected := range t.Cookies {
+	matched := make([]bool, len(actual))
+	for _, expectedCookie := range expected {
 		found := false
-		for _, cookie := range actual {
-			if expected != nil && cookie.Name == expected.Name && cookie.Value == expected.Value {
+		for index, cookie := range actual {
+			if !matched[index] && expectedCookie != nil && cookie.Name == expectedCookie.Name && cookie.Value == expectedCookie.Value {
+				matched[index] = true
 				found = true
 				break
 			}
@@ -133,7 +147,7 @@ func (t *openAICodexTicket) matchesHeaders(h http.Header) bool {
 			return false
 		}
 	}
-	return len(actual) > 0
+	return true
 }
 
 func (t *openAICodexTicket) clearHeaders(h http.Header) {

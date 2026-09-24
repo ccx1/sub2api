@@ -128,6 +128,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+		ctx = withCodexRequestStrategyConnectionScope(ctx, string(ingressMode))
 		switch ingressMode {
 		case OpenAIWSIngressModePassthrough:
 			if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
@@ -240,6 +241,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
 		eventType := strings.TrimSpace(values[0].String())
 		normalized := trimmed
+		strategyScope := codexRequestStrategyConnectionScope(ctx)
+		if strategyScope == "" {
+			strategyScope = CodexRequestStrategyScopeDedicated
+		}
+		if sanitized, changed, policyErr := s.applyCodexRequestBodyPolicyForScope(ctx, normalized, account, strategyScope); policyErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", policyErr)
+		} else if changed {
+			normalized = sanitized
+			values = gjson.GetManyBytes(normalized, "type", "model", "prompt_cache_key", "previous_response_id")
+			eventType = strings.TrimSpace(values[0].String())
+		}
 		switch eventType {
 		case "":
 			eventType = "response.create"
@@ -524,8 +536,26 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if err != nil {
 		return err
 	}
-
 	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
+	strategyApplied := false
+	if !useHTTPBridge {
+		strategyMessage, applied, strategyErr := s.applyCodexRequestStrategyRaw(ctx, firstPayload.payloadRaw, account, token)
+		if strategyErr != nil {
+			return wrapOpenAIWSFallback("request_strategy", strategyErr)
+		}
+		if applied {
+			originalRawForHash := firstPayload.rawForHash
+			firstPayload, err = parseClientPayload(1, strategyMessage)
+			if err != nil {
+				return err
+			}
+			// Keep the session identity derived from the client payload. The
+			// injected previous_response_id is an upstream-only continuation hint
+			// and must not move the ingress session to a new state-store key.
+			firstPayload.rawForHash = originalRawForHash
+			strategyApplied = true
+		}
+	}
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
@@ -813,6 +843,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}(),
 		ForceNewConn: false,
 	}
+	strategyScope := codexRequestStrategyConnectionScope(ctx)
+	if strategyScope == "" {
+		strategyScope = string(ingressMode)
+	}
+	s.applyCodexRouteManagementPolicy(ctx, strategyScope, &baseAcquireReq)
+	defer func() {
+		if errors.Is(returnErr, errOpenAIWSRouteAffinityUnavailable) {
+			model := canonicalOpenAIAccountSchedulingModel(account, ingressSessionOriginalModel)
+			s.pauseOpenAIModelForRouteAffinity(ctx, account, model, baseAcquireReq.RouteFailureCooldownSeconds)
+			returnErr = NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater,
+				"当前模型的可用路由暂时不可用，请稍后重试", returnErr)
+		}
+	}()
 	pool := s.getOpenAIWSConnPool()
 	if pool == nil {
 		return errors.New("openai ws conn pool is nil")
@@ -879,7 +922,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		req.ForcePreferredConn = forcePreferredConn
 		// dedicated 模式下每次获取均新建连接，避免跨会话复用残留上下文；
 		// 上游读写失败后的重试同样新建，避免再拿到同批陈旧的空闲连接。
-		req.ForceNewConn = dedicatedMode || forceNewConn
+		req.ForceNewConn = dedicatedMode || forceNewConn || (strategyApplied && turn == 1)
 		// baseAcquireReq 已在本轮进入前准备好票据头和 immutable receipt。
 		// 这里不能再次按当前开关/模型读取票据，否则首握手的 header 与
 		// receipt 会来自两个不同时间点。需要刷新时由外层本轮准备阶段统一完成。
@@ -934,6 +977,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					acquireErr,
 				)
 			}
+			if errors.Is(acquireErr, errOpenAIWSRouteAffinityUnavailable) {
+				return nil, NewOpenAIWSClientCloseError(
+					coderws.StatusTryAgainLater,
+					"当前模型的可用路由暂时不可用，请稍后重试",
+					acquireErr,
+				)
+			}
 			if errors.Is(acquireErr, context.DeadlineExceeded) || errors.Is(acquireErr, errOpenAIWSConnQueueFull) {
 				return nil, NewOpenAIWSClientCloseError(
 					coderws.StatusTryAgainLater,
@@ -946,7 +996,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		connID := strings.TrimSpace(lease.ConnID())
 		activeTicketReceipt = confirmedOpenAICodexTicketWSReceipt(ticketReceipt, lease)
 		ticketObservationDisabled = false
-		activeTicketReceipt.observeHandshake(ctx, s, lease.HandshakeHeaders())
 		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
 			turnState = handshakeTurnState
 			if stateStore != nil && sessionHash != "" {
@@ -995,7 +1044,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if err := validateMode1StagedRequest(c, account, payload); err != nil {
 			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 		}
-		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+		wirePayload, rewriteErr := s.rewriteOpenAIRequestTimezonePayload(ctx, payload)
+		if rewriteErr != nil {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, rewriteErr.Error(), rewriteErr)
+		}
+		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1010,7 +1063,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				account.ID,
 				turn,
 				truncateOpenAIWSLogValue(lease.ConnID(), openAIWSIDValueMaxLen),
-				payloadBytes,
+				len(wirePayload),
 			)
 		}
 

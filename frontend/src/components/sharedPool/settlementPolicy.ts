@@ -26,5 +26,8 @@ export function hasSettlementPolicy(config: SharedSettlementPolicy) {
   return validSettlementMultiplier(config.settlement_multiplier)
 }
 export const isDispatchGroup = (group: AdminGroup) => group.status === 'active' && group.subscription_type === 'standard' && !group.is_exclusive && group.rate_multiplier > 0
+// 订阅档位路由可在账号明确授权调度后指向专属分组；默认分组仍保持公开规则。
+export const isSubscriptionAssignmentGroup = (group: AdminGroup) => group.status === 'active'
+  && group.subscription_type === 'standard' && group.rate_multiplier > 0
 export const isSharedManualAssignmentGroup = (group: AdminGroup) => group.status === 'active'
   && (group.subscription_type === 'standard' || group.subscription_type === 'subscription')

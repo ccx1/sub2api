@@ -32,7 +32,10 @@ type openAICodexTicketProbeInput struct {
 	// CookieCandidate receives a cloned jar when the upstream response sends a
 	// changed Cookie. The candidate is intentionally separate from CookieJar:
 	// callers must business-verify it before replacing the published snapshot.
-	CookieCandidate      *openAICodexTicketCookieCandidate
+	CookieCandidate *openAICodexTicketCookieCandidate
+	// ResponseID receives the completed response.id for optional request
+	// strategies that validate an HTTP continuation before opening WS.
+	ResponseID           *string
 	BusinessVerification bool
 	// BusinessCredentialSnapshot freezes the credentials for a multi-round
 	// quality probe. It is never persisted and is replaced only between probe
@@ -42,6 +45,7 @@ type openAICodexTicketProbeInput struct {
 	SkipSchedulerAdmission     bool
 	QualityVerification        bool
 	FreezeCredentials          bool
+	BackgroundQuality          bool
 	HarvestProxy               *openAICodexTicketProxy
 	Revalidation               bool
 }
@@ -72,7 +76,12 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	// 必须保留原 jar，并把变化写入候选 jar，等待下一次复验后再发布。
 	cookieChanged := false
 	if in.FreezeCredentials {
-		// 连续探测只验证采集时的凭据；响应中的新 Cookie 留待下一次采集。
+		// 过滤投影的响应仍进入原票候选队列，不改变本次验证所用凭据。
+		if sentCookies != nil && in.Config != nil && normalizeCodexCookieMode(sentCookies.CookieMode) != CodexCookiePreserve {
+			s.captureCodexTicketCookieCandidate(&openAICodexTicketReceipt{
+				account: in.Account, ticket: *sentCookies, config: *in.Config,
+			}, req, resp)
+		}
 	} else if sentCookies == nil {
 		storeOpenAICodexTicketCookies(in.CookieJar, req, resp)
 	} else if candidate, changed := candidateOpenAICodexTicketCookies(in.CookieJar, req, resp,
@@ -113,7 +122,17 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	if !in.FreezeCredentials && sentCookies != nil && sentCookies.cookieResponseChanged(originalHeaders) && !cookieChanged {
 		return "", resp.StatusCode, &codexTicketProbeResponseError{reason: "ticket_rejected"}
 	}
+	if in.ResponseID != nil {
+		*in.ResponseID = strings.TrimSpace(diagnosticResponseID(diagnostic))
+	}
 	return extractOpenAICodexTurnState(originalHeaders), resp.StatusCode, nil
+}
+
+func diagnosticResponseID(capture *codexTicketExchangeCapture) string {
+	if capture == nil || capture.responseID == nil {
+		return ""
+	}
+	return strings.TrimSpace(*capture.responseID)
 }
 
 func (s *OpenAIGatewayService) buildOpenAICodexTicketProbeRequest(ctx context.Context, in openAICodexTicketProbeInput) (*http.Request, error) {
@@ -186,6 +205,9 @@ func (s *OpenAIGatewayService) doOpenAICodexTicketProbe(req *http.Request, in op
 	}
 	// 等待代理或调度资源期间账号可能已被停用，发送前读取最新状态。
 	if (in.CheckControls || in.FreezeCredentials) && !s.codexTicketAccountCurrentBeforePublish(req.Context(), in) {
+		return nil, errOpenAICodexTicketControlsChanged
+	}
+	if (in.CheckControls || in.FreezeCredentials) && s.codexModelQualityCircuitPaused(req.Context(), in.Account, in.Model) {
 		return nil, errOpenAICodexTicketControlsChanged
 	}
 	if in.Attempt != nil {

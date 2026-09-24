@@ -30,7 +30,7 @@ let wrapper: Page | undefined
 const render = () => {
   wrapper = mount(CodexTicketSettingsView, {
     attachTo: document.body,
-    global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, transition: true } }
+    global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, transition: true, CodexModelQuality: true } }
   })
   return wrapper
 }

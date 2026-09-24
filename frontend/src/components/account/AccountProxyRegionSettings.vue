@@ -16,6 +16,13 @@
           <option v-for="country in countries" :key="country" :value="country">{{ countryLabel(country) }}</option>
         </select>
       </label>
+      <label v-if="modelValue.mode === 'billing' && fallbackCountry !== undefined" class="block">
+        <span class="input-label">{{ t('admin.accountImportSettings.regionFallbackCountry') }}</span>
+        <select :value="fallbackCountry" class="input w-full" data-testid="proxy-region-fallback-country" :disabled="disabled" @change="setFallbackCountry">
+          <option value="">{{ t('admin.accountImportSettings.regionFallbackCountryOptional') }}</option>
+          <option v-for="country in countries" :key="country" :value="country">{{ countryLabel(country) }}</option>
+        </select>
+      </label>
       <p v-if="resolution.country" class="input-hint" data-testid="proxy-region-resolution">
         {{ t(sourceKey, { country: countryLabel(resolution.country), currency: resolution.currency }) }}
       </p>
@@ -45,18 +52,19 @@ const props = defineProps<{
   randomEnabled?: boolean
   emptyPoolPolicy?: string
   billingPending?: boolean
+  fallbackCountry?: string
   disabled?: boolean
 }>()
-const emit = defineEmits<{ 'update:modelValue': [value: AccountProxyRegionSelection] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: AccountProxyRegionSelection]; 'update:fallbackCountry': [value: string] }>()
 const { t, locale } = useI18n()
 const modes: AccountProxyRegionMode[] = ['off', 'billing', 'manual']
-const resolution = computed(() => resolveAccountProxyRegion(props.modelValue, props.credentials))
+const resolution = computed(() => resolveAccountProxyRegion(props.modelValue, props.credentials, props.fallbackCountry))
 const validationError = computed(() => accountProxyRegionValidationError(props.modelValue))
-const countries = computed(() => [...new Set(['US', 'DE', 'FR', ...Object.values(BILLING_CURRENCY_COUNTRIES), props.modelValue.country, ...props.proxies.map(proxy => normalizeProxyRegionCountry(proxy.country_code))])].filter(Boolean).sort())
+const countries = computed(() => [...new Set(['US', 'DE', 'FR', ...Object.values(BILLING_CURRENCY_COUNTRIES), props.modelValue.country, normalizeProxyRegionCountry(props.fallbackCountry), ...props.proxies.map(proxy => normalizeProxyRegionCountry(proxy.country_code))])].filter(Boolean).sort())
 const matchingCount = computed(() => props.proxies.filter(proxy => normalizeProxyRegionCountry(proxy.country_code) === resolution.value.country).length)
 const fixedMismatch = computed(() => !props.randomEnabled && !!props.proxyId && !!resolution.value.country &&
   normalizeProxyRegionCountry(props.proxies.find(proxy => proxy.id === props.proxyId)?.country_code) !== resolution.value.country)
-const sourceKey = computed(() => `admin.accounts.proxyRegion.${resolution.value.source === 'price_country' ? 'sourceCountry' : resolution.value.source === 'billing_currency' ? 'sourceCurrency' : 'sourceManual'}`)
+const sourceKey = computed(() => `admin.accounts.proxyRegion.${({ price_country: 'sourceCountry', billing_currency: 'sourceCurrency', fallback_country: 'sourceFallback' } as Record<string, string>)[resolution.value.source] || 'sourceManual'}`)
 
 function countryLabel(country: string): string {
   const name = new Intl.DisplayNames([locale?.value || 'zh'], { type: 'region' }).of(country)
@@ -68,5 +76,8 @@ function setMode(event: Event) {
 }
 function setCountry(event: Event) {
   if (!props.disabled) emit('update:modelValue', { ...props.modelValue, country: (event.target as HTMLSelectElement).value })
+}
+function setFallbackCountry(event: Event) {
+  if (!props.disabled) emit('update:fallbackCountry', (event.target as HTMLSelectElement).value)
 }
 </script>

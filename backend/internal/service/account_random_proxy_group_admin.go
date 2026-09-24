@@ -9,7 +9,8 @@ func mergeRandomProxyRoutingExtra(extra, current map[string]any) map[string]any 
 	merged := maps.Clone(extra)
 	for _, key := range []string{ProxyModeExtraKey, RandomProxyPoolScopeExtraKey, RandomProxyPoolIDsExtraKey,
 		RandomProxyGroupIDExtraKey, RandomProxyEmptyPoolPolicyExtraKey, RandomProxyMaxReuseMinutesExtraKey,
-		ProxyRegionModeExtraKey, ProxyRegionCountryExtraKey} {
+		RandomProxyRegionFallbackExtraKey,
+		ProxyRegionModeExtraKey, ProxyRegionCountryExtraKey, ProxyRegionFallbackCountryExtraKey} {
 		if _, supplied := extra[key]; supplied {
 			continue
 		}
@@ -24,7 +25,7 @@ func mergeRandomProxyRoutingExtra(extra, current map[string]any) map[string]any 
 }
 
 func hasRandomProxyGroupUpdates(extra map[string]any) bool {
-	for _, key := range []string{ProxyModeExtraKey, RandomProxyPoolScopeExtraKey, RandomProxyGroupIDExtraKey, ProxyRegionModeExtraKey, ProxyRegionCountryExtraKey} {
+	for _, key := range []string{ProxyModeExtraKey, RandomProxyPoolScopeExtraKey, RandomProxyGroupIDExtraKey, RandomProxyRegionFallbackExtraKey, ProxyRegionModeExtraKey, ProxyRegionCountryExtraKey, ProxyRegionFallbackCountryExtraKey} {
 		if _, exists := extra[key]; exists {
 			return true
 		}
@@ -41,7 +42,7 @@ func explicitRandomProxyRoutingPatch(extra, requested map[string]any) map[string
 		extra = make(map[string]any)
 	}
 	for _, key := range []string{ProxyModeExtraKey, RandomProxyEmptyPoolPolicyExtraKey, RandomProxyGroupIDExtraKey,
-		RandomProxyPoolScopeExtraKey, RandomProxyPoolIDsExtraKey} {
+		RandomProxyPoolScopeExtraKey, RandomProxyPoolIDsExtraKey, RandomProxyRegionFallbackExtraKey} {
 		extra[key] = nil
 	}
 	return extra

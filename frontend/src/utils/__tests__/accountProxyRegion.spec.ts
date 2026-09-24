@@ -26,6 +26,19 @@ describe('account proxy region', () => {
     expect(resolveAccountProxyRegion({ mode: 'billing', country: '' }, { billing_currency }).country).toBe('')
   })
 
+  it.each(['USD', 'EUR', '', 'unknown'])('uses the saved fallback when %s cannot determine a country', billing_currency => {
+    expect(resolveAccountProxyRegion({ mode: 'billing', country: '' }, { billing_currency }, ' jp '))
+      .toEqual({ country: 'JP', currency: billing_currency.toUpperCase(), source: 'fallback_country' })
+  })
+
+  it('uses billing evidence before fallback and ignores fallback outside billing mode', () => {
+    expect(resolveAccountProxyRegion({ mode: 'billing', country: '' }, { price_country: 'PH', billing_currency: 'JPY' }, 'US').country).toBe('PH')
+    expect(resolveAccountProxyRegion({ mode: 'billing', country: '' }, { billing_currency: 'JPY' }, 'US').country).toBe('JP')
+    expect(resolveAccountProxyRegion({ mode: 'off', country: '' }, {}, 'JP').country).toBe('')
+    expect(resolveAccountProxyRegion({ mode: 'manual', country: 'PH' }, {}, 'JP').country).toBe('PH')
+    expect(resolveAccountProxyRegion({ mode: 'billing', country: '' }, {}, 'Japan').source).toBe('unknown')
+  })
+
   it('prioritizes price country and never writes billing evidence into extra', () => {
     expect(resolveAccountProxyRegion({ mode: 'billing', country: 'JP' }, { price_country: ' ph ', billing_currency: 'USD' }))
       .toEqual({ country: 'PH', currency: 'USD', source: 'price_country' })

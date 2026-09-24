@@ -38,7 +38,7 @@ describe('Proxy ImportDataModal', () => {
     errors: [{ kind: 'proxy', name: 'invalid proxy', message: 'invalid port' }]
   }
 
-  const mountWithFile = async () => {
+  const mountWithFile = async (content = '{}', readText = () => Promise.resolve(content)) => {
     const wrapper = mount(ImportDataModal, {
       props: { show: true },
       global: {
@@ -48,12 +48,63 @@ describe('Proxy ImportDataModal', () => {
       }
     })
     const input = wrapper.find('input[type="file"]')
-    const file = new File(['{}'], 'data.json', { type: 'application/json' })
-    Object.defineProperty(file, 'text', { value: () => Promise.resolve('{}') })
+    const file = new File([content], 'data.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: readText })
     Object.defineProperty(input.element, 'files', { value: [file] })
     await input.trigger('change')
     return wrapper
   }
+
+  it('applies the selected country to every proxy regardless of its original country', async () => {
+    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, proxy_failed: 0, errors: [] })
+    const proxies = [{ name: 'existing', country_code: 'US' }, { name: 'empty', country_code: '' }, { name: 'null', country_code: null }, { name: 'missing' }]
+    const wrapper = await mountWithFile(JSON.stringify({ proxies }))
+    await wrapper.get('[data-testid="import-proxy-country"]').setValue('JP')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(adminAPI.proxies.importData).toHaveBeenCalledWith({ data: { proxies: proxies.map(proxy => ({ ...proxy, country_code: 'JP' })) } })
+  })
+
+  it('preserves original country values when no import country is selected', async () => {
+    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, proxy_failed: 0, errors: [] })
+    const payload = { proxies: [{ country_code: 'US' }, { country_code: '' }, { country_code: null }, {}] }
+    const wrapper = await mountWithFile(JSON.stringify(payload))
+    expect(wrapper.text()).toContain('admin.proxies.dataImportCountryOptional')
+    expect(wrapper.text()).toContain('admin.proxies.dataImportCountryHint')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(adminAPI.proxies.importData).toHaveBeenCalledWith({ data: payload })
+  })
+
+  it('resets the country and selected file after closing and reopening', async () => {
+    const wrapper = await mountWithFile()
+    await wrapper.get('[data-testid="import-proxy-country"]').setValue('JP')
+    await wrapper.get('footer button[type="button"]').trigger('click')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="import-proxy-country"]').element.value).toBe('')
+    await wrapper.find('form').trigger('submit')
+    expect(showError).toHaveBeenCalledWith('admin.proxies.dataImportSelectFile')
+    expect(adminAPI.proxies.importData).not.toHaveBeenCalled()
+  })
+
+  it('disables the country selector and prevents duplicate submission while reading the file', async () => {
+    let finishRead!: (text: string) => void
+    const pendingRead = new Promise<string>(resolve => { finishRead = resolve })
+    const readText = vi.fn(() => pendingRead)
+    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({ ...partialResult, proxy_failed: 0, errors: [] })
+    const wrapper = await mountWithFile('{}', readText)
+    await wrapper.get('[data-testid="import-proxy-country"]').setValue('JP')
+    await wrapper.find('form').trigger('submit')
+    await wrapper.find('form').trigger('submit')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="import-proxy-country"]').element.disabled).toBe(true)
+    expect(readText).toHaveBeenCalledOnce()
+    finishRead(JSON.stringify({ proxies: [{ country_code: '' }] }))
+    await flushPromises()
+    expect(adminAPI.proxies.importData).toHaveBeenCalledOnce()
+    expect(adminAPI.proxies.importData).toHaveBeenCalledWith({ data: { proxies: [{ country_code: 'JP' }] } })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="import-proxy-country"]').element.disabled).toBe(false)
+  })
 
   it.each([
     { name: 'created', proxy_created: 1, proxy_reused: 0 },
@@ -93,6 +144,26 @@ describe('Proxy ImportDataModal', () => {
     await wrapper.get('footer button[type="button"]').trigger('click')
 
     expect(wrapper.emitted('imported')).toHaveLength(1)
+  })
+
+  it('keeps reused proxy update errors visible even when the backend failure count is zero', async () => {
+    vi.mocked(adminAPI.proxies.importData).mockResolvedValue({
+      ...partialResult, proxy_created: 0, proxy_reused: 1, proxy_failed: 0,
+      errors: [{ kind: 'proxy', name: 'existing proxy', message: 'country update failed' }]
+    })
+    const wrapper = await mountWithFile()
+    await wrapper.get('[data-testid="import-proxy-country"]').setValue('JP')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.proxies.dataImportCompletedWithErrors')
+    expect(showSuccess).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('country update failed')
+    expect(wrapper.emitted('imported')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.get('footer button[type="button"]').trigger('click')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
   it('does not refresh when all imported proxies fail', async () => {

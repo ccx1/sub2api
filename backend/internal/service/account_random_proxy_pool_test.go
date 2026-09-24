@@ -92,6 +92,8 @@ func TestValidateRandomProxyPoolExtra(t *testing.T) {
 	require.NoError(t, ValidateRandomProxyPoolExtra(nil))
 	require.NoError(t, ValidateRandomProxyPoolExtra(map[string]any{RandomProxyPoolScopeExtraKey: RandomProxyPoolAll, RandomProxyPoolIDsExtraKey: []int64{}}))
 	require.NoError(t, ValidateRandomProxyPoolExtra(map[string]any{RandomProxyPoolScopeExtraKey: RandomProxyPoolSelected, RandomProxyPoolIDsExtraKey: []int64{7, 9}}))
+	require.NoError(t, ValidateRandomProxyPoolExtra(map[string]any{RandomProxyRegionFallbackExtraKey: RandomProxyRegionFallbackPool}))
+	require.Error(t, ValidateRandomProxyPoolExtra(map[string]any{RandomProxyRegionFallbackExtraKey: "global"}))
 }
 
 type randomProxyUsageStub struct{ records []RandomProxyUsage }

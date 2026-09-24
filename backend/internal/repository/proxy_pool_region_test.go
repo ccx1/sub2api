@@ -37,6 +37,44 @@ func TestProxyPoolRegionChangesReleasePreviousAffinity(t *testing.T) {
 	require.Zero(t, a.rdb.ZCard(ctx, proxyPoolLeaseKey("2")).Val())
 }
 
+func TestProxyPoolRegionFallbackUsesConfiguredPoolAndMarksSelection(t *testing.T) {
+	first, second := poolCandidate(1), poolCandidate(2)
+	first.proxy.UpdatedAt, second.proxy.UpdatedAt = time.Now(), time.Now()
+	a, _ := newProxyPoolAllocatorTest(t, 0, first, second)
+	ctx := context.Background()
+	for id, country := range map[int64]string{1: "JP", 2: "PH"} {
+		candidate := first.proxy
+		if id == 2 {
+			candidate = second.proxy
+		}
+		require.NoError(t, a.latencyCache.SetProxyLatency(ctx, id, &service.ProxyLatencyInfo{
+			Success: true, CountryCode: country, UpdatedAt: candidate.UpdatedAt,
+		}))
+	}
+	selected, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 42, CountryCode: "US", AllowCountryFallback: true})
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Contains(t, []int64{1, 2}, selected.ID)
+	require.True(t, selected.RegionFallback)
+}
+
+func TestProxyPoolRegionFallbackStaysWithinRestrictedPool(t *testing.T) {
+	a, _ := newProxyPoolAllocatorTest(t, 0, poolCandidate(1), poolCandidate(2))
+	ctx := context.Background()
+	for id, country := range map[int64]string{1: "JP", 2: "PH"} {
+		candidate := poolCandidate(id).proxy
+		candidate.UpdatedAt = time.Now()
+		require.NoError(t, a.latencyCache.SetProxyLatency(ctx, id, &service.ProxyLatencyInfo{
+			Success: true, CountryCode: country, UpdatedAt: candidate.UpdatedAt,
+		}))
+	}
+	selected, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: 43, CountryCode: "US", IDs: []int64{2}, Restricted: true, AllowCountryFallback: true})
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.EqualValues(t, 2, selected.ID)
+	require.True(t, selected.RegionFallback)
+}
+
 func TestProxyPoolRegionRejectsUnknownFailedAndStaleProbe(t *testing.T) {
 	for _, reason := range []string{"missing", "country_missing", "failed", "stale", "other_country"} {
 		t.Run(reason, func(t *testing.T) {
@@ -136,6 +174,11 @@ func TestProxyPoolRegionIntersectsAllGroupAndSelectedScopes(t *testing.T) {
 		account.Extra[service.RandomProxyPoolScopeExtraKey] = scope
 		account.Extra[service.RandomProxyGroupIDExtraKey] = group.ID
 		account.Extra[service.RandomProxyPoolIDsExtraKey] = []int64{ph.ID}
+		delete(account.Extra, service.RandomProxyRegionFallbackExtraKey)
+		require.NoError(t, service.ResolveRandomProxy(ctx, account, r))
+		require.Equal(t, ph.ID, *account.ProxyID, "默认回退仍仅使用当前代理池")
+		require.True(t, account.Proxy.RegionFallback)
+		account.Extra[service.RandomProxyRegionFallbackExtraKey] = service.RandomProxyRegionFallbackNone
 		require.ErrorIs(t, service.ResolveRandomProxy(ctx, account, r), service.ErrRandomProxyUnavailable)
 		require.Nil(t, account.ProxyID, "同国家代理不能突破指定范围")
 	}

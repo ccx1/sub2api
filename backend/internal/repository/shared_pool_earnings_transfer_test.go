@@ -92,14 +92,14 @@ func TestSharedPoolUserEarningsGroupsByContributor(t *testing.T) {
 			AddRow(int64(6), "owner@example.com", service.PlatformOpenAI, service.AccountTypeAPIKey, `{}`, `{}`).
 			AddRow(int64(7), "quiet@example.com", service.PlatformGemini, service.AccountTypeOAuth, `{"oauth_type":"google_one","tier_id":"google_ai_pro"}`, `{}`))
 	mock.ExpectQuery("(?s)SELECT visible_earnings.owner_user_id.*GROUP BY visible_earnings.owner_user_id").
-		WillReturnRows(sqlmock.NewRows([]string{"user_id", "email", "account_count", "earnings_count", "total_earned", "available", "pending", "transferred"}).
-			AddRow(int64(6), "owner@example.com", int64(2), int64(3), 12.5, 5.0, 2.5, 5.0))
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "email", "account_count", "earnings_count", "billing_amount", "total_earned", "platform_amount", "available", "pending", "transferred"}).
+			AddRow(int64(6), "owner@example.com", int64(2), int64(3), 15.0, 12.5, 2.5, 5.0, 2.5, 5.0))
 	result, err := NewSharedPoolEarningsRepository(db).UserEarnings(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []service.SharedPoolUserEarnings{
 		{UserID: 6, Email: "owner@example.com", AccountCount: 2,
 			AccountTiers:  []service.SharedPoolUserAccountTier{{Tier: "api_key", Count: 1}, {Tier: "pro", Count: 1}},
-			EarningsCount: 3, TotalEarned: 12.5, Available: 5, Pending: 2.5, Transferred: 5},
+			EarningsCount: 3, BillingAmount: 15, TotalEarned: 12.5, PlatformAmount: 2.5, Available: 5, Pending: 2.5, Transferred: 5},
 		{UserID: 7, Email: "quiet@example.com", AccountCount: 1,
 			AccountTiers: []service.SharedPoolUserAccountTier{{Tier: "google_ai_pro", Count: 1}}},
 	}, result)

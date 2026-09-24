@@ -30,6 +30,8 @@ func (s *AccountUsageService) persistOpenAIUsageProbeSnapshot(ctx context.Contex
 		return fmt.Errorf("usage snapshot repository is unavailable")
 	}
 	// 共享账号操作锁必须覆盖快照保存；已取得的上游结果不因浏览器断开丢失。
+	unlock := lockOpenAICodexSnapshotWrite(account.ID)
+	defer unlock()
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, updates); err != nil {

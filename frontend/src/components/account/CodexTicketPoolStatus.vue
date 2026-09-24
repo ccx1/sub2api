@@ -48,6 +48,25 @@
         <span v-if="validCount(ticket.expiring_count) && ticket.expiring_count! > 0" class="text-amber-600 dark:text-amber-400" data-testid="pool-expiring">{{ t('admin.accounts.openai.codexTicketPoolExpiring', { count: ticket.expiring_count }) }}</span>
         <span v-if="validExpiry(ticket.next_expires_at)" class="break-words" :title="formatDateTime(ticket.next_expires_at)" data-testid="pool-expiry">{{ t('admin.accounts.openai.codexTicketPoolNextExpiry', { time: shortExpiry(ticket.next_expires_at!) }) }}</span>
       </div>
+      <div
+        v-if="routeAffinityLabel(ticket)"
+        class="flex flex-wrap items-center gap-x-1.5 text-[10px]"
+        data-testid="ticket-route-affinity"
+        :class="routeAffinityClass(ticket)"
+        :title="t('admin.accounts.openai.codexTicketPoolRouteAffinityHint')"
+      >
+        <span>{{ routeAffinityLabel(ticket) }}</span>
+        <span v-if="validCount(ticket.route_affinity_connections)" class="tabular-nums" data-testid="route-affinity-connections">{{ t('admin.accounts.openai.codexTicketPoolRouteAffinityConnections', { count: ticket.route_affinity_connections }) }}</span>
+      </div>
+      <div
+        v-if="ticket.quality_status"
+        class="flex flex-wrap items-center gap-1 text-[10px]"
+        data-testid="ticket-quality-status"
+        :class="qualityStatusClass(ticket.quality_status)"
+      >
+        <span>{{ qualityStatusLabel(ticket.quality_status) }}</span>
+        <span v-if="ticket.quality_paused">· {{ t('admin.accounts.openai.codexTicketQualityPaused') }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -138,6 +157,41 @@ function primaryStatusClass(ticket: TicketStatus) {
 function primaryStatusTitle(ticket: TicketStatus) {
   if (!validExpiry(ticket.primary_expires_at)) return undefined
   return t('admin.accounts.openai.codexTicketPrimaryExpires', { time: formatDateTime(ticket.primary_expires_at) })
+}
+
+function routeAffinityLabel(ticket: TicketStatus) {
+  switch (ticket.route_affinity_status) {
+    case 'available': return t('admin.accounts.openai.codexTicketPoolRouteAffinityAvailable')
+    case 'unavailable': return t('admin.accounts.openai.codexTicketPoolRouteAffinityUnavailable')
+    case 'unknown': return t('admin.accounts.openai.codexTicketPoolRouteAffinityUnknown')
+    default: return undefined
+  }
+}
+
+function routeAffinityClass(ticket: TicketStatus) {
+  if (ticket.route_affinity_status === 'available') return 'text-emerald-600 dark:text-emerald-400'
+  if (ticket.route_affinity_status === 'unavailable') return 'text-amber-600 dark:text-amber-400'
+  return 'text-gray-500 dark:text-gray-400'
+}
+
+function qualityStatusLabel(status: NonNullable<TicketStatus['quality_status']>) {
+  switch (status) {
+    case 'passed': return t('admin.accounts.openai.codexTicketQualityPassed')
+    case 'quarantined':
+    case 'suspect': return t('admin.accounts.openai.codexTicketQualityFailed')
+    case 'running': return t('admin.accounts.openai.codexTicketQualityChecking')
+    case 'inconclusive':
+    case 'stale': return t('admin.accounts.openai.codexTicketQualityPending')
+    case 'skipped': return t('admin.accounts.openai.codexTicketQualitySkipped')
+    default: return t('admin.accounts.openai.codexTicketQualityPending')
+  }
+}
+
+function qualityStatusClass(status: NonNullable<TicketStatus['quality_status']>) {
+  if (status === 'passed') return 'text-emerald-600 dark:text-emerald-400'
+  if (status === 'quarantined' || status === 'suspect') return 'font-medium text-rose-600 dark:text-rose-400'
+  if (status === 'running') return 'text-cyan-600 dark:text-cyan-400'
+  return 'text-gray-500 dark:text-gray-400'
 }
 
 function formatRemaining(seconds: number) {

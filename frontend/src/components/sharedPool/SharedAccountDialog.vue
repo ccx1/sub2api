@@ -7,7 +7,7 @@
           <div class="min-w-0"><p class="break-words font-semibold text-gray-900 dark:text-white">{{ account.name }}</p><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ platformNames[account.platform] }}</p></div>
         </div>
         <p v-if="!account && !platforms.length" class="text-sm text-amber-600">{{ t('sharedPool.noPlatforms') }}</p>
-        <div v-if="!account">
+        <div>
           <label for="shared-name" class="input-label">{{ t('admin.accounts.accountName') }}</label>
           <input id="shared-name" v-model="form.name" required maxlength="100" class="input" :placeholder="t('admin.accounts.enterAccountName')" />
         </div>
@@ -141,6 +141,7 @@ function openImport() {
 function submit() {
   if (saving.value || authorizing.value) return
   error.value = ''
+  if (props.account && !form.name.trim()) { error.value = t('admin.accounts.enterAccountName'); return }
   if (!validateCooldown()) return
   if (!props.account && !canConsent.value) { error.value = t('sharedPool.settlementRequired'); return }
   if (!props.account && (!credentialsValid.value || !credentials.value)) { error.value = t('sharedPool.credentialsRequired'); return }
@@ -152,7 +153,7 @@ async function save() {
   try {
     if (props.account) {
       const input: SharedAccountUpdateInput = {
-        name: props.account.name, platform: props.account.platform, type: props.account.type,
+        name: form.name.trim(), platform: props.account.platform, type: props.account.type,
         enabled: props.account.enabled, protection_enabled: props.account.protection_enabled,
         concurrency: form.concurrency, ...(changeProxy.value ? { proxy_url: form.proxy_url } : {}), ...cooldownInput()
       }

@@ -31,8 +31,9 @@
           <SharedPoolUserRates v-else-if="tab === 'userRates'" @saved="refreshAccountRates" />
           <template v-else-if="tab === 'earnings'">
             <div><h2 class="font-semibold text-gray-900 dark:text-white">{{ t('sharedPool.earnings') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('sharedPool.revenueSplitHint') }}</p></div>
-            <SharedEarningsTable admin />
+            <SharedEarningsTable admin :show-user-totals="false" />
           </template>
+          <SharedEarningsTable v-else-if="tab === 'userEarnings'" admin user-totals-only />
         </section>
       </template>
     </div>
@@ -57,8 +58,8 @@ import type { AdminGroup } from '@/types'
 import { useAppStore } from '@/stores/app'
 const { t } = useI18n()
 const app = useAppStore()
-const tabs = ['accounts', 'settings', 'userRates', 'earnings'] as const
-const tabIcons = { accounts: 'users', settings: 'cog', userRates: 'userCircle', earnings: 'chart' } as const
+const tabs = ['accounts', 'settings', 'userRates', 'earnings', 'userEarnings'] as const
+const tabIcons = { accounts: 'users', settings: 'cog', userRates: 'userCircle', earnings: 'chart', userEarnings: 'chart' } as const
 const tab = ref<typeof tabs[number]>('accounts')
 const loading = ref(false)
 const accountsLoading = ref(false)

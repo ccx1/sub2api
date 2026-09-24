@@ -20,7 +20,7 @@ func TestGetCodexTicketHistoryPreservesObservedZeroAndUnknown(t *testing.T) {
 				BusinessTicketLength: &missing, HarvestHTTPStatus: &status, BusinessHTTPStatus: &status,
 				HarvestExchange: &service.CodexTicketExchange{CaptureMode: "raw", RequestedModel: "requested", ReportedModels: []string{"actual"},
 					Response: &service.CodexTicketHTTPMessage{StatusCode: 200, Body: `{"model":"actual"}`}}},
-			{ID: "legacy", Reason: "harvest_failed"},
+			{ID: "legacy", StartedAt: time.Now().Add(-time.Hour), Reason: "harvest_failed"},
 		},
 	}}
 	result := ticketHistoryRequest(&ticketHistoryAdminStub{account: account}, "/accounts/41/codex-ticket/history")

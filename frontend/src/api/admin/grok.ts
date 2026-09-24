@@ -56,6 +56,9 @@ export interface GrokTokenInfo {
 }
 
 export interface GrokSSOToOAuthRequest {
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
+  use_import_defaults?: boolean
   sso_tokens: string[]
   name?: string
   notes?: string | null

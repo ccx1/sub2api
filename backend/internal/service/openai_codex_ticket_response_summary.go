@@ -81,6 +81,9 @@ func (c *codexTicketExchangeCapture) captureObserver(observer *openAICodexTicket
 		return
 	}
 	c.setReportedModels(observer.reportedModels, observer.modelsTruncated)
+	if c.responseID != nil {
+		*c.responseID = strings.TrimSpace(observer.responseID)
+	}
 	d := observer.diagnostics
 	if d == nil {
 		return

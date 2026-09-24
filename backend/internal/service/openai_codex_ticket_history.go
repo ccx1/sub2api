@@ -16,6 +16,7 @@ import (
 
 const OpenAICodexTicketHistoryKey = openAICodexTicketExtraKeyPrefix + "activity"
 const OpenAICodexTicketHistoryLimit = 100
+const OpenAICodexTicketHistoryRetention = 12 * time.Hour
 const OpenAICodexTicketExchangeHistoryLimit = 10
 
 type CodexTicketProxySnapshot struct {
@@ -65,6 +66,7 @@ type CodexTicketAttemptSummary struct {
 }
 
 type CodexTicketHistory struct {
+	QualityReceipts       []codexTicketQualityReceipt     `json:"quality_receipts,omitempty"`
 	Summary               CodexTicketAttemptSummary       `json:"summary"`
 	Items                 []CodexTicketAttempt            `json:"items"`
 	Total                 int                             `json:"total"`
@@ -77,6 +79,10 @@ type CodexTicketHistory struct {
 
 type codexTicketAttemptRecorder interface {
 	RecordCodexTicketAttempt(context.Context, int64, CodexTicketAttempt) error
+}
+
+type codexTicketAttemptFailureMarker interface {
+	MarkCodexTicketAttemptFailed(context.Context, int64, string, string, time.Time, string) error
 }
 
 func DecodeCodexTicketHistory(raw any) (CodexTicketHistory, error) {
@@ -93,6 +99,8 @@ func DecodeCodexTicketHistory(raw any) (CodexTicketHistory, error) {
 
 // 调用者必须在同一账号的数据库行锁内读取和追加，避免多模型/多实例丢计数。
 func (h *CodexTicketHistory) Append(attempt CodexTicketAttempt) {
+	h.rememberQualityReceipts(h.Items)
+	h.rememberQualityReceipts([]CodexTicketAttempt{attempt})
 	if attempt.Outcome != "" {
 		if h.Summary.OutcomeCounts == nil {
 			h.Summary.OutcomeCounts = make(map[string]int64)
@@ -130,12 +138,43 @@ func (h *CodexTicketHistory) Append(attempt CodexTicketAttempt) {
 	}
 }
 
+// PruneCodexTicketHistory 清理保留窗口外的明细记录；Summary 仍保持累计口径。
+func (h *CodexTicketHistory) PruneCodexTicketHistory(now time.Time) {
+	if h == nil {
+		return
+	}
+	if len(h.Items) > 0 {
+		cutoff := now.Add(-OpenAICodexTicketHistoryRetention)
+		items := h.Items[:0]
+		for _, item := range h.Items {
+			if item.StartedAt.IsZero() || item.StartedAt.Before(cutoff) {
+				continue
+			}
+			items = append(items, item)
+		}
+		sort.SliceStable(items, func(i, j int) bool { return items[i].StartedAt.After(items[j].StartedAt) })
+		if len(items) > OpenAICodexTicketHistoryLimit {
+			items = items[:OpenAICodexTicketHistoryLimit]
+		}
+		h.Items = items
+	}
+	retained := h.QualityReceipts[:0]
+	for _, receipt := range h.QualityReceipts {
+		if now.Before(receipt.ExpiresAt) {
+			retained = append(retained, receipt)
+		}
+	}
+	h.QualityReceipts = retained
+}
+
 func GetCodexTicketHistory(account *Account, page, size int, filters ...CodexTicketHistoryFilter) (CodexTicketHistory, error) {
 	history, err := DecodeCodexTicketHistory(account.Extra[OpenAICodexTicketHistoryKey])
 	if err != nil {
 		return history, err
 	}
-	if err := projectCodexTicketHistory(&history, account, time.Now()); err != nil {
+	now := time.Now()
+	history.PruneCodexTicketHistory(now)
+	if err := projectCodexTicketHistory(&history, account, now); err != nil {
 		return CodexTicketHistory{}, err
 	}
 	history.FilterOptions = codexTicketHistoryFilterOptions(history.Items)
@@ -157,6 +196,7 @@ func GetCodexTicketHistory(account *Account, page, size int, filters ...CodexTic
 	start = min(start, history.Total)
 	end := min(start+history.PageSize, history.Total)
 	history.Items = append([]CodexTicketAttempt{}, history.Items[start:end]...)
+	history.QualityReceipts = nil
 	return history, nil
 }
 

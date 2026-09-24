@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -24,37 +25,76 @@ func (r *accountRepository) RecordCodexTicketAttempt(ctx context.Context, id int
 	return tx.Commit()
 }
 
-func appendCodexTicketAttempt(ctx context.Context, client *dbent.Client, id int64, attempt service.CodexTicketAttempt) error {
-	rows, err := client.QueryContext(ctx,
-		`SELECT extra -> $2 FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`, id, service.OpenAICodexTicketHistoryKey)
+func (r *accountRepository) MarkCodexTicketAttemptFailed(ctx context.Context, id int64, attemptID, model string, capturedAt time.Time, reason string) error {
+	if id <= 0 || attemptID == "" || model == "" || capturedAt.IsZero() ||
+		(reason != "model_quality_capability_failed" && reason != "model_quality_model_mismatch") {
+		return errors.New("invalid codex ticket attempt failure")
+	}
+	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	history, account, err := lockedCodexTicketHistory(ctx, tx.Client(), id)
+	if err != nil {
+		return err
+	}
+	changed, err := history.ReconcileQualityFailure(account, attemptID, model, capturedAt, reason)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := persistCodexTicketHistory(ctx, tx.Client(), id, history); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func appendCodexTicketAttempt(ctx context.Context, client *dbent.Client, id int64, attempt service.CodexTicketAttempt) error {
+	history, account, err := lockedCodexTicketHistory(ctx, client, id)
+	if err != nil {
+		return err
+	}
+	if err := history.AppendWithQualityFailures(attempt, account); err != nil {
+		return err
+	}
+	history.PruneCodexTicketHistory(time.Now())
+	return persistCodexTicketHistory(ctx, client, id, history)
+}
+
+func lockedCodexTicketHistory(ctx context.Context, client *dbent.Client, id int64) (service.CodexTicketHistory, *service.Account, error) {
+	var history service.CodexTicketHistory
+	account := &service.Account{ID: id}
+	rows, err := client.QueryContext(ctx,
+		`SELECT extra FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`, id)
+	if err != nil {
+		return history, nil, err
 	}
 	var raw []byte
 	if !rows.Next() {
 		err = rows.Err()
 		_ = rows.Close()
 		if err != nil {
-			return err
+			return history, nil, err
 		}
-		return service.ErrAccountNotFound
+		return history, nil, service.ErrAccountNotFound
 	}
 	err = rows.Scan(&raw)
 	_ = rows.Close()
 	if err != nil {
-		return err
+		return history, nil, err
 	}
-	var value any
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return err
+		if err := json.Unmarshal(raw, &account.Extra); err != nil {
+			return history, nil, err
 		}
 	}
-	history, err := service.DecodeCodexTicketHistory(value)
-	if err != nil {
-		return err
-	}
-	history.Append(attempt)
+	history, err = service.DecodeCodexTicketHistory(account.Extra[service.OpenAICodexTicketHistoryKey])
+	return history, account, err
+}
+
+func persistCodexTicketHistory(ctx context.Context, client *dbent.Client, id int64, history service.CodexTicketHistory) error {
 	encoded, err := json.Marshal(history)
 	if err != nil {
 		return err

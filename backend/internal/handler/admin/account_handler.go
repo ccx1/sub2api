@@ -127,6 +127,9 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
+	ProtectionEnabled       *bool          `json:"protection_enabled"`
+	CodexTicketEnabled      *bool          `json:"codex_ticket_enabled"`
+	UseImportDefaults       *bool          `json:"use_import_defaults"`
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required"`
@@ -385,6 +388,39 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 			out.CodexTicketEnabled = &accountEnabled
 		}
 		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
+		// The usage window needs the latest quality result, but rendering a list
+		// row must not schedule a new check. Redis failures are intentionally
+		// ignored here; ticket availability remains the source of truth.
+		if h.codexTicketRetry != nil && account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			h.codexTicketRetry.EnrichCodexRouteAffinityStatus(ctx, account, out.CodexTurnTickets)
+			qualityGateEnabled := cfg.FailClosed && h.codexTicketRetry.CodexModelQualityAdmissionEnabled(ctx)
+			quality, err := h.codexTicketRetry.GetCodexModelQualityStatusSnapshot(ctx, account)
+			cancel()
+			if err == nil {
+				byModel := make(map[string]service.CodexModelQualityStatus, len(quality))
+				for _, item := range quality {
+					byModel[item.Model] = item
+				}
+				for i := range out.CodexTurnTickets {
+					item, ok := byModel[out.CodexTurnTickets[i].Model]
+					if !ok {
+						continue
+					}
+					out.CodexTurnTickets[i].QualityStatus = item.Status
+					out.CodexTurnTickets[i].QualityReason = item.Reason
+					out.CodexTurnTickets[i].QualityCheckedAt = item.CheckedAt
+					if qualityGateEnabled && service.CodexModelQualityFailure(item) {
+						status := &out.CodexTurnTickets[i]
+						status.QualityPaused, status.Blocked, status.Ready = true, true, false
+						status.AvailableCount, status.ReserveCount = 0, 0
+						status.UsingStandby, status.StandbyReady = false, false
+						status.RemainingSeconds, status.PrimaryRemainingSeconds = 0, 0
+						status.ExpiresAt, status.NextExpiresAt = nil, nil
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -1088,6 +1124,9 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			ExpiresAt:             req.ExpiresAt,
 			AutoPauseOnExpired:    req.AutoPauseOnExpired,
 			ProbeEnabled:          req.ProbeEnabled,
+			ProtectionEnabled:     req.ProtectionEnabled,
+			CodexTicketEnabled:    req.CodexTicketEnabled,
+			SkipImportDefaults:    skipAccountImportDefaults(req.UseImportDefaults),
 			SkipMixedChannelCheck: skipCheck,
 		})
 		if execErr != nil {
@@ -2105,6 +2144,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 		Accounts           []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
 		ProtectionEnabled  *bool                  `json:"protection_enabled"`
 		CodexTicketEnabled *bool                  `json:"codex_ticket_enabled"`
+		UseImportDefaults  *bool                  `json:"use_import_defaults"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -2173,8 +2213,9 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				ExpiresAt:             item.ExpiresAt,
 				AutoPauseOnExpired:    item.AutoPauseOnExpired,
 				SkipMixedChannelCheck: skipCheck,
-				ProtectionEnabled:     req.ProtectionEnabled,
-				CodexTicketEnabled:    req.CodexTicketEnabled,
+				ProtectionEnabled:     firstAccountImportOption(item.ProtectionEnabled, req.ProtectionEnabled),
+				CodexTicketEnabled:    firstAccountImportOption(item.CodexTicketEnabled, req.CodexTicketEnabled),
+				SkipImportDefaults:    skipAccountImportDefaults(firstAccountImportOption(item.UseImportDefaults, req.UseImportDefaults)),
 			})
 			if err != nil {
 				failed++

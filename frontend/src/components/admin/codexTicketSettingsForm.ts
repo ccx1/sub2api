@@ -3,13 +3,21 @@ import type { CodexTicketProtectionSettings, CodexTicketSettings } from '@/api/a
 export const defaultTicketProtection = (): Required<CodexTicketProtectionSettings> => ({
   enabled: false, reject_and_silence_lengths: [312], proxy_silence_seconds: 300,
   max_pool_rounds: 2, max_account_attempts: 6, account_cooldown_seconds: 1800,
-  rejection_retry_interval_seconds: 30, rejection_retry_max_attempts: 6, rejection_retry_cooldown_seconds: 300
+  rejection_retry_interval_seconds: 30, rejection_retry_max_attempts: 6, rejection_retry_cooldown_seconds: 300,
+  proxy_ip_protection_enabled: false, proxy_ip_failure_account_threshold: 3,
+  proxy_ip_failure_window_seconds: 600, proxy_ip_cooldown_seconds: 300, proxy_ip_max_rounds: 3
 })
 export const ticketProtectionFields = [
   { key: 'proxy_silence_seconds', min: 1, max: 86400 },
   { key: 'max_pool_rounds', min: 1, max: 100 },
   { key: 'max_account_attempts', min: 1, max: 1000 },
   { key: 'account_cooldown_seconds', min: 1, max: 86400 }
+] as const
+export const ticketIPProtectionFields = [
+  { key: 'proxy_ip_failure_account_threshold', min: 1, max: 1000 },
+  { key: 'proxy_ip_failure_window_seconds', min: 1, max: 86400 },
+  { key: 'proxy_ip_cooldown_seconds', min: 1, max: 86400 },
+  { key: 'proxy_ip_max_rounds', min: 1, max: 100 }
 ] as const
 export const ticketRejectionRetryFields = [
   { key: 'rejection_retry_interval_seconds', min: 1, max: 86400 },
@@ -20,9 +28,10 @@ export const ticketRejectionRetryFields = [
 export function readTicketProtection(settings?: CodexTicketProtectionSettings): Required<CodexTicketProtectionSettings> {
   const defaults = defaultTicketProtection()
   const result = { ...defaults, ...settings }
+  if (result.proxy_ip_protection_enabled === undefined) result.proxy_ip_protection_enabled = false
   const lengths = settings?.reject_and_silence_lengths
   result.reject_and_silence_lengths = lengths === undefined ? defaults.reject_and_silence_lengths : [...(lengths ?? [])]
-  for (const { key } of ticketRejectionRetryFields) {
+  for (const { key } of [...ticketRejectionRetryFields, ...ticketIPProtectionFields]) {
     if (result[key] === undefined || result[key] === 0) result[key] = defaults[key]
   }
   return result
@@ -102,7 +111,8 @@ export function validateTicketSettings(settings: CodexTicketSettings): TicketVal
   const protection = settings.protection
   if (protection) {
     const effective = readTicketProtection(protection)
-    for (const field of [...ticketProtectionFields, ...ticketRejectionRetryFields]) {
+    if (typeof effective.proxy_ip_protection_enabled !== 'boolean') return { key: 'ipProtectionEnabled' }
+    for (const field of [...ticketProtectionFields, ...ticketRejectionRetryFields, ...ticketIPProtectionFields]) {
       if (!inRange(effective[field.key], field.min, field.max)) return { key: 'range', field: field.key, min: field.min, max: field.max }
     }
     const lengths = effective.reject_and_silence_lengths

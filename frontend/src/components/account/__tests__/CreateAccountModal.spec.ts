@@ -74,6 +74,7 @@ vi.mock('vue-i18n', async () => {
 
 import CreateAccountModal from '../CreateAccountModal.vue'
 import CodexTicketProxySettings from '../CodexTicketProxySettings.vue'
+import ProxySelector from '@/components/common/ProxySelector.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -227,10 +228,10 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     wrapper.unmount()
   })
 
-  it('defaults new OAuth accounts to their outbound proxy and retains group selection on import', async () => {
+  it('inherits ticket proxy defaults and retains explicit group selection on import', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
-    expect(wrapper.get<HTMLInputElement>('[data-testid="codex-ticket-proxy-account"]').element.checked).toBe(true)
+    expect(wrapper.find('[data-testid="codex-ticket-proxy-account"]').exists()).toBe(false)
     const settings = wrapper.get('[data-testid="random-proxy-settings"]')
     await settings.get('input[type="checkbox"]').setValue(true)
     await settings.get('[data-testid="random-proxy-scope"]').setValue('group')
@@ -243,16 +244,17 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(importCodexSessionMock).toHaveBeenCalledWith(expect.objectContaining({
       proxy_id: null,
       extra: expect.objectContaining({
-        codex_ticket_proxy_mode: 'account', codex_ticket_proxy_id: 0,
         proxy_mode: 'random', random_proxy_pool_scope: 'group', random_proxy_group_id: 7
       })
     }))
+    expect(importCodexSessionMock.mock.calls[0][0].extra.codex_ticket_proxy_mode).toBeUndefined()
     wrapper.unmount()
   })
 
   it('preserves independent ticket proxy settings on each account in a refresh-token batch', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-ticket-proxy-override"]').setValue(true)
     await wrapper.get('[data-testid="codex-ticket-proxy-random"]').setValue(true)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('RT tickets')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
@@ -271,6 +273,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = mountModal()
     await wrapper.setProps({ proxies: [{ id: 7, name: 'Ticket', protocol: 'http', host: 'ticket.example', port: 8080, status: 'active' }] as any })
     await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-ticket-proxy-override"]').setValue(true)
     wrapper.getComponent(CodexTicketProxySettings).vm.$emit('update:modelValue', { mode: 'fixed', proxyId: 7 })
     await wrapper.get('[data-testid="random-proxy-settings"] input[type="checkbox"]').setValue(true)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Ticket test')
@@ -288,6 +291,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   it('prevents entering OAuth import with an empty fixed ticket proxy', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-ticket-proxy-override"]').setValue(true)
     await wrapper.get('[data-testid="codex-ticket-proxy-fixed"]').setValue(true)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Ticket test')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
@@ -295,6 +299,25 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(importCodexSessionMock).not.toHaveBeenCalled()
     expect(createOpenAICodexPATMock).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it.each(['session', 'pat'])('lets Codex %s inherit defaults while allowing explicit direct routing', async (method) => {
+    for (const direct of [false, true]) {
+      const wrapper = mountModal()
+      await selectButtonByText(wrapper, 'OpenAI')
+      if (direct) wrapper.getComponent(ProxySelector).vm.$emit('update:modelValue', null)
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('Import defaults')
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await wrapper.get(`[data-testid="import-codex-${method}"]`).trigger('click')
+      await flushPromises()
+      const mock = method === 'session' ? importCodexSessionMock : createOpenAICodexPATMock
+      const payload = mock.mock.calls.at(-1)![0]
+      expect(payload.proxy_id).toBe(direct ? 0 : null)
+      expect(payload.extra).not.toHaveProperty('codex_ticket_proxy_mode')
+      expect(payload).not.toHaveProperty('protection_enabled')
+      expect(payload).not.toHaveProperty('codex_ticket_enabled')
+      wrapper.unmount()
+    }
   })
 
   beforeEach(() => {
@@ -407,7 +430,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
     const payload = createAccountMock.mock.calls[0]?.[0]
-    expect(payload.proxy_id).toBeNull()
+    expect(payload.proxy_id).toBe(0)
     expect(payload.extra || {}).not.toHaveProperty('random_proxy_group_id')
     expect(payload.extra || {}).not.toHaveProperty('proxy_mode')
     wrapper.unmount()

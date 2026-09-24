@@ -250,3 +250,9 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\$out"
 如果工作区存在未提交改动，`go version -m` 可能显示 `vcs.modified=true`；最终回复必须说明该状态是否来自合并前已有改动、构建生成物，或本次任务修改。
 
 部署更新时默认保留运行时 `DATA_DIR`，不要覆盖 `config.yaml` 和 `.installed`，只替换二进制并重启服务。
+
+## 参考项目目录
+
+- 从 GitHub 或其它远程来源下载、克隆、抽取的参考项目统一放在仓库根目录 `remoteTemp/`。
+- `remoteTemp/` 已被 `.gitignore` 忽略；参考工程保留为独立 checkout 或压缩包，不得当作本项目源码提交。
+- 具体审计记录、来源 URL、抓取日期、commit/tag、源码快照说明和研究结论统一放入 `remoteTemp/` 的日期化 Markdown 文件。

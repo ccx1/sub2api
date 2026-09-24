@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -32,7 +33,7 @@ func (a *ProxyPoolAllocator) runCodexScheduler(ctx context.Context, id int64, q 
 	}
 	raw, err := codexTicketSchedulerScript.Run(ctx, a.rdb, []string{codexSchedulerAccountKey(id)}, string(encoded)).Text()
 	if err != nil {
-		return nil, errors.New("codex ticket shared scheduler unavailable")
+		return nil, fmt.Errorf("codex ticket shared scheduler unavailable: %w", err)
 	}
 	var result codexSchedulerResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil || result.Status == nil {
@@ -77,15 +78,14 @@ func (a *ProxyPoolAllocator) StartCodexTicket(ctx context.Context, r *service.Co
 	if err != nil {
 		return err
 	}
-	if r.Proxy != nil && a.client != nil {
-		current, err := a.client.Proxy.Get(ctx, r.Proxy.ID)
+	if current, err := a.codexSchedulerCurrentReservationProxy(ctx, r); err != nil {
+		return err
+	} else if current != nil {
+		candidate, err := a.codexSchedulerCurrentCandidate(ctx, current, true)
 		if err != nil {
-			return codexSchedulerWait("proxy_changed")
+			return err
 		}
-		proxy := proxyEntityToService(current)
-		if !proxy.IsActive() || proxy.IsExpired(time.Now()) || proxy.URL() != r.Proxy.URL() {
-			return codexSchedulerWait("proxy_changed")
-		}
+		q["current_harvest"] = candidate
 	}
 	_, err = a.runCodexScheduler(ctx, r.AccountID, q)
 	return err
@@ -95,6 +95,24 @@ func (a *ProxyPoolAllocator) ValidateCodexTicket(ctx context.Context, r *service
 	q, err := a.reservationInput(ctx, "publish", r)
 	if err != nil {
 		return err
+	}
+	if current, err := a.codexSchedulerCurrentReservationProxy(ctx, r); err != nil {
+		return err
+	} else if current != nil {
+		candidate, err := a.codexSchedulerCurrentCandidate(ctx, current, false)
+		if err != nil {
+			return err
+		}
+		q["current_harvest"] = candidate
+	}
+	if business, err := a.codexSchedulerBusinessProxy(ctx, r.AccountID); err != nil {
+		return err
+	} else if business != nil {
+		candidate, err := a.codexSchedulerCurrentCandidate(ctx, business, false)
+		if err != nil {
+			return err
+		}
+		q["current_business"] = candidate
 	}
 	_, err = a.runCodexScheduler(ctx, r.AccountID, q)
 	return err

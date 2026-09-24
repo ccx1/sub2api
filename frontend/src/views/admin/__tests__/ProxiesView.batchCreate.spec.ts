@@ -193,6 +193,7 @@ describe('proxy batch create expiry and fallback', () => {
   it('resets shared settings and batch input after closing and reopening the dialog', async () => {
     await openCreate()
     await wrapper.get('textarea').setValue(batchText)
+    await wrapper.get('[data-testid="batch-proxy-country"]').setValue('JP')
     await configureBackup()
     await clickButton('common.cancel')
     expect(wrapper.find('#create-proxy-form').exists()).toBe(false)
@@ -202,6 +203,7 @@ describe('proxy batch create expiry and fallback', () => {
     expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('')
     expect(wrapper.get<HTMLInputElement>('input[type="date"]').element.value).toBe('')
     expect(selectWithOption('proxy').element.value).toBe('none')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="batch-proxy-country"]').element.value).toBe('')
     await wrapper.get('textarea').setValue(batchText)
     for (const item of await submitBatch()) expect(item).toMatchObject(sharedDefaults)
   })
@@ -245,19 +247,30 @@ describe('proxy batch create expiry and fallback', () => {
     }
   })
 
-  it('preserves single proxy creation with the shared settings', async () => {
+  it('creates an IPv6 proxy with the selected country and shared settings', async () => {
     await openCreate(false)
     await wrapper.get('input[placeholder="admin.proxies.enterProxyName"]').setValue(' Single proxy ')
-    await wrapper.get('input[placeholder="admin.proxies.form.hostPlaceholder"]').setValue(' single.example ')
+    await wrapper.get('input[placeholder="admin.proxies.form.hostPlaceholder"]').setValue(' 2001:db8::10 ')
+    await wrapper.get('[data-testid="create-proxy-country"]').setValue('JP')
     await configureBackup()
     await wrapper.get('#create-proxy-form').trigger('submit')
     await flushPromises()
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Single proxy', host: 'single.example', protocol: 'http', port: 8080,
+      name: 'Single proxy', host: '2001:db8::10', protocol: 'http', port: 8080, country_code: 'JP',
       expires_at: Date.parse('2026-10-22') / 1000,
       fallback_mode: 'proxy', backup_proxy_id: 41, expiry_warn_days: 7,
     }))
     expect(batchCreate).not.toHaveBeenCalled()
+  })
+
+  it('allows standard creation without assigning a country', async () => {
+    await openCreate(false)
+    await wrapper.get('input[placeholder="admin.proxies.enterProxyName"]').setValue('Unassigned')
+    await wrapper.get('input[placeholder="admin.proxies.form.hostPlaceholder"]').setValue('proxy.example')
+    await wrapper.get('#create-proxy-form').trigger('submit')
+    await flushPromises()
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ country_code: null }))
   })
 })

@@ -100,27 +100,20 @@ func (f CodexTicketHistoryFilter) matches(item CodexTicketAttempt) bool {
 }
 
 func projectCodexTicketHistory(history *CodexTicketHistory, account *Account, now time.Time) error {
-	var events []CodexTicketInvalidation
-	if raw := account.Extra[OpenAICodexTicketInvalidationsKey]; raw != nil {
-		encoded, err := json.Marshal(raw)
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(encoded, &events); err != nil {
-			return err
-		}
+	events, err := codexTicketHistoryInvalidations(account)
+	if err != nil {
+		return err
 	}
+	history.reconcileQualityFailures(account, events, nil)
 	for i := range history.Items {
 		item := &history.Items[i]
+		invalidation := codexTicketHistoryInvalidation(account, *item, events)
 		item.Invalidation = nil
 		item.TicketStatus = "not_issued"
-		if !item.Success {
+		if !item.Success && !codexTicketConfirmedQualityFailure(item.Reason) {
 			continue
 		}
-		item.Invalidation = matchingCodexTicketInvalidation(*item, events)
-		if item.Invalidation == nil {
-			item.Invalidation = codexTicketHistoryTombstoneInvalidation(account, *item)
-		}
+		item.Invalidation = invalidation
 		switch {
 		case item.Invalidation != nil:
 			item.TicketStatus = "invalidated"
@@ -173,14 +166,14 @@ func codexTicketHistoryTombstoneInvalidation(account *Account, item CodexTicketA
 }
 
 func codexTicketHistoryReason(item CodexTicketAttempt) string {
+	if item.Invalidation != nil && item.Invalidation.Reason != "" {
+		return "invalidation:" + item.Invalidation.Reason
+	}
 	if !item.Success {
 		if item.Reason != "" && item.Reason != "verified" {
 			return "attempt:" + item.Reason
 		}
 		return ""
-	}
-	if item.Invalidation != nil && item.Invalidation.Reason != "" {
-		return "invalidation:" + item.Invalidation.Reason
 	}
 	if item.TicketStatus == "ttl_elapsed" {
 		return "invalidation:ttl_expired"

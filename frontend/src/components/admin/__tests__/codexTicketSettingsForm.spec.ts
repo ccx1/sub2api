@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CodexTicketSettings } from '@/api/admin/codexTicketSettings'
-import { defaultTicketProtection, readTicketProtection, ticketRejectionRetryFields, validateTicketSettings } from '../codexTicketSettingsForm'
+import { defaultTicketProtection, readTicketProtection, ticketIPProtectionFields, ticketRejectionRetryFields, validateTicketSettings } from '../codexTicketSettingsForm'
 
 const settings = (): CodexTicketSettings => ({
   enabled: true, target_length: 292, ttl_seconds: 3600, refresh_before_seconds: 600,
@@ -91,6 +91,30 @@ describe('ticket settings length mode validation', () => {
     for (const value of [field.min, field.max]) {
       expect(validateTicketSettings({ ...settings(), protection: { ...defaultTicketProtection(), [field.key]: value } })).toBeNull()
     }
+  })
+
+  it.each([undefined, 0])('fills legacy IP protection numeric defaults %s without enabling protection', value => {
+    const legacy = { ...defaultTicketProtection(), proxy_ip_protection_enabled: undefined }
+    for (const field of ticketIPProtectionFields) legacy[field.key] = value as number
+    const before = structuredClone(legacy)
+    expect(readTicketProtection(legacy)).toEqual(defaultTicketProtection())
+    expect(validateTicketSettings({ ...settings(), protection: legacy })).toBeNull()
+    expect(legacy).toEqual(before)
+  })
+
+  it.each(ticketIPProtectionFields)('validates IP protection field $key even when disabled', field => {
+    for (const value of [-1, 1.5, field.max + 1, NaN, Infinity, null, '3']) {
+      const protection = { ...defaultTicketProtection(), [field.key]: value }
+      expect(validateTicketSettings({ ...settings(), protection })).toEqual({ key: 'range', field: field.key, min: field.min, max: field.max })
+    }
+    for (const value of [field.min, field.max]) {
+      expect(validateTicketSettings({ ...settings(), protection: { ...defaultTicketProtection(), [field.key]: value } })).toBeNull()
+    }
+  })
+
+  it.each(['false', 0, null, []])('rejects malformed IP protection switch %s', value => {
+    const protection = { ...defaultTicketProtection(), proxy_ip_protection_enabled: value } as unknown as CodexTicketSettings['protection']
+    expect(validateTicketSettings({ ...settings(), protection })).toEqual({ key: 'ipProtectionEnabled' })
   })
 
   it.each([undefined, 1, 3, 1000])('accepts the default and supported proxy failure threshold %s', proxy_failure_threshold => {

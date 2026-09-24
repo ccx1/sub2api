@@ -47,7 +47,11 @@ func (a *ProxyPoolAllocator) TransportCoolingDown(ctx context.Context, proxy *se
 	if a == nil || a.rdb == nil {
 		return false, fmt.Errorf("proxy pool allocator dependencies unavailable")
 	}
-	result, err := proxyTransportCoolingScript.Run(ctx, a.rdb, []string{proxyTransportCooldownKey}, proxyTransportCooldownMember(proxy)).Int()
+	ip, err := a.proxyIPIdentity(ctx, proxy)
+	if err != nil {
+		return false, err
+	}
+	result, err := proxyTransportCoolingScript.Run(ctx, a.rdb, []string{proxyTransportCooldownKey}, proxyTransportCooldownMember(proxy), ip).Int()
 	if err != nil {
 		return false, fmt.Errorf("read proxy transport cooldown: %w", err)
 	}
@@ -71,9 +75,9 @@ end
 return added
 `)
 
-var proxyTransportCoolingScript = redis.NewScript(`
+var proxyTransportCoolingScript = redis.NewScript(proxyIPGuardLua + `
 local clock = redis.call('TIME')
 local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
 local until_at = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1])) or 0
-return until_at > now and 1 or 0
+return (until_at > now or proxyipblocked(ARGV[2],now)) and 1 or 0
 `)

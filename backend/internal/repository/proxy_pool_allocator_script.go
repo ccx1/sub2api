@@ -3,7 +3,7 @@ package repository
 import "github.com/redis/go-redis/v9"
 
 // 账号关联长期保留，容量占位使用短租约；校验、复用和换绑在同一脚本内原子完成。
-var proxyPoolReserveScript = redis.NewScript(`
+var proxyPoolReserveScript = redis.NewScript(proxyIPGuardLua + `
 local member = ARGV[1]
 local ttl = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
@@ -46,8 +46,9 @@ for i, candidate in ipairs(candidates) do
   local accountUntil = tonumber(redis.call('ZSCORE', failureKey, candidate.id)) or 0
   local transportUntil = tonumber(redis.call('ZSCORE', transportKey, candidate.id .. ':' .. candidate.version)) or 0
   local failedUntil = math.max(accountUntil * 1000, transportUntil)
-  local available = limit == 0 or projected <= limit
-  if failedUntil <= nowMillis then
+  local ipBlocked = proxyipblocked(candidate.ip,nowMillis)
+  local available = not ipBlocked and (limit == 0 or projected <= limit)
+  if not ipBlocked and failedUntil <= nowMillis then
     allFailed = false
   elseif available and failedUntil < earliest then
     recovery, earliest = i, failedUntil

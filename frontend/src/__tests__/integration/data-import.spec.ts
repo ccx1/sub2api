@@ -132,7 +132,8 @@ describe('ImportDataModal', () => {
       data: expect.objectContaining({
         accounts: [{ name: 'a' }]
       }),
-      skip_default_group_bind: true
+      skip_default_group_bind: true,
+      use_import_defaults: true
     })
   })
 
@@ -172,7 +173,8 @@ describe('ImportDataModal', () => {
         proxies: [{ proxy_key: 'p' }],
         accounts: [{ name: 'a' }, { name: 'b' }]
       }),
-      skip_default_group_bind: true
+      skip_default_group_bind: true,
+      use_import_defaults: true
     })
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')
   })
@@ -236,7 +238,7 @@ describe('ImportDataModal', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(adminAPI.accounts.batchCreate).toHaveBeenCalledWith(accounts)
+    expect(adminAPI.accounts.batchCreate).toHaveBeenCalledWith(accounts, { use_import_defaults: true })
     expect(adminAPI.accounts.importData).not.toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')
   })
@@ -266,7 +268,8 @@ describe('ImportDataModal', () => {
 
     expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
       data: payload,
-      skip_default_group_bind: true
+      skip_default_group_bind: true,
+      use_import_defaults: true
     })
     expect(adminAPI.accounts.batchCreate).not.toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')

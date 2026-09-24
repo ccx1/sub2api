@@ -100,7 +100,11 @@ export interface SharedAccountTierStat {
 export interface SharedUserEarnings {
   user_id: number; email: string; account_count: number; earnings_count: number
   account_tiers?: SharedAccountTierStat[]
-  total_earned: number; available: number; pending: number; transferred: number
+  billing_amount?: number; total_earned: number; platform_amount?: number
+  available: number; pending: number; transferred: number
+}
+export interface SharedEarningsTransfer {
+  id: number; amount: number; balance: number
 }
 export interface SharedUserRate {
   user_id: number; email: string; platform_rate_bps: number | null; proxy_rate_bps: number | null
@@ -147,7 +151,7 @@ export const sharedPoolAPI = {
   autoTransferSettings: async () => (await apiClient.get<SharedAutoTransferSettings>(`${userPath}/auto-transfer`)).data,
   saveAutoTransferSettings: async ({ enabled, threshold, daily_time }: SharedAutoTransferInput) => (await apiClient.put<SharedAutoTransferSettings>(`${userPath}/auto-transfer`, { enabled, threshold, daily_time })).data,
   earnings: async (page = 1) => (await apiClient.get<SharedPage<SharedEarning>>(`${userPath}/earnings`, { params: { page, page_size: 20 } })).data,
-  transfer: async () => (await apiClient.post<{ id: number; amount: number; balance: number }>(`${userPath}/transfer`)).data,
+  transfer: async () => (await apiClient.post<SharedEarningsTransfer>(`${userPath}/transfer`)).data,
   oauthStart: async (platform: SharedPlatform, proxy_url?: string, account_id?: number) => (await apiClient.post<{ auth_url: string; session_id: string }>(`${userPath}/oauth/${platform}/start`, { proxy_url, account_id })).data,
   oauthFinish: async (platform: SharedPlatform, input: { session_id: string; code: string; state?: string }) => (await apiClient.post<{ credentials: Record<string, unknown> }>(`${userPath}/oauth/${platform}/finish`, input)).data
 }
@@ -160,7 +164,8 @@ export const adminSharedPoolAPI = {
   userRates: async () => (await apiClient.get<SharedUserRate[]>(`${adminPath}/user-rates`)).data,
   saveUserRate: async (id: number, input: { platform_rate_bps: number | null; proxy_rate_bps: number | null; settlement_multiplier?: number | null }) => (await apiClient.put<SharedUserRate>(`${adminPath}/user-rates/${id}`, input)).data,
   earnings: async (page = 1, owner_user_id?: number) => (await apiClient.get<SharedPage<SharedEarning>>(`${adminPath}/earnings`, { params: { page, page_size: 20, owner_user_id } })).data,
-  userEarnings: async () => (await apiClient.get<SharedUserEarnings[]>(`${adminPath}/user-earnings`)).data
+  userEarnings: async () => (await apiClient.get<SharedUserEarnings[]>(`${adminPath}/user-earnings`)).data,
+  transferUserEarnings: async (userId: number) => (await apiClient.post<SharedEarningsTransfer>(`${adminPath}/users/${userId}/transfer`)).data
 }
 
 // 必须收到明确的 test_complete；流中断不能被当作连接成功。

@@ -46,6 +46,41 @@ type openAIWSPolicyEnforcingFrameConn struct {
 	onBlock func(blocked *OpenAIFastBlockedError)
 }
 
+// openAIWSRequestTimezoneFrameConn rewrites only client-to-upstream JSON
+// frames. Integrity checks run in the policy wrapper before this layer writes,
+// so the client-visible payload and protection snapshot remain unchanged.
+type openAIWSRequestTimezoneFrameConn struct {
+	inner   openaiwsv2.FrameConn
+	service *OpenAIGatewayService
+}
+
+var _ openaiwsv2.FrameConn = (*openAIWSRequestTimezoneFrameConn)(nil)
+
+func (c *openAIWSRequestTimezoneFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	return c.inner.ReadFrame(ctx)
+}
+
+func (c *openAIWSRequestTimezoneFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
+	if c == nil || c.inner == nil {
+		return errOpenAIWSConnClosed
+	}
+	if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+		rewritten, err := c.service.rewriteOpenAIRequestTimezonePayload(ctx, payload)
+		if err != nil {
+			return err
+		}
+		payload = rewritten
+	}
+	return c.inner.WriteFrame(ctx, msgType, payload)
+}
+
+func (c *openAIWSRequestTimezoneFrameConn) Close() error {
+	if c == nil || c.inner == nil {
+		return nil
+	}
+	return c.inner.Close()
+}
+
 var _ openaiwsv2.FrameConn = (*openAIWSPolicyEnforcingFrameConn)(nil)
 
 func (c *openAIWSPolicyEnforcingFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
@@ -686,6 +721,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("account is nil")
 	}
 	ctx, cancelBusiness := context.WithCancel(ctx)
+	ctx = withCodexRequestStrategyConnectionScope(ctx, CodexRequestStrategyScopePassthrough)
 	businessHold := &codexTicketBusinessTurnHold{ctx: ctx, cancel: cancelBusiness, service: s, account: account}
 	defer businessHold.close()
 	if err := businessHold.begin(); err != nil {
@@ -757,6 +793,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return fmt.Errorf("normalize first websocket response.create: %w", normalizeErr)
 	} else if compatibilityChanged {
 		firstClientMessage = normalized
+	}
+	if strategyMessage, _, strategyErr := s.applyCodexRequestStrategyRaw(ctx, firstClientMessage, account, token); strategyErr != nil {
+		return wrapOpenAIWSFallback("request_strategy", strategyErr)
+	} else {
+		firstClientMessage = strategyMessage
 	}
 	if account.IsOpenAIOAuthLike() {
 		aliasedBody, reverse, aliased, aliasErr := aliasOpenAIOAuthReservedToolNamesBody(firstClientMessage)
@@ -894,6 +935,23 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
+		cookieMode := s.codexCookieModeForRequest(ctx, account)
+		if ticketReceipt != nil && normalizeCodexCookieMode(ticketReceipt.ticket.CookieMode) != cookieMode {
+			return ErrOpenAICodexTicketUnavailable
+		}
+		filterCodexCookieHeader(headers, cookieMode)
+		if ticketReceipt != nil && !ticketReceipt.ticket.matchesHeaders(headers) {
+			return ErrOpenAICodexTicketUnavailable
+		}
+		if err := ticketReceipt.validate(time.Now()); err != nil {
+			return err
+		}
+		if ticketReceipt != nil && ticketReceipt.service != nil && ticketReceipt.ticket.usesCookies() {
+			cfg := ticketReceipt.service.openAICodexTicketConfigForAccount(ctx, account)
+			if err := ticketReceipt.service.validateCodexCookieProjectionProof(ctx, account, &ticketReceipt.ticket, cfg); err != nil {
+				return err
+			}
+		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
 		if tlsProfile != nil {
 			tlsDialer, ok := dialer.(openAIWSClientTLSDialer)
@@ -906,6 +964,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 		}
 		cancelDial()
+		ticketReceipt.observeHandshake(ctx, s, handshakeHeaders)
 		if err == nil {
 			break
 		}
@@ -949,9 +1008,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
-	ticketReceipt.observeHandshake(ctx, s, handshakeHeaders)
 	upstreamFrameConn = s.observeOpenAICodexTicketWSFrames(ctx, upstreamFrameConn, ticketReceipt, account)
 	upstreamFrameConn = &randomProxyObservedWSFrameConn{FrameConn: upstreamFrameConn, account: account, source: s.accountRepo}
+	upstreamFrameConn = &openAIWSRequestTimezoneFrameConn{inner: upstreamFrameConn, service: s}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),

@@ -138,7 +138,8 @@ func mergeSharedPoolUserAccounts(byUser map[int64]*service.SharedPoolUserEarning
 
 func (r *sharedPoolEarningsRepository) mergeSharedPoolUserEarnings(ctx context.Context, byUser map[int64]*service.SharedPoolUserEarnings) error {
 	rows, err := r.db.QueryContext(ctx, `SELECT visible_earnings.owner_user_id, COALESCE(u.email, ''),
-		COUNT(DISTINCT visible_earnings.account_id), COUNT(*), COALESCE(SUM(visible_earnings.owner_amount), 0),
+		COUNT(DISTINCT visible_earnings.account_id), COUNT(*), COALESCE(SUM(visible_earnings.billing_amount), 0),
+		COALESCE(SUM(visible_earnings.owner_amount), 0), COALESCE(SUM(`+sharedPoolDisplayedPlatformAmountSQL+`), 0),
 		COALESCE(SUM(visible_earnings.owner_amount) FILTER (WHERE visible_earnings.effective_status = 'available'), 0),
 		COALESCE(SUM(visible_earnings.owner_amount) FILTER (WHERE visible_earnings.effective_status = 'pending'), 0),
 		COALESCE(SUM(visible_earnings.owner_amount) FILTER (WHERE visible_earnings.effective_status = 'transferred'), 0)
@@ -154,7 +155,8 @@ func (r *sharedPoolEarningsRepository) mergeSharedPoolUserEarnings(ctx context.C
 		var item service.SharedPoolUserEarnings
 		var earningsAccountCount int64
 		if err := rows.Scan(&item.UserID, &item.Email, &earningsAccountCount, &item.EarningsCount,
-			&item.TotalEarned, &item.Available, &item.Pending, &item.Transferred); err != nil {
+			&item.BillingAmount, &item.TotalEarned, &item.PlatformAmount,
+			&item.Available, &item.Pending, &item.Transferred); err != nil {
 			return err
 		}
 		if existing := byUser[item.UserID]; existing != nil {
@@ -162,7 +164,9 @@ func (r *sharedPoolEarningsRepository) mergeSharedPoolUserEarnings(ctx context.C
 				existing.Email = item.Email
 			}
 			existing.EarningsCount = item.EarningsCount
+			existing.BillingAmount = item.BillingAmount
 			existing.TotalEarned = item.TotalEarned
+			existing.PlatformAmount = item.PlatformAmount
 			existing.Available = item.Available
 			existing.Pending = item.Pending
 			existing.Transferred = item.Transferred

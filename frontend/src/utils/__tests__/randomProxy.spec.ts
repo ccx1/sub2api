@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, randomProxyExtra } from '../randomProxy'
+import { isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, normalizeRandomProxyRegionFallback, randomProxyExtra } from '../randomProxy'
 
 describe('random proxy settings serialization', () => {
   it('defaults legacy accounts to the full pool', () => {
@@ -9,7 +9,7 @@ describe('random proxy settings serialization', () => {
 
   it('preserves selected IDs without checking the currently available pool', () => {
     expect(randomProxyExtra('selected', [1, 99, 1], 'disable')).toEqual({
-      proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [1, 99], random_proxy_group_id: null, random_proxy_empty_pool_policy: 'disable', random_proxy_max_reuse_minutes: 0
+      proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [1, 99], random_proxy_group_id: null, random_proxy_empty_pool_policy: 'disable', random_proxy_max_reuse_minutes: 0, random_proxy_region_fallback: 'pool'
     })
   })
 
@@ -42,6 +42,16 @@ describe('random proxy settings serialization', () => {
     expect(randomProxyExtra('all', [], { policy: 'reject', maxReuseMinutes: 1440 }).random_proxy_max_reuse_minutes).toBe(1440)
     expect(isValidRandomProxyReuseMinutes(0)).toBe(true)
     expect(isValidRandomProxyReuseMinutes(525600)).toBe(true)
+  })
+
+  it('defaults region fallback to the current pool and preserves explicit none', () => {
+    expect(normalizeRandomProxyRegionFallback(undefined)).toBe('pool')
+    expect(normalizeRandomProxyRegionFallback(null)).toBe('pool')
+    expect(normalizeRandomProxyRegionFallback('invalid')).toBe('pool')
+    expect(normalizeRandomProxyRegionFallback('none')).toBe('none')
+    expect(randomProxyExtra('all', [], { policy: 'reject', maxReuseMinutes: 0 }).random_proxy_region_fallback).toBe('pool')
+    expect(randomProxyExtra('all', [], { policy: 'reject', maxReuseMinutes: 0, regionFallback: 'none' }).random_proxy_region_fallback).toBe('none')
+    expect(randomProxyExtra('all', [], { policy: 'reject', maxReuseMinutes: 0, regionFallback: 'pool' }).random_proxy_region_fallback).toBe('pool')
   })
 
   it.each([-1, 0.5, 525601, NaN, Infinity, '', '60', null])('rejects an invalid reuse interval %s', value => {

@@ -4,6 +4,10 @@ import "context"
 
 // 采集与业务复验可能使用不同出口，只能上报与本次请求 URL 一致的代理快照。
 func (s *OpenAIGatewayService) reportCodexProbeConnectionFailure(ctx context.Context, in openAICodexTicketProbeInput, cause error) {
+	// 后台质量检测失败只记录未完成，不能解除业务出口绑定或触发代理冷却。
+	if in.BackgroundQuality {
+		return
+	}
 	if in.Account == nil || in.ProxyURL == "" || !isProxyConnectionFailure(cause) {
 		return
 	}

@@ -163,6 +163,10 @@ func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) 
 // unschedulable until the winning window resets. Returns true when the account
 // is blocked (either newly or already paused for the same threshold reason).
 func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, account *Account) bool {
+	// 耗尽窗口由域模型暂停，保留用卡重置扫描和 Spark 母子配额隔离。
+	if account != nil && account.IsOpenAICodexQuotaExhausted(time.Now()) {
+		return true
+	}
 	if s == nil || s.settingService == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
 		return false
 	}
@@ -1755,6 +1759,8 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	if len(updates) == 0 {
 		return
 	}
+	unlock := lockOpenAICodexSnapshotWrite(account.ID)
+	defer unlock()
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
 		return

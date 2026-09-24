@@ -96,8 +96,10 @@ func (s *OpenAIGatewayService) selectOpenAICodexTicketProxy(ctx context.Context,
 	if !codexTicketProxyAvailable(proxy) || (selection.Restricted && !slices.Contains(selection.IDs, proxy.ID)) {
 		return openAICodexTicketProxy{}, ErrRandomProxyUnavailable
 	}
-	if err := validateProxyRegion(ctx, proxy, policy.countryCode, s.accountRepo); err != nil {
-		return openAICodexTicketProxy{}, err
+	if !proxy.RegionFallback {
+		if err := validateProxyRegion(ctx, proxy, policy.countryCode, s.accountRepo); err != nil {
+			return openAICodexTicketProxy{}, err
+		}
 	}
 	return openAICodexTicketProxy{url: proxy.URL(), accountID: account.ID, proxyID: proxy.ID, proxyName: proxy.Name, policy: policy}, nil
 }

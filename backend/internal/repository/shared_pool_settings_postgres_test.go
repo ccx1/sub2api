@@ -73,7 +73,6 @@ func TestSharedPoolSettingsPostgresInvalidSubscriptionRollsBackAllFields(t *test
 		{"zero charge multiplier", func(g *dbent.GroupCreate) *dbent.GroupCreate { return g.SetRateMultiplier(0) }},
 		{"negative charge multiplier", func(g *dbent.GroupCreate) *dbent.GroupCreate { return g.SetRateMultiplier(-1) }},
 		{"subscription group", func(g *dbent.GroupCreate) *dbent.GroupCreate { return g.SetSubscriptionType("subscription") }},
-		{"exclusive", func(g *dbent.GroupCreate) *dbent.GroupCreate { return g.SetIsExclusive(true) }},
 		{"deleted", func(g *dbent.GroupCreate) *dbent.GroupCreate { return g.SetDeletedAt(time.Now()) }},
 	}
 	for _, tc := range tests {
@@ -97,6 +96,23 @@ func TestSharedPoolSettingsPostgresInvalidSubscriptionRollsBackAllFields(t *test
 	saved, err := f.repo.SharedSettings(ctx)
 	require.NoError(t, err)
 	require.Equal(t, original, saved)
+}
+
+func TestSharedPoolSettingsPostgresAllowsExclusiveSubscriptionTarget(t *testing.T) {
+	f := sharedAccountPostgresFixture(t)
+	ctx := context.Background()
+	exclusive, err := f.client.Group.Create().SetName("Exclusive tier target").
+		SetPlatform(service.PlatformOpenAI).SetIsExclusive(true).SetRateMultiplier(1.5).Save(ctx)
+	require.NoError(t, err)
+	defaultOnly := sharedSubscriptionSettings(f)
+	defaultOnly.DefaultGroupIDs[service.PlatformOpenAI] = []int64{exclusive.ID}
+	require.Error(t, f.repo.SaveSharedSettings(ctx, defaultOnly), "exclusive groups remain invalid as defaults")
+	settings := sharedSubscriptionSettings(f)
+	settings.SubscriptionGroupIDs[service.PlatformOpenAI]["plus"] = []int64{exclusive.ID}
+	require.NoError(t, f.repo.SaveSharedSettings(ctx, settings))
+	saved, err := f.repo.SharedSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, settings, saved)
 }
 
 func TestSharedPoolSettingsPostgresSubscriptionsRequireDefault(t *testing.T) {

@@ -57,9 +57,21 @@ func (s *adminServiceImpl) GetAllGroupsByPlatform(ctx context.Context, platform 
 
 func (s *adminServiceImpl) GetAllGroupsIncludingInactive(ctx context.Context) ([]Group, error) {
 	// ListWithFilters with empty status = no status filter, so active + disabled groups are returned.
-	// PageSize 10000 is intentionally large; group count is O(dozens) in practice.
-	groups, _, err := s.groupRepo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10000}, "", "", "", nil)
-	return groups, err
+	// 分页单次最多返回 1000 条，持续读取到 total 覆盖，避免调用方静默丢失分组。
+	const pageSize = 1000
+	groups := make([]Group, 0, pageSize)
+	for page := 1; ; page++ {
+		pageGroups, result, err := s.groupRepo.ListWithFilters(ctx,
+			pagination.PaginationParams{Page: page, PageSize: pageSize}, "", "", "", nil)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, pageGroups...)
+		if result == nil || len(pageGroups) == 0 || int64(len(groups)) >= result.Total || len(pageGroups) < pageSize {
+			break
+		}
+	}
+	return groups, nil
 }
 
 func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, error) {

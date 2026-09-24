@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -16,6 +17,25 @@ type transientCooldownAccountRepo struct {
 
 func (transientCooldownAccountRepo) SetOverloaded(context.Context, int64, time.Time) error {
 	return nil
+}
+
+type transientAccountBlockRepo struct {
+	AccountRepository
+	setTempCalls int
+	lastUntil    time.Time
+	lastReason   string
+	setTempError error
+}
+
+func (r *transientAccountBlockRepo) SetOverloaded(context.Context, int64, time.Time) error {
+	return nil
+}
+
+func (r *transientAccountBlockRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, reason string) error {
+	r.setTempCalls++
+	r.lastUntil = until
+	r.lastReason = reason
+	return r.setTempError
 }
 
 func TestHandleOpenAITransientError_BlocksOnlyRequestedModel(t *testing.T) {
@@ -57,6 +77,96 @@ func TestHandleOpenAITransientError_TransientStatusesUseModelScope(t *testing.T)
 			require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"), "status %d should block the failing model", statusCode)
 		})
 	}
+}
+
+func TestHandleOpenAITransient503_ThirdFailurePausesAccount(t *testing.T) {
+	repo := &transientAccountBlockRepo{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc.rateLimitService.SetAccountRuntimeBlocker(svc)
+	account := &Account{
+		ID:       5110,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+	}
+	body := []byte(`{"error":{"message":"upstream unavailable"}}`)
+
+	for i := 0; i < openAITransientAccountFailureThreshold; i++ {
+		require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, body, "gpt-5.5"))
+	}
+
+	require.Equal(t, 1, repo.setTempCalls)
+	require.True(t, repo.lastUntil.After(time.Now()))
+	require.Contains(t, repo.lastReason, openAITransientAccountBlockReason)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestHandleOpenAITransient503_OnlyConsecutive503Counts(t *testing.T) {
+	repo := &transientAccountBlockRepo{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 5111, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := []byte(`{"error":{"message":"upstream unavailable"}}`)
+
+	for _, statusCode := range []int{http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusServiceUnavailable} {
+		require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, statusCode, http.Header{}, body, "gpt-5.5"))
+	}
+
+	require.Equal(t, 0, repo.setTempCalls, "500/502 must break the consecutive 503 streak")
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestHandleOpenAITransient503_RequestCapacityDoesNotPauseAccount(t *testing.T) {
+	repo := &transientAccountBlockRepo{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 5114, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	ordinaryBody := []byte(`{"error":{"message":"upstream unavailable"}}`)
+	capacityBody := []byte(`{"error":{"code":"server_is_overloaded","message":"server is overloaded"}}`)
+
+	for range openAITransientAccountFailureThreshold - 1 {
+		require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, ordinaryBody, "gpt-5.5"))
+	}
+	require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, capacityBody, "gpt-5.5"))
+	require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, ordinaryBody, "gpt-5.5"))
+
+	require.Equal(t, 0, repo.setTempCalls, "request capacity 503 must clear the account streak")
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestHandleOpenAITransient503_SuccessClearsStreak(t *testing.T) {
+	repo := &transientAccountBlockRepo{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 5112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := []byte(`{"error":{"message":"upstream unavailable"}}`)
+
+	for range openAITransientAccountFailureThreshold - 1 {
+		require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, body, "gpt-5.5"))
+	}
+	svc.ReportOpenAIAccountScheduleResult(account, "gpt-5.5", true, nil)
+	require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, body, "gpt-5.5"))
+
+	require.Equal(t, 0, repo.setTempCalls, "a successful request must reset the 503 streak")
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestHandleOpenAITransient503_PersistFailureDoesNotBlockRuntime(t *testing.T) {
+	repo := &transientAccountBlockRepo{setTempError: errors.New("db unavailable")}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc.rateLimitService.SetAccountRuntimeBlocker(svc)
+	account := &Account{ID: 5113, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := []byte(`{"error":{"message":"upstream unavailable"}}`)
+
+	for range openAITransientAccountFailureThreshold {
+		require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, body, "gpt-5.5"))
+	}
+
+	require.Equal(t, 1, repo.setTempCalls)
+	require.Nil(t, account.TempUnschedulableUntil, "failed persistence must not report a successful pause")
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestHandleOpenAITransientError_529RemainsOverloadOnly(t *testing.T) {

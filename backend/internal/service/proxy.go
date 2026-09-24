@@ -35,6 +35,7 @@ type Proxy struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	RegionFallback bool `json:"-"`
 }
 
 func (p *Proxy) IsActive() bool {

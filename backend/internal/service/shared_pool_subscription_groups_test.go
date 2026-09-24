@@ -126,6 +126,40 @@ func TestSharedSubscriptionGroupMatchesAllConfiguredTargets(t *testing.T) {
 	require.Equal(t, []int64{11, 12}, ids, "initial assignment preserves configured target order and removes duplicate IDs")
 }
 
+func TestSharedSubscriptionGroupAllowsExclusiveTargetAfterConsent(t *testing.T) {
+	g := sharedTierGroup(11, PlatformOpenAI)
+	g.IsExclusive = true
+	s := &SharedPoolService{groups: sharedTierGroups{items: map[int64]*Group{
+		10: sharedTierGroup(10, PlatformOpenAI), 11: g,
+	}}}
+	cfg := &SharedPoolSettings{
+		DefaultGroupIDs:      SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}},
+		SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"plus": {11}}},
+	}
+	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "plus"},
+		Extra:       map[string]any{SharedPoolDispatchConsentKey: true}}
+	ids, err := s.initialSharedGroups(context.Background(), cfg, a)
+	require.NoError(t, err)
+	require.Equal(t, []int64{11}, ids)
+}
+
+func TestSharedSubscriptionSettingsAllowExclusiveTarget(t *testing.T) {
+	exclusive := sharedTierGroup(11, PlatformOpenAI)
+	exclusive.IsExclusive = true
+	r := &sharedTierSettingsRepo{}
+	s := &SharedPoolService{repo: r, groups: sharedTierGroups{items: map[int64]*Group{
+		10: sharedTierGroup(10, PlatformOpenAI), 11: exclusive,
+	}}}
+	cfg := &SharedPoolSettings{
+		MaxConcurrency:       5,
+		DefaultGroupIDs:      SharedPoolDefaultGroupIDs{PlatformOpenAI: {10}},
+		SubscriptionGroupIDs: SharedPoolSubscriptionGroupIDs{PlatformOpenAI: {"plus": {11}}},
+	}
+	require.NoError(t, s.SaveSettings(context.Background(), cfg))
+	require.Equal(t, []int64{11}, r.cfg.SubscriptionGroupIDs[PlatformOpenAI]["plus"])
+}
+
 func TestSharedSubscriptionDefaultsAndErrors(t *testing.T) {
 	groups := sharedTierGroups{items: map[int64]*Group{10: sharedTierGroup(10, PlatformOpenAI), 11: sharedTierGroup(11, PlatformOpenAI)}}
 	s := &SharedPoolService{groups: groups}

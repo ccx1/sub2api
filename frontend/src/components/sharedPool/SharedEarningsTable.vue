@@ -1,7 +1,7 @@
 <template>
   <div>
     <p v-if="error" role="alert" class="mb-3 text-sm text-red-500">{{ error }} <button class="underline" @click="load">{{ t('common.refresh') }}</button></p>
-    <section v-if="admin" class="mb-5 space-y-2" data-test="user-earnings-summary">
+    <section v-if="admin && showUserTotals" class="mb-5 space-y-2" data-test="user-earnings-summary">
       <div>
         <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('sharedPool.userEarningsTitle') }}</h3>
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('sharedPool.userEarningsHint') }}</p>
@@ -16,10 +16,13 @@
               <th class="p-3">{{ t('sharedPool.accountsCount') }}</th>
               <th class="p-3">{{ t('sharedPool.accountTiers') }}</th>
               <th class="p-3">{{ t('sharedPool.entriesCount') }}</th>
+              <th class="p-3">{{ t('sharedPool.billed') }}</th>
               <th class="p-3">{{ t('sharedPool.total') }}</th>
+              <th class="p-3">{{ t('sharedPool.platformAmount') }}</th>
               <th class="p-3">{{ t('sharedPool.available') }}</th>
               <th class="p-3">{{ t('sharedPool.pending') }}</th>
               <th class="p-3">{{ t('sharedPool.transferred') }}</th>
+              <th class="p-3">{{ t('sharedPool.actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -37,16 +40,31 @@
                 <span v-else class="text-gray-400">—</span>
               </td>
               <td class="p-3">{{ item.earnings_count }}</td>
+              <td class="p-3">{{ money(item.billing_amount ?? 0) }}</td>
               <td class="p-3 font-medium text-emerald-600 dark:text-emerald-400">{{ money(item.total_earned) }}</td>
+              <td class="p-3">{{ money(item.platform_amount ?? 0) }}</td>
               <td class="p-3">{{ money(item.available) }}</td>
               <td class="p-3">{{ money(item.pending) }}</td>
               <td class="p-3">{{ money(item.transferred) }}</td>
+              <td class="p-3">
+                <button
+                  type="button"
+                  class="btn btn-secondary whitespace-nowrap px-2 py-1 text-xs"
+                  :data-test="`transfer-user-earnings-${item.user_id}`"
+                  :aria-label="t('sharedPool.transferForUser', { email: item.email || `#${item.user_id}` })"
+                  :disabled="item.available <= 0 || transferringUserId === item.user_id"
+                  @click="openTransfer(item)"
+                >
+                  {{ transferringUserId === item.user_id ? t('sharedPool.transferring') : t('sharedPool.transfer') }}
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
       <p v-else class="py-3 text-sm text-gray-500">{{ t('sharedPool.noEarnings') }}</p>
     </section>
+    <template v-if="!userTotalsOnly">
     <div v-if="loading" class="py-8 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
     <div v-else-if="!items.length" class="py-10 text-center text-sm text-gray-500">{{ t('sharedPool.noEarnings') }}</div>
     <div v-else class="table-container overflow-x-auto">
@@ -81,17 +99,37 @@
       </table>
     </div>
     <Pagination v-if="total > 20" :page="page" :page-size="20" :total="total" :show-page-size-selector="false" @update:page="changePage" />
+    </template>
+    <ConfirmDialog
+      :show="!!transferUser"
+      :title="t('sharedPool.adminTransferTitle')"
+      :message="transferUser ? t('sharedPool.adminTransferConfirm', { email: transferUser.email || `#${transferUser.user_id}`, amount: money(transferUser.available) }) : ''"
+      :confirm-text="t('sharedPool.transfer')"
+      :cancel-text="t('common.cancel')"
+      @cancel="transferUser = null"
+      @confirm="transfer"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { formatDateTime } from '@/utils/format'
 import { adminSharedPoolAPI, sharedPoolAPI, type SharedEarning, type SharedUserEarnings } from '@/api/sharedPool'
-const props = defineProps<{ admin?: boolean }>()
+import { useAppStore } from '@/stores/app'
+import { extractApiErrorMessage } from '@/utils/apiError'
+const props = withDefaults(defineProps<{ admin?: boolean; showUserTotals?: boolean; userTotalsOnly?: boolean }>(), {
+  admin: false,
+  showUserTotals: true,
+  userTotalsOnly: false,
+})
+const showUserTotals = props.showUserTotals
+const userTotalsOnly = props.userTotalsOnly
 const { t } = useI18n()
+const appStore = useAppStore()
 const items = ref<SharedEarning[]>([])
 const page = ref(1)
 const total = ref(0)
@@ -100,15 +138,21 @@ const loading = ref(false)
 const userTotals = ref<SharedUserEarnings[]>([])
 const userTotalsLoading = ref(false)
 const userTotalsError = ref('')
+const transferUser = ref<SharedUserEarnings | null>(null)
+const transferringUserId = ref<number | null>(null)
 const money = (amount: number) => `$${Number(amount || 0).toFixed(6)}`
 async function load() {
   loading.value = true; error.value = ''
   userTotalsError.value = ''
-  if (props.admin) {
+  if (props.admin && props.showUserTotals) {
     userTotalsLoading.value = true
     try { userTotals.value = await adminSharedPoolAPI.userEarnings() }
     catch (e: unknown) { userTotalsError.value = (e as Error).message || t('sharedPool.loadFailed') }
     finally { userTotalsLoading.value = false }
+  }
+  if (userTotalsOnly) {
+    loading.value = false
+    return
   }
   try {
     const result = await (props.admin ? adminSharedPoolAPI : sharedPoolAPI).earnings(page.value)
@@ -117,5 +161,27 @@ async function load() {
   finally { loading.value = false }
 }
 function changePage(value: number) { page.value = value; void load() }
+function openTransfer(user: SharedUserEarnings) {
+  if (!props.admin || !showUserTotals || user.available <= 0 || transferringUserId.value !== null) return
+  transferUser.value = user
+}
+async function transfer() {
+  const user = transferUser.value
+  transferUser.value = null
+  if (!user || transferringUserId.value !== null || user.available <= 0) return
+  transferringUserId.value = user.user_id
+  try {
+    const result = await adminSharedPoolAPI.transferUserEarnings(user.user_id)
+    await load()
+    appStore.showSuccess(t('sharedPool.adminTransferSuccess', {
+      email: user.email || `#${user.user_id}`,
+      amount: money(result.amount),
+    }))
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('sharedPool.adminTransferFailed')))
+  } finally {
+    transferringUserId.value = null
+  }
+}
 onMounted(load)
 </script>

@@ -82,6 +82,20 @@ func TestResolvePluginOutboundIdentityPausesDuringDailyCooldown(t *testing.T) {
 	require.Empty(t, repo.disabledIDs, "每日冷却不能永久禁用账号")
 }
 
+func TestResolvePluginOutboundIdentitySkipsExhaustedCodexAccount(t *testing.T) {
+	account := pluginDirectoryAccount(RandomProxyEmptyPoolPolicyDirect)
+	account.Extra["codex_5h_used_percent"] = 100.0
+	account.Extra["codex_5h_reset_at"] = time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	repo := &pluginDirectoryProxyRepo{account: account}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+
+	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), pluginDirectoryScope(), account.ID)
+
+	require.NoError(t, err)
+	require.Nil(t, identity, "plugins must not receive credentials from an exhausted Codex account")
+	require.Zero(t, repo.globalCalls)
+}
+
 func TestResolvePluginOutboundIdentityUsesSelectedRandomProxy(t *testing.T) {
 	account := pluginDirectoryAccount(RandomProxyEmptyPoolPolicyReject)
 	account.Extra[RandomProxyPoolScopeExtraKey] = RandomProxyPoolSelected

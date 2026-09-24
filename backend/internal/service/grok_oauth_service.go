@@ -433,8 +433,11 @@ func (s *GrokOAuthService) tokenInfoFromResponse(tokenResp *xai.TokenResponse, c
 }
 
 func (s *GrokOAuthService) proxyURL(ctx context.Context, proxyID *int64) (string, error) {
-	if proxyID == nil {
+	if proxyID == nil || *proxyID == 0 {
 		return "", nil
+	}
+	if *proxyID < 0 {
+		return "", infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_PROXY_INVALID", "proxy_id must be >= 0")
 	}
 	if s.proxyRepo == nil {
 		return "", infraerrors.New(http.StatusBadRequest, "GROK_OAUTH_PROXY_NOT_AVAILABLE", "proxy repository is not available")

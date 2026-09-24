@@ -75,6 +75,7 @@ func TestCodexTicketExchangeRecordsRejectedResponseBody(t *testing.T) {
 
 func TestCodexTicketExchangeHistoryLimitsBodiesButRetainsModels(t *testing.T) {
 	history := CodexTicketHistory{}
+	base := time.Now().Add(-2 * time.Hour)
 	var firstExchange *CodexTicketExchange
 	for i := 0; i < 105; i++ {
 		exchange := &CodexTicketExchange{CaptureMode: "raw", RequestedModel: "requested", ReportedModels: []string{"actual"},
@@ -82,7 +83,7 @@ func TestCodexTicketExchangeHistoryLimitsBodiesButRetainsModels(t *testing.T) {
 		if i == 0 {
 			firstExchange = exchange
 		}
-		history.Append(CodexTicketAttempt{ID: fmt.Sprint(i), StartedAt: time.Unix(int64(i), 0),
+		history.Append(CodexTicketAttempt{ID: fmt.Sprint(i), StartedAt: base.Add(time.Duration(i) * time.Second),
 			HarvestExchange: exchange})
 	}
 	require.NotNil(t, firstExchange.Request, "历史清理不能修改调用者持有的原始记录")

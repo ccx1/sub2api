@@ -27,7 +27,8 @@ func (r *accountRepository) prepareCodexTicketProxyUpdate(ctx context.Context, i
 	_, hasCredentialPolicy := updates[service.CodexTicketCredentialPolicyExtraKey]
 	_, hasRegionMode := updates[service.ProxyRegionModeExtraKey]
 	_, hasRegionCountry := updates[service.ProxyRegionCountryExtraKey]
-	if !hasMode && !hasID && !hasStrategy && !hasCredentialPolicy && !hasRegionMode && !hasRegionCountry {
+	_, hasRegionFallbackCountry := updates[service.ProxyRegionFallbackCountryExtraKey]
+	if !hasMode && !hasID && !hasStrategy && !hasCredentialPolicy && !hasRegionMode && !hasRegionCountry && !hasRegionFallbackCountry {
 		return updates, nil
 	}
 	updates = copyJSONMap(updates)
@@ -70,7 +71,8 @@ func needsCodexTicketProxyTransaction(ctx context.Context, extra map[string]any)
 	_, credentialPolicy := extra[service.CodexTicketCredentialPolicyExtraKey]
 	_, regionMode := extra[service.ProxyRegionModeExtraKey]
 	_, regionCountry := extra[service.ProxyRegionCountryExtraKey]
-	return (mode || id || strategy || credentialPolicy || regionMode || regionCountry) && dbent.TxFromContext(ctx) == nil
+	_, regionFallbackCountry := extra[service.ProxyRegionFallbackCountryExtraKey]
+	return (mode || id || strategy || credentialPolicy || regionMode || regionCountry || regionFallbackCountry) && dbent.TxFromContext(ctx) == nil
 }
 
 func (r *accountRepository) updateCodexTicketProxyExtra(ctx context.Context, id int64, updates map[string]any) error {

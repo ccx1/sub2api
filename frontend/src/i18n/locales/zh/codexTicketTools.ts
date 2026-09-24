@@ -33,6 +33,7 @@ export default {
       idle: '空闲', disabled: '保护未启用', available: '可采集', waiting: '等待准入', reserved: '已预留', running: '正在采集',
       half_open: '半开试探', cooldown: '账号冷却', account_cooldown: '账号冷却', account_busy: '账号有在途采票',
       all_proxies_silent: '全部代理静默', proxy_silent: '代理静默', proxy_half_open: '代理已有半开采集', capacity: '等待代理容量',
+      ip_cooling: '出口 IP 冷却', ip_disabled: '出口 IP 已禁用',
       verification_deferred: '业务复验暂缓', budget_exhausted: '账号预算耗尽', unavailable: '共享状态不可用',
       recovery_waiting_for_harvest: '等待有资格的采集恢复代理', model_backoff: '模型失败退避', retry_after: '上游要求等待'
     }

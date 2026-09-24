@@ -8,7 +8,14 @@ vi.mock('@/api/admin', () => ({ adminAPI: { proxies: api } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const groups = [{ id: 7, name: 'Hong Kong', proxy_count: 3, active_proxy_count: 2 }]
-const global = { stubs: { BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' } } }
+const global = { stubs: {
+  BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
+  Select: {
+    props: ['modelValue', 'options'],
+    emits: ['update:modelValue'],
+    template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value === \'\' ? null : Number($event.target.value))"><option v-for="option in options" :value="option.value">{{ option.label }}</option></select>'
+  }
+} }
 const mounted: { unmount: () => void }[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 beforeEach(() => vi.clearAllMocks())

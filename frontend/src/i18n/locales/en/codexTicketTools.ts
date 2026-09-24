@@ -33,6 +33,7 @@ export default {
       idle: 'Idle', disabled: 'Protection disabled', available: 'Available', waiting: 'Waiting for admission', reserved: 'Reserved', running: 'Harvesting',
       half_open: 'Half-open probe', cooldown: 'Account cooldown', account_cooldown: 'Account cooldown', account_busy: 'Account harvest in progress',
       all_proxies_silent: 'All proxies silent', proxy_silent: 'Proxy silent', proxy_half_open: 'Proxy probe already in progress', capacity: 'Waiting for proxy capacity',
+      ip_cooling: 'Egress IP cooling down', ip_disabled: 'Egress IP disabled',
       verification_deferred: 'Verification deferred', budget_exhausted: 'Account budget exhausted', unavailable: 'Shared state unavailable',
       recovery_waiting_for_harvest: 'Waiting for an eligible harvest to recover the proxy', model_backoff: 'Model failure backoff', retry_after: 'Upstream retry delay'
     }

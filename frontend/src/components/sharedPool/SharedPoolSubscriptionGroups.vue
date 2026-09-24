@@ -46,7 +46,7 @@ import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
-import { sharedPlatforms as platforms, sharedPlatformNames as platformNames, subscriptionTierOptions as tierOptions, isDispatchGroup } from './settlementPolicy'
+import { sharedPlatforms as platforms, sharedPlatformNames as platformNames, subscriptionTierOptions as tierOptions, isSubscriptionAssignmentGroup } from './settlementPolicy'
 
 const props = defineProps<{
   rules?: SharedSettings['subscription_group_ids']
@@ -71,7 +71,7 @@ watch(() => props.rules, value => {
 }, { immediate: true, deep: true })
 
 function groupsFor(platform: SharedPlatform) {
-  return props.groups.filter(group => group.platform === platform && isDispatchGroup(group))
+  return props.groups.filter(group => group.platform === platform && isSubscriptionAssignmentGroup(group))
 }
 function validGroup(platform: SharedPlatform, id: number) { return groupsFor(platform).some(group => group.id === id) }
 function knownTier(platform: SharedPlatform, tier: string) { return tierOptions[platform].some(option => option.value === tier) }
@@ -87,11 +87,10 @@ function tierSelectOptions(platform: SharedPlatform, row: RuleRow): SelectOption
   return options.concat(tierOptions[platform])
 }
 function groupSelectOptions(platform: SharedPlatform, row: RuleRow): GroupOption[] {
-  const selected = new Set(row.groupIds)
   const unavailable: GroupOption[] = row.groupIds.filter(id => !validGroup(platform, id))
     .map(id => ({ value: String(id), label: unavailableGroup(id), disabled: true }))
+  // 保留已选分组，供 CodexTicketTagSelect 解析标签名称；下拉重复项由组件自行过滤。
   return unavailable.concat(groupsFor(platform)
-    .filter(group => !selected.has(group.id))
     .map(group => ({ value: String(group.id), label: `${group.name} · ${group.rate_multiplier}x` })))
 }
 function updateTier(row: RuleRow, value: SelectOption['value']) {

@@ -342,6 +342,71 @@ func TestHandleSmartRetry_503_ShortDelay_SingleAccountRetry_NoRateLimit(t *testi
 		"should NOT set model rate limit for 503 in single account mode")
 }
 
+func TestHandleSmartRetry_503_Capacity_SingleAccountIgnoresGlobalCooldown(t *testing.T) {
+	model := "single-account-capacity-cooldown-test"
+	cooldownUntil := time.Now().Add(time.Minute)
+	modelCapacityExhaustedMu.Lock()
+	modelCapacityExhaustedUntil[model] = cooldownUntil
+	modelCapacityExhaustedMu.Unlock()
+	t.Cleanup(func() {
+		modelCapacityExhaustedMu.Lock()
+		delete(modelCapacityExhaustedUntil, model)
+		modelCapacityExhaustedMu.Unlock()
+	})
+	body := []byte(`{"error":{"code":503,"status":"UNAVAILABLE","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"MODEL_CAPACITY_EXHAUSTED","metadata":{"model":"` + model + `"}}]}}`)
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}},
+		errors:    []error{nil},
+	}
+	repo := &stubAntigravityAccountRepo{}
+	params := antigravityRetryLoopParams{
+		ctx: ctxWithSingleAccountRetry(), prefix: "[test]",
+		account:     &Account{ID: 41, Platform: PlatformAntigravity, Type: AccountTypeOAuth},
+		accessToken: "token", action: "generateContent", body: []byte(`{"input":"test"}`),
+		httpUpstream: upstream, accountRepo: repo,
+	}
+	resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))}
+	result := (&AntigravityGatewayService{}).handleSmartRetry(params, resp, body, "https://ag-1.test", 0, []string{"https://ag-1.test"})
+
+	require.NotNil(t, result.resp)
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.Len(t, upstream.calls, 1, "single-account capacity failures must retry despite global cooldown")
+	require.Empty(t, repo.modelRateLimitCalls)
+	modelCapacityExhaustedMu.RLock()
+	actualUntil := modelCapacityExhaustedUntil[model]
+	modelCapacityExhaustedMu.RUnlock()
+	require.Equal(t, cooldownUntil, actualUntil, "single-account retries must not mutate global model cooldown")
+}
+
+func TestHandleSmartRetry_503_Capacity_SingleAccountExhaustionDoesNotSetGlobalCooldown(t *testing.T) {
+	model := "single-account-capacity-exhaustion-test"
+	body := []byte(`{"error":{"code":503,"status":"UNAVAILABLE","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"MODEL_CAPACITY_EXHAUSTED","metadata":{"model":"` + model + `"}}]}}`)
+	upstream := &mockSmartRetryUpstream{
+		responses:  []*http.Response{{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))}},
+		errors:     []error{nil},
+		repeatLast: true,
+	}
+	repo := &stubAntigravityAccountRepo{}
+	params := antigravityRetryLoopParams{
+		ctx: ctxWithSingleAccountRetry(), prefix: "[test]",
+		account:     &Account{ID: 42, Platform: PlatformAntigravity, Type: AccountTypeOAuth},
+		accessToken: "token", action: "generateContent", body: []byte(`{"input":"test"}`),
+		httpUpstream: upstream, accountRepo: repo,
+	}
+	resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))}
+	result := (&AntigravityGatewayService{}).handleSmartRetry(params, resp, body, "https://ag-1.test", 0, []string{"https://ag-1.test"})
+
+	require.NotNil(t, result.resp)
+	require.Equal(t, http.StatusServiceUnavailable, result.resp.StatusCode)
+	require.Nil(t, result.switchError)
+	require.Len(t, upstream.calls, antigravitySingleAccountSmartRetryMaxAttempts)
+	require.Empty(t, repo.modelRateLimitCalls)
+	modelCapacityExhaustedMu.RLock()
+	_, exists := modelCapacityExhaustedUntil[model]
+	modelCapacityExhaustedMu.RUnlock()
+	require.False(t, exists, "bounded single-account retries must not create a global model cooldown")
+}
+
 // TestHandleSmartRetry_503_ShortDelay_NoSingleAccountRetry_SetsRateLimit
 // 对照组：503 + retryDelay < 7s + 无 SingleAccountRetry → 智能重试耗尽后照常设限流
 // 使用 RATE_LIMIT_EXCEEDED 而非 MODEL_CAPACITY_EXHAUSTED，因为后者走独立的 60 次重试路径

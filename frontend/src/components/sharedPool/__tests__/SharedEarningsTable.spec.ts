@@ -2,10 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SharedEarningsTable from '../SharedEarningsTable.vue'
 
-const { userEarnings, adminEarnings, adminUserEarnings } = vi.hoisted(() => ({ userEarnings: vi.fn(), adminEarnings: vi.fn(), adminUserEarnings: vi.fn() }))
-vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: { earnings: userEarnings }, adminSharedPoolAPI: { earnings: adminEarnings, userEarnings: adminUserEarnings } }))
+const { userEarnings, adminEarnings, adminUserEarnings, transferUserEarnings, showSuccess, showError } = vi.hoisted(() => ({
+  userEarnings: vi.fn(), adminEarnings: vi.fn(), adminUserEarnings: vi.fn(), transferUserEarnings: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(),
+}))
+vi.mock('@/api/sharedPool', () => ({
+  sharedPoolAPI: { earnings: userEarnings },
+  adminSharedPoolAPI: { earnings: adminEarnings, userEarnings: adminUserEarnings, transferUserEarnings },
+}))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess, showError }) }))
 
 const base = { account_id: 7, group_id: 10, group_name: 'Internal dispatch group', billing_amount: 5, platform_amount: 1.05, owner_amount: 3.95, created_at: '2026-09-19T12:00:00Z' }
 const page = { total: 2, items: [
@@ -19,6 +25,7 @@ describe('shared earnings rate snapshots', () => {
     userEarnings.mockResolvedValue(page)
     adminEarnings.mockResolvedValue(page)
     adminUserEarnings.mockResolvedValue([])
+    transferUserEarnings.mockResolvedValue({ id: 1, amount: 5, balance: 15 })
   })
 
   it('distinguishes billing from independent settlement and retains negative platform margin', async () => {
@@ -71,5 +78,79 @@ describe('shared earnings rate snapshots', () => {
     await flushPromises()
     expect(wrapper.get('[data-test="account-tiers"]').text()).toBe('—')
     wrapper.unmount()
+  })
+
+  it('confirms an administrator transfer and refreshes contributor totals', async () => {
+    const contributor = { user_id: 6, email: 'owner@example.com', account_count: 3, earnings_count: 3, total_earned: 12.5, available: 5, pending: 2.5, transferred: 5 }
+    adminUserEarnings.mockResolvedValueOnce([contributor]).mockResolvedValueOnce([{ ...contributor, available: 0, transferred: 10 }])
+    const wrapper = mount(SharedEarningsTable, {
+      props: { admin: true },
+      global: {
+        stubs: {
+          Pagination: true,
+          ConfirmDialog: {
+            props: ['show', 'message'],
+            emits: ['confirm', 'cancel'],
+            template: '<div v-if="show" data-test="transfer-confirm"><p>{{ message }}</p><button data-test="transfer-confirm-submit" @click="$emit(\'confirm\')">confirm</button></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="transfer-user-earnings-6"]').trigger('click')
+    expect(wrapper.get('[data-test="transfer-confirm"]').text()).toContain('sharedPool.adminTransferConfirm')
+    await wrapper.get('[data-test="transfer-confirm-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(transferUserEarnings).toHaveBeenCalledWith(6)
+    expect(adminUserEarnings).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="transfer-user-earnings-6"]').attributes('disabled')).toBeDefined()
+    expect(showSuccess).toHaveBeenCalledWith('sharedPool.adminTransferSuccess')
+    wrapper.unmount()
+  })
+
+  it('disables empty transfers and reports administrator transfer failures', async () => {
+    adminUserEarnings.mockResolvedValue([{ user_id: 7, email: 'empty@example.com', account_count: 1, earnings_count: 1, total_earned: 0, available: 0, pending: 0, transferred: 0 }])
+    const wrapper = mount(SharedEarningsTable, {
+      props: { admin: true },
+      global: {
+        stubs: {
+          Pagination: true,
+          ConfirmDialog: {
+            props: ['show'],
+            emits: ['confirm', 'cancel'],
+            template: '<div v-if="show" data-test="transfer-confirm"><button data-test="transfer-confirm-submit" @click="$emit(\'confirm\')">confirm</button></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transfer-user-earnings-7"]').attributes('disabled')).toBeDefined()
+    expect(transferUserEarnings).not.toHaveBeenCalled()
+    wrapper.unmount()
+
+    adminUserEarnings.mockResolvedValue([{ user_id: 8, email: 'failure@example.com', account_count: 1, earnings_count: 1, total_earned: 3, available: 3, pending: 0, transferred: 0 }])
+    transferUserEarnings.mockRejectedValueOnce(new Error('transfer failed'))
+    const failureWrapper = mount(SharedEarningsTable, {
+      props: { admin: true },
+      global: {
+        stubs: {
+          Pagination: true,
+          ConfirmDialog: {
+            props: ['show'],
+            emits: ['confirm', 'cancel'],
+            template: '<div v-if="show" data-test="transfer-confirm"><button data-test="transfer-confirm-submit" @click="$emit(\'confirm\')">confirm</button></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await failureWrapper.get('[data-test="transfer-user-earnings-8"]').trigger('click')
+    await failureWrapper.get('[data-test="transfer-confirm-submit"]').trigger('click')
+    await flushPromises()
+    expect(showError).toHaveBeenCalledWith('transfer failed')
+    failureWrapper.unmount()
   })
 })

@@ -44,7 +44,7 @@ func (r *openAICodexTicketWSReceipt) observeHandshake(ctx context.Context, s *Op
 	// 握手已发送，观察响应时不能按当前时间过滤它实际携带的旧快照。
 	if r.ticket.usesCookies() {
 		req.Header.Del("Cookie")
-		for _, cookie := range r.ticket.Cookies {
+		for _, cookie := range filterCodexCookies(r.ticket.Cookies, r.ticket.CookieMode) {
 			if cookie != nil {
 				req.AddCookie(cookie)
 			}
@@ -67,6 +67,7 @@ func (r *openAICodexTicketWSReceipt) watch(ctx context.Context, s *OpenAIGateway
 		return nil
 	}
 	watchdog := &openAICodexTicketWSWatchdog{observer: newOpenAICodexTicketResponseObserver(model)}
+	watchdog.quality = func() { s.markCodexModelQualityAnomaly(r.account.ID, r.ticket.Model) }
 	watchdog.observer.diagnostics = &codexTicketResponseDiagnostics{wireStatus: http.StatusSwitchingProtocols}
 	watchdog.invalidate = func() {
 		r.invalidate(ctx, s, watchdog.invalidation("websocket"))
@@ -75,8 +76,10 @@ func (r *openAICodexTicketWSReceipt) watch(ctx context.Context, s *OpenAIGateway
 }
 
 type openAICodexTicketWSWatchdog struct {
-	observer   *openAICodexTicketResponseObserver
-	invalidate func()
+	observer    *openAICodexTicketResponseObserver
+	invalidate  func()
+	quality     func()
+	qualityOnce sync.Once
 }
 
 func (w *openAICodexTicketWSWatchdog) invalidation(source string) *CodexTicketInvalidation {
@@ -93,7 +96,11 @@ func (w *openAICodexTicketWSWatchdog) observe(payload []byte) {
 	}
 	// WS 消息已有完整 JSON 边界，复用事件判定且不改写传输字节。
 	w.observer.inspect(payload)
-	if completed, matches := w.observer.Result(); completed && !matches {
+	completed, matches := w.observer.Result()
+	if w.quality != nil && (w.observer.failed || w.observer.protocolCompleted && (!completed || !matches)) {
+		w.qualityOnce.Do(w.quality)
+	}
+	if completed && !matches {
 		w.invalidate()
 	}
 }
@@ -110,6 +117,7 @@ type openAICodexTicketWSIdentity struct {
 	state      [32]byte
 	model      string
 	capturedAt int64
+	cookieMode string
 }
 
 func (r *openAICodexTicketWSReceipt) identity() openAICodexTicketWSIdentity {
@@ -117,18 +125,21 @@ func (r *openAICodexTicketWSReceipt) identity() openAICodexTicketWSIdentity {
 		return openAICodexTicketWSIdentity{}
 	}
 	return openAICodexTicketWSIdentity{state: sha256.Sum256([]byte(r.ticket.credentialIdentity())),
-		model: r.ticket.Model, capturedAt: r.ticket.CapturedAt.UnixNano()}
+		model: r.ticket.Model, capturedAt: r.ticket.CapturedAt.UnixNano(), cookieMode: normalizeCodexCookieMode(r.ticket.CookieMode)}
 }
 
 func codexTicketWSCookieTransition(current, next *openAICodexTicketWSReceipt) bool {
 	if current != nil && current.config.FailClosed || next != nil && next.config.FailClosed {
 		return false
 	}
+	if normalizeCodexCookieMode(current.identity().cookieMode) != normalizeCodexCookieMode(next.identity().cookieMode) {
+		return false
+	}
 	return current != nil && current.ticket.usesCookies() || next != nil && next.ticket.usesCookies()
 }
 
 func (r *openAICodexTicketWSReceipt) validate(now time.Time) error {
-	if r == nil || !r.config.FailClosed {
+	if r == nil || !r.config.FailClosed && normalizeCodexCookieMode(r.ticket.CookieMode) == CodexCookiePreserve {
 		return nil
 	}
 	if !r.ticket.usable(now, r.account, r.config) {
@@ -145,7 +156,8 @@ func (r *openAICodexTicketWSReceipt) validate(now time.Time) error {
 
 func discardExpiredOpenAICodexTicketWSHandshake(req *openAIWSAcquireRequest, now time.Time) {
 	receipt := req.CodexTicketReceipt
-	if receipt == nil || !receipt.ticket.usesCookies() || receipt.config.FailClosed {
+	if receipt == nil || !receipt.ticket.usesCookies() || receipt.config.FailClosed ||
+		normalizeCodexCookieMode(receipt.ticket.CookieMode) != CodexCookiePreserve {
 		return
 	}
 	expired := !receipt.ticket.effectiveExpiresAt(receipt.config).After(now)
@@ -169,6 +181,11 @@ func validOpenAICodexTicketWSReceiptAccount(req openAIWSAcquireRequest) bool {
 
 func normalizeOpenAIWSTicketCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
 	key := normalizeOpenAIWSTransportCompatibility(req)
+	key.cookieMode = openAIWSCookieMode(req)
+	if normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode) == CodexRouteAffinityStrict {
+		key.strictRoute = openAIWSRequestRouteFingerprint(req.Headers)
+		key.strictRoutingHint = normalizeOpenAIWSRoutingAffinity(req.Headers)
+	}
 	// 没有原生注入凭证时，不把客户端请求头当作受管理票据。
 	if receipt := req.CodexTicketReceipt; receipt != nil && receipt.ticket.matchesHeaders(req.Headers) {
 		key.codexTicket = receipt.identity()
@@ -176,7 +193,44 @@ func normalizeOpenAIWSTicketCompatibility(req openAIWSAcquireRequest) openAIWSHa
 	return key
 }
 
+func openAIWSCookieMode(req openAIWSAcquireRequest) string {
+	if req.CodexTicketReceipt != nil {
+		return normalizeCodexCookieMode(req.CodexTicketReceipt.ticket.CookieMode)
+	}
+	return normalizeCodexCookieMode(req.CookieMode)
+}
+
+// 只约束新握手；已建立连接继续使用它实际发送的不可变凭据快照。
+func validateOpenAIWSCookiePolicyDial(ctx context.Context, req openAIWSAcquireRequest) error {
+	if req.CookiePolicyScope != "" {
+		ctx = withCodexRequestStrategyConnectionScope(ctx, req.CookiePolicyScope)
+	}
+	var current string
+	if req.CookiePolicyCurrent != nil {
+		current = req.CookiePolicyCurrent(ctx)
+	} else if receipt := req.CodexTicketReceipt; receipt != nil && receipt.service != nil {
+		current = receipt.service.codexCookieModeForRequest(ctx, req.Account)
+	} else {
+		return nil
+	}
+	if normalizeCodexCookieMode(current) != openAIWSCookieMode(req) {
+		return ErrOpenAICodexTicketUnavailable
+	}
+	if receipt := req.CodexTicketReceipt; receipt != nil && receipt.service != nil && receipt.ticket.usesCookies() {
+		cfg := receipt.service.openAICodexTicketConfigForAccount(ctx, req.Account)
+		if err := receipt.service.validateCodexCookieProjectionProof(ctx, req.Account, &receipt.ticket, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *OpenAIGatewayService) refreshOpenAICodexTicketWSHeaders(ctx context.Context, account *Account, model string, req *openAIWSAcquireRequest) error {
+	if req.CookiePolicyScope != "" {
+		ctx = withCodexRequestStrategyConnectionScope(ctx, req.CookiePolicyScope)
+	} else {
+		req.CookiePolicyScope = codexRequestStrategyConnectionScope(ctx)
+	}
 	req.Headers = cloneHeader(req.Headers)
 	if req.Headers == nil {
 		req.Headers = make(http.Header)
@@ -245,6 +299,7 @@ type openAICodexTicketWSFrameConn struct {
 	ctx                 context.Context
 	service             *OpenAIGatewayService
 	account             *Account
+	cookiePolicyScope   string
 	receipt             *openAICodexTicketWSReceipt
 	watchdog            *openAICodexTicketWSWatchdog
 	inFlight            bool
@@ -261,14 +316,15 @@ func (s *OpenAIGatewayService) observeOpenAICodexTicketWSFrames(ctx context.Cont
 	if account == nil {
 		return conn
 	}
-	return &openAICodexTicketWSFrameConn{FrameConn: conn, ctx: ctx, service: s, account: account, receipt: receipt}
+	return &openAICodexTicketWSFrameConn{FrameConn: conn, ctx: ctx, service: s, account: account, receipt: receipt,
+		cookiePolicyScope: codexRequestStrategyConnectionScope(ctx)}
 }
 
 func (c *openAICodexTicketWSFrameConn) WriteFrame(ctx context.Context, kind coderws.MessageType, payload []byte) error {
 	if (kind == coderws.MessageText || kind == coderws.MessageBinary) && gjson.GetBytes(payload, "type").String() == "response.create" {
 		c.mu.Lock()
 		model := gjson.GetBytes(payload, "model").String()
-		req := openAIWSAcquireRequest{}
+		req := openAIWSAcquireRequest{CookiePolicyScope: c.cookiePolicyScope}
 		err := c.service.refreshOpenAICodexTicketWSHeaders(ctx, c.account, model, &req)
 		changed := c.receipt.identity() != req.CodexTicketReceipt.identity()
 		cookieMode := codexTicketWSCookieTransition(c.receipt, req.CodexTicketReceipt)

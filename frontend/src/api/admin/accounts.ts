@@ -637,6 +637,7 @@ export async function exchangeCode(
  * @returns Results of batch creation
  */
 export async function batchCreate(accounts: CreateAccountRequest[], options?: {
+  use_import_defaults?: boolean
   protection_enabled?: boolean
   codex_ticket_enabled?: boolean
 }): Promise<{
@@ -905,12 +906,14 @@ export async function exportData(options?: {
 
 export async function importData(payload: {
   data: AdminDataPayload
+  use_import_defaults?: boolean
   skip_default_group_bind?: boolean
   protection_enabled?: boolean
   codex_ticket_enabled?: boolean
 }): Promise<AdminDataImportResult> {
   const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
     data: payload.data,
+    use_import_defaults: payload.use_import_defaults,
     skip_default_group_bind: payload.skip_default_group_bind,
     protection_enabled: payload.protection_enabled,
     codex_ticket_enabled: payload.codex_ticket_enabled

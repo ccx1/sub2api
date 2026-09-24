@@ -37,17 +37,14 @@
           </div>
 
           <!-- Right: All action buttons -->
-          <label class="w-full sm:w-44">
-            <span class="sr-only">{{ t('proxyGroups.title') }}</span>
-            <select v-model="filters.group_id" class="input" data-testid="proxy-group-filter" @change="handleFilterChange">
-              <option value="">{{ t('proxyGroups.all') }}</option>
-              <option :value="0">{{ t('proxyGroups.ungrouped') }}</option>
-              <option v-for="group in proxyGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
-            </select>
-          </label>
+          <div class="w-full sm:w-44" data-testid="proxy-group-filter">
+            <Select v-model="filters.group_id" :options="proxyGroupFilterOptions" :aria-label="t('proxyGroups.title')" @change="handleFilterChange" />
+          </div>
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
             <button class="btn btn-secondary" :disabled="groupsLoading || !!groupsError" @click="showProxyGroups = true">{{ t('proxyGroups.manage') }}</button>
+            <button class="btn btn-secondary" @click="showCodexIPStatus = true">{{ t('admin.proxies.ipStatusButton') }}</button>
             <button class="btn btn-secondary" :disabled="!selectedCount || groupsLoading || !!groupsError" @click="showBatchGroup = true">{{ t('proxyGroups.batch') }}</button>
+            <button class="btn btn-secondary" :disabled="!selectedCount" @click="showBatchLocation = true">{{ t('admin.proxies.batchLocation') }}</button>
             <button
               @click="refreshProxies"
               :disabled="loading"
@@ -98,6 +95,7 @@
             {{ groupsError }}
             <button type="button" class="btn btn-secondary" @click="loadProxyGroups">{{ t('common.refresh') }}</button>
           </div>
+
         </div>
       </template>
 
@@ -460,6 +458,16 @@
           <Select v-model="createForm.protocol" :options="protocolSelectOptions" />
         </div>
         <ProxyGroupSelect v-model="createForm.group_id" :groups="proxyGroups" :disabled="groupsLoading || !!groupsError" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.proxies.batchCountry') }}</span>
+          <select v-model="createForm.country_code" class="input" data-testid="create-proxy-country" :disabled="submitting">
+            <option value="">{{ t('admin.proxies.countryOptional') }}</option>
+            <option v-for="country in countryOptions" :key="country.code" :value="country.code">
+              {{ country.label }}
+            </option>
+          </select>
+          <span class="input-hint">{{ t('admin.proxies.countryHint') }}</span>
+        </label>
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
@@ -556,8 +564,8 @@
           />
           <label class="block">
             <span class="input-label">{{ t('admin.proxies.batchCountry') }}</span>
-            <select v-model="createForm.country_code" class="input" data-testid="batch-proxy-country">
-              <option value="">{{ t('admin.proxies.batchCountryOptional') }}</option>
+            <select v-model="createForm.country_code" class="input" data-testid="batch-proxy-country" :disabled="submitting">
+              <option value="">{{ t('admin.proxies.countryOptional') }}</option>
               <option v-for="country in countryOptions" :key="country.code" :value="country.code">
                 {{ country.label }}
               </option>
@@ -763,6 +771,11 @@
         <div>
           <label class="input-label">{{ t('admin.proxies.username') }}</label>
           <input v-model="editForm.username" type="text" class="input" />
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.proxies.batchCountry') }}</label>
+          <Select v-model="editForm.country_code" :options="editCountryOptions" searchable="auto" />
+          <p class="input-hint">{{ t('admin.proxies.countryHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.proxies.password') }}</label>
@@ -1025,6 +1038,8 @@
     </BaseDialog>
     <ProxyGroupsDialog :show="showProxyGroups" :groups="proxyGroups" @close="showProxyGroups = false" @changed="handleGroupsChanged" />
     <BatchProxyGroupDialog :show="showBatchGroup" :groups="proxyGroups" :ids="Array.from(selectedProxyIds)" @close="showBatchGroup = false" @changed="handleGroupAssigned" />
+    <BatchProxyLocationDialog :show="showBatchLocation" :ids="Array.from(selectedProxyIds)" :countries="countryOptions" @close="showBatchLocation = false" @changed="handleLocationUpdated" />
+    <CodexIPStatusDialog :show="showCodexIPStatus" @close="showCodexIPStatus = false" />
   </AppLayout>
 </template>
 
@@ -1047,6 +1062,8 @@ import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import ProxyGroupSelect from '@/components/admin/proxy/ProxyGroupSelect.vue'
 import ProxyGroupsDialog from '@/components/admin/proxy/ProxyGroupsDialog.vue'
 import BatchProxyGroupDialog from '@/components/admin/proxy/BatchProxyGroupDialog.vue'
+import BatchProxyLocationDialog from '@/components/admin/proxy/BatchProxyLocationDialog.vue'
+import CodexIPStatusDialog from '@/components/admin/proxy/CodexIPStatusDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1058,6 +1075,7 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { proxyOptionLabel } from '@/utils/proxyLabel'
+import { getProxyCountryOptions } from '@/utils/proxyCountry'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -1080,13 +1098,12 @@ const columns = computed<Column[]>(() => [
 ])
 
 const countryOptions = computed(() => {
-  const codes = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ')
-  const displayNames = new Intl.DisplayNames([locale?.value || 'zh-CN'], { type: 'region' })
-  return codes.sort().map(code => ({
-    code,
-    label: `${code} · ${displayNames.of(code) || code}`
-  }))
+  return getProxyCountryOptions(locale?.value)
 })
+const editCountryOptions = computed(() => [
+  { value: null, label: t('admin.proxies.countryOptional') },
+  ...countryOptions.value.map(country => ({ value: country.code, label: country.label }))
+])
 
 // Filter options
 const protocolOptions = computed(() => [
@@ -1111,6 +1128,11 @@ const protocolSelectOptions = computed(() => [
   { value: 'socks5', label: t('admin.proxies.protocols.socks5') },
   { value: 'socks5h', label: t('admin.proxies.protocols.socks5h') }
 ])
+const proxyGroupFilterOptions = computed(() => [
+  { value: '', label: t('proxyGroups.all') },
+  { value: 0, label: t('proxyGroups.ungrouped') },
+  ...proxyGroups.value.map(group => ({ value: group.id, label: group.name }))
+])
 
 const editStatusOptions = computed(() => [
   { value: 'active', label: t('admin.accounts.status.active') },
@@ -1121,6 +1143,8 @@ const proxies = ref<Proxy[]>([])
 const proxyGroups = ref<ProxyGroup[]>([])
 const showProxyGroups = ref(false)
 const showBatchGroup = ref(false)
+const showBatchLocation = ref(false)
+const showCodexIPStatus = ref(false)
 const groupsLoading = ref(false)
 const groupsError = ref('')
 const proxyGroupName = (proxy: Proxy) => proxy.group_id
@@ -1142,6 +1166,10 @@ const handleGroupAssigned = () => {
   clearSelectedProxies()
   void handleGroupsChanged()
 }
+const handleLocationUpdated = () => {
+  clearSelectedProxies()
+  void loadProxies()
+}
 const refreshProxies = () => {
   void loadProxyGroups()
   void loadProxies()
@@ -1151,7 +1179,7 @@ const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
-  group_id: '' as number | '',
+  group_id: '' as number | '' | null,
   protocol: '',
   status: ''
 })
@@ -1256,6 +1284,7 @@ const createForm = reactive({
 
 const editForm = reactive({
   group_id: null as number | null,
+  country_code: null as string | null,
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
@@ -1301,7 +1330,7 @@ const toggleSelectAllVisible = (event: Event) => {
 }
 
 const buildProxyQueryFilters = () => ({
-  group_id: filters.group_id === '' ? undefined : filters.group_id,
+  group_id: filters.group_id === '' || filters.group_id === null ? undefined : filters.group_id,
   protocol: filters.protocol || undefined,
   status: (filters.status || undefined) as 'active' | 'inactive' | 'expired' | undefined,
   search: searchQuery.value || undefined,
@@ -1484,6 +1513,7 @@ const handleBatchCreate = async () => {
 }
 
 const handleCreateProxy = async () => {
+  if (submitting.value) return
   if (!createForm.name.trim()) {
     appStore.showError(t('admin.proxies.nameRequired'))
     return
@@ -1500,6 +1530,7 @@ const handleCreateProxy = async () => {
   try {
     await adminAPI.proxies.create({
       group_id: createForm.group_id,
+      country_code: createForm.country_code || null,
       name: createForm.name.trim(),
       protocol: createForm.protocol,
       host: createForm.host.trim(),
@@ -1526,6 +1557,7 @@ const handleCreateProxy = async () => {
 const handleEdit = (proxy: Proxy) => {
   editingProxy.value = proxy
   editForm.group_id = proxy.group_id ?? null
+  editForm.country_code = proxy.country_code || null
   editForm.name = proxy.name
   editForm.protocol = proxy.protocol
   editForm.host = proxy.host
@@ -1568,6 +1600,7 @@ const handleUpdateProxy = async () => {
   try {
     const updateData: any = {
       name: editForm.name.trim(),
+      country_code: editForm.country_code || '',
       protocol: editForm.protocol,
       host: editForm.host.trim(),
       port: editForm.port,

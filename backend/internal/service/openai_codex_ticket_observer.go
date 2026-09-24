@@ -16,6 +16,8 @@ type openAICodexTicketResponseObserver struct {
 	lineOverflow, eventOverflow, bodyOverflow bool
 	started, jsonMode, finished               bool
 	completed, matches, failed                bool
+	responseID                                string
+	protocolCompleted                         bool
 	failureStatus                             int
 	reportedModels                            []string
 	modelsTruncated                           bool
@@ -135,10 +137,12 @@ func (o *openAICodexTicketResponseObserver) inspect(data []byte) {
 	var value struct {
 		Type     string          `json:"type"`
 		Object   string          `json:"object"`
+		ID       string          `json:"id"`
 		Status   string          `json:"status"`
 		Model    string          `json:"model"`
 		Error    json.RawMessage `json:"error"`
 		Response *struct {
+			ID     string          `json:"id"`
 			Status string          `json:"status"`
 			Model  string          `json:"model"`
 			Error  json.RawMessage `json:"error"`
@@ -175,10 +179,16 @@ func (o *openAICodexTicketResponseObserver) inspect(data []byte) {
 		}
 		model = value.Response.Model
 	}
+	o.protocolCompleted = true
 	if strings.TrimSpace(model) == "" {
 		return
 	}
 	o.completed = true
+	if value.Response != nil {
+		o.responseID = strings.TrimSpace(value.Response.ID)
+	} else {
+		o.responseID = strings.TrimSpace(value.ID)
+	}
 	o.matches = o.matches && model == o.expected
 	o.recordReportedModel(model)
 }

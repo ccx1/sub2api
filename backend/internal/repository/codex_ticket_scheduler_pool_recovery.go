@@ -9,8 +9,9 @@ local function poolrecovery()
   local transportOldest,transportDeadline,allTransport,transportCooling=nil,math.huge,true,false
   for _,c in ipairs(q.candidates) do
     local p=readproxy(c.id,c.version)
-    if p.owner and n(p.lease)>now and (busy==0 or n(p.lease)<busy) then busy=n(p.lease) end
-    if c.healthy then
+    local ipblocked=ipwait(c)~=''
+    if not ipblocked and p.owner and n(p.lease)>now and (busy==0 or n(p.lease)<busy) then busy=n(p.lease) end
+    if not ipblocked and c.healthy then
       local at=transportuntil(c)
       if at>now then
         transportCooling=true

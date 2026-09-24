@@ -16,6 +16,10 @@ func preserveAccountProxyRegionExtraSQL(ctx context.Context, expression string) 
 	if !country {
 		keys = append(keys, "'proxy_region_country'")
 	}
+	// 导入地区兜底是账号级配置；除非调用方显式写入，否则凭据刷新不能覆盖。
+	if !service.AccountProxyRegionFallbackCountryWriteField(ctx) {
+		keys = append(keys, "'proxy_region_fallback_country'")
+	}
 	if len(keys) == 0 {
 		return expression
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -669,7 +670,7 @@ func resolveAccountExtraNumber(extra map[string]any, keys ...string) (float64, b
 // after the real window reset.
 func resolveOpenAIQuotaUtilization(extra map[string]any, window string, now time.Time) (float64, bool) {
 	usedPercent := readOpenAIQuotaUsedPercent(extra, window)
-	if usedPercent <= 0 {
+	if usedPercent <= 0 || math.IsNaN(usedPercent) || math.IsInf(usedPercent, 0) {
 		return 0, false
 	}
 	if openAIQuotaWindowReset(extra, window, now) {
@@ -1673,6 +1674,23 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 		}
 	}
 	return account, nil
+}
+
+// IsAccountSchedulableNow 重读长连接绑定账号，避免后续轮次沿用握手时的配额。
+func (s *OpenAIGatewayService) IsAccountSchedulableNow(ctx context.Context, account *Account) bool {
+	if account == nil {
+		return false
+	}
+	latest := account
+	if s != nil && s.accountRepo != nil && account.ID > 0 {
+		fresh, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || fresh == nil {
+			slog.Warn("openai.websocket_account_state_unavailable", "account_id", account.ID, "error", err)
+			return false
+		}
+		latest = fresh
+	}
+	return latest.IsSchedulable()
 }
 
 // filterGrokFreeQuotaAccountsForOpenAI applies the same local free soft-gate as

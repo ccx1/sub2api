@@ -22,14 +22,16 @@ export function readAccountProxyRegion(extra?: Record<string, unknown> | null): 
   return { mode: mode === 'billing' || mode === 'manual' ? mode : 'off', country: normalizeProxyRegionCountry(extra?.proxy_region_country) }
 }
 
-export function resolveAccountProxyRegion(selection: AccountProxyRegionSelection, credentials?: Record<string, unknown> | null) {
+export function resolveAccountProxyRegion(selection: AccountProxyRegionSelection, credentials?: Record<string, unknown> | null, fallbackCountry?: unknown) {
   const currency = typeof credentials?.billing_currency === 'string' ? credentials.billing_currency.trim().toUpperCase() : ''
   if (selection.mode === 'off') return { country: '', currency, source: 'off' }
   if (selection.mode === 'manual') return { country: normalizeProxyRegionCountry(selection.country), currency, source: 'manual' }
   const priceCountry = normalizeProxyRegionCountry(credentials?.price_country)
   if (priceCountry) return { country: priceCountry, currency, source: 'price_country' }
   const country = BILLING_CURRENCY_COUNTRIES[currency] || ''
-  return { country, currency, source: country ? 'billing_currency' : 'unknown' }
+  if (country) return { country, currency, source: 'billing_currency' }
+  const fallback = normalizeProxyRegionCountry(fallbackCountry)
+  return { country: fallback, currency, source: fallback ? 'fallback_country' : 'unknown' }
 }
 
 export function accountProxyRegionValidationError(selection: AccountProxyRegionSelection): string | null {

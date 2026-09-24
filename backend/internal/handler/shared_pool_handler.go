@@ -275,12 +275,21 @@ func (h *SharedPoolHandler) Transfer(c *gin.Context) {
 	if !ok {
 		return
 	}
+	h.transferEarnings(c, userID)
+}
+
+// transferEarnings 统一处理用户和管理员发起的共享收益转入，确保余额缓存和认证缓存同步失效。
+func (h *SharedPoolHandler) transferEarnings(c *gin.Context, userID int64) {
 	data, err := h.earnings.Transfer(c.Request.Context(), userID)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Second)
 		defer cancel()
-		h.keys.InvalidateAuthCacheByUserID(ctx, userID)
-		_ = h.billing.InvalidateUserBalance(ctx, userID)
+		if h.keys != nil {
+			h.keys.InvalidateAuthCacheByUserID(ctx, userID)
+		}
+		if h.billing != nil {
+			_ = h.billing.InvalidateUserBalance(ctx, userID)
+		}
 	}
 	sharedReply(c, data, err)
 }

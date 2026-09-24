@@ -9,9 +9,27 @@ if q.action == 'start' or q.action == 'stage' or q.action=='publish' then
 end
 if q.action=='publish' then
   if not a.started then return waiting('attempt_not_started',0) end
+  if q.current_harvest then
+    local why,at=ipwait(q.current_harvest)
+    if why~='' then return waiting(why,at) end
+  end
+  if q.current_business then
+    local why,at=ipwait(q.current_business)
+    if why~='' then return waiting(why,at) end
+  end
+  local why,at=ipwait(a.harvest_selected)
+  if why~='' then return waiting(why,at) end
+  why,at=ipwait(a.business)
+  if why~='' then return waiting(why,at) end
   return reply('running','',false)
 end
 if q.action == 'start' then
+  if q.current_harvest then
+    local why,at=ipwait(q.current_harvest)
+    if why~='' then return waiting(why,at) end
+  end
+  local why,at=ipwait(a.harvest_selected)
+  if why~='' then return waiting(why,at) end
   local transportAt=transportuntil(a.harvest_selected)
   if transportAt>now then return waiting('proxy_silent',transportAt) end
   if a.started then return reply('running','',false) end
@@ -24,7 +42,12 @@ if q.action == 'start' then
     elseif p.owner and n(p.lease)>now and p.owner~=a.token then return waiting('half_open_busy',n(p.lease)) end
   end
   if q.enabled and not q.manual and not rejectionmode() and n(a.attempts)>=n(a.maxattempts) then return waiting('account_cooldown',n(a.until_at)) end
+  if q.current_harvest and q.current_harvest.ip~='' and a.harvest_selected and
+      q.current_harvest.id==a.harvest_selected.id and q.current_harvest.version==a.harvest_selected.version then
+    a.harvest_selected.ip=q.current_harvest.ip
+  end
   a.started,a.started_at=true,now
+  a.ip_generation=n(readip(a.harvest_selected and a.harvest_selected.ip).g)
   a.learning_turns=a.learning_turns or {}
   a.learning_turns[a.model]=n(a.learning_turns[a.model])+1
   if a.pool then confirmpin(a.follow_business and 'business' or 'harvest',a.harvest_selected) end
@@ -68,6 +91,7 @@ if q.action == 'finish' then
   if not a.reported then q.neutral=neutral or not q.silence;report() end
   local success=q.outcome=='verified' or q.outcome=='published' or q.outcome=='success'
   local rejected=q.outcome=='ticket_rejected' and a.started
+  finiship(neutral)
   finishpins(success,neutral)
   finishlearning(success,neutral)
   finishsession(success,neutral)

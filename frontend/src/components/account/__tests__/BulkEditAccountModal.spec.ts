@@ -239,7 +239,7 @@ describe('BulkEditAccountModal', () => {
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
       proxy_id: 0,
-      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_group_id: null, random_proxy_empty_pool_policy: 'reject', random_proxy_max_reuse_minutes: 0 }
+      extra: { proxy_mode: 'random', random_proxy_pool_scope: 'selected', random_proxy_pool_ids: [7], random_proxy_group_id: null, random_proxy_empty_pool_policy: 'reject', random_proxy_max_reuse_minutes: 0, random_proxy_region_fallback: 'pool' }
     }))
     wrapper.unmount()
   })

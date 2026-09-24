@@ -68,15 +68,17 @@ type SharedPoolUserAccountTier struct {
 
 // SharedPoolUserEarnings 按供号用户聚合共享收益，供管理员查看每个用户的实际收益。
 type SharedPoolUserEarnings struct {
-	UserID        int64                       `json:"user_id"`
-	Email         string                      `json:"email"`
-	AccountCount  int64                       `json:"account_count"`
-	AccountTiers  []SharedPoolUserAccountTier `json:"account_tiers"`
-	EarningsCount int64                       `json:"earnings_count"`
-	TotalEarned   float64                     `json:"total_earned"`
-	Available     float64                     `json:"available"`
-	Pending       float64                     `json:"pending"`
-	Transferred   float64                     `json:"transferred"`
+	UserID         int64                       `json:"user_id"`
+	Email          string                      `json:"email"`
+	AccountCount   int64                       `json:"account_count"`
+	AccountTiers   []SharedPoolUserAccountTier `json:"account_tiers"`
+	EarningsCount  int64                       `json:"earnings_count"`
+	BillingAmount  float64                     `json:"billing_amount"`
+	TotalEarned    float64                     `json:"total_earned"`
+	PlatformAmount float64                     `json:"platform_amount"`
+	Available      float64                     `json:"available"`
+	Pending        float64                     `json:"pending"`
+	Transferred    float64                     `json:"transferred"`
 }
 
 type SharedPoolEarningsTransfer struct {

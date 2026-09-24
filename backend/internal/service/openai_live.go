@@ -279,6 +279,11 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	if err != nil {
 		return nil, err
 	}
+	if sanitized, changed, policyErr := s.applyCodexRequestBodyPolicyForScope(ctx, body, account, CodexRequestStrategyScopeDedicated); policyErr != nil {
+		return nil, policyErr
+	} else if changed {
+		body = sanitized
+	}
 	reqCtx := WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI))
 	upstreamReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, chatGPTLiveCallsURL, bytes.NewReader(body))
 	if err != nil {
@@ -298,6 +303,11 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, upstreamReq.Header, account); err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "account_headers", err)
 		return nil, err
+	}
+	if policy, enabled := s.codexRequestStrategyPolicyForScope(ctx, CodexRequestStrategyScopeDedicated); enabled {
+		if err := ApplyCodexRequestHeaderPolicy(upstreamReq.Header, policy, account); err != nil {
+			return nil, err
+		}
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "application/sdp")
@@ -429,6 +439,11 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
 		return nil, err
 	}
+	if policy, enabled := s.codexRequestStrategyPolicyForScope(ctx, CodexRequestStrategyScopeDedicated); enabled {
+		if err := ApplyCodexRequestHeaderPolicy(headers, policy, account); err != nil {
+			return nil, err
+		}
+	}
 	attestation, err := s.decryptLiveAttestation(record)
 	if err != nil {
 		return nil, err
@@ -531,7 +546,16 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 				errCh <- readErr
 				return
 			}
-			if writeErr := upstream.WriteFrame(proxyCtx, messageType, payload); writeErr != nil {
+			wirePayload := payload
+			if messageType == coderws.MessageText || messageType == coderws.MessageBinary {
+				rewritten, rewriteErr := s.rewriteOpenAIRequestTimezonePayload(proxyCtx, payload)
+				if rewriteErr != nil {
+					errCh <- rewriteErr
+					return
+				}
+				wirePayload = rewritten
+			}
+			if writeErr := upstream.WriteFrame(proxyCtx, messageType, wirePayload); writeErr != nil {
 				errCh <- writeErr
 				return
 			}

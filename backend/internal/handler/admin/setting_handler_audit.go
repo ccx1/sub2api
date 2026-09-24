@@ -500,6 +500,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAICodexUserAgent != after.OpenAICodexUserAgent {
 		changed = append(changed, "openai_codex_user_agent")
 	}
+	if before.OpenAIRequestTimezone != after.OpenAIRequestTimezone {
+		changed = append(changed, "openai_request_timezone")
+	}
 	if before.OpenAICodexClientVersion != after.OpenAICodexClientVersion {
 		changed = append(changed, "openai_codex_client_version")
 	}
@@ -623,6 +626,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.CyberSessionBlockTTLSeconds != after.CyberSessionBlockTTLSeconds {
 		changed = append(changed, "cyber_session_block_ttl_seconds")
+	}
+	if before.CyberSessionIdentityStrictEnabled != after.CyberSessionIdentityStrictEnabled {
+		changed = append(changed, "cyber_session_identity_strict_enabled")
 	}
 	// Default platform quotas（JSON map，整体比较）
 	if !equalPlatformQuotaSettings(before.DefaultPlatformQuotas, after.DefaultPlatformQuotas) {

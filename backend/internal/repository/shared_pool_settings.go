@@ -124,7 +124,7 @@ func (r *sharedPoolRepository) SaveSharedSettings(ctx context.Context, s *servic
 func validateSharedSettingsGroups(ctx context.Context, tx *sql.Tx, defaults service.SharedPoolDefaultGroupIDs, subscriptions service.SharedPoolSubscriptionGroupIDs) error {
 	for platform, ids := range defaults {
 		for _, id := range ids {
-			if err := validateSharedSettingsGroup(ctx, tx, platform, id); err != nil {
+			if err := validateSharedSettingsGroup(ctx, tx, platform, id, false); err != nil {
 				return err
 			}
 		}
@@ -135,7 +135,7 @@ func validateSharedSettingsGroups(ctx context.Context, tx *sql.Tx, defaults serv
 		}
 		for _, ids := range tiers {
 			for _, id := range ids {
-				if err := validateSharedSettingsGroup(ctx, tx, platform, id); err != nil {
+				if err := validateSharedSettingsGroup(ctx, tx, platform, id, true); err != nil {
 					return err
 				}
 			}
@@ -144,13 +144,13 @@ func validateSharedSettingsGroups(ctx context.Context, tx *sql.Tx, defaults serv
 	return nil
 }
 
-func validateSharedSettingsGroup(ctx context.Context, tx *sql.Tx, platform string, id int64) error {
+func validateSharedSettingsGroup(ctx context.Context, tx *sql.Tx, platform string, id int64, allowExclusive bool) error {
 	var valid bool
 	err := tx.QueryRowContext(ctx, `SELECT status='active' AND platform=$2 AND rate_multiplier>0
-        AND subscription_type='standard' AND NOT is_exclusive
-        FROM groups WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, id, platform).Scan(&valid)
+        AND subscription_type='standard' AND ($3 OR NOT is_exclusive)
+        FROM groups WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, id, platform, allowExclusive).Scan(&valid)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !valid) {
-		return infraerrors.BadRequest("INVALID_SHARED_DEFAULT", "默认及订阅档位分组必须为已启用的同平台标准分组，且收费倍率大于0")
+		return infraerrors.BadRequest("INVALID_SHARED_DEFAULT", "分组必须是已启用的同平台标准分组且收费倍率大于0；默认分组不可为专属分组")
 	}
 	return err
 }

@@ -101,6 +101,12 @@
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
                       </button>
+                      <button class="account-tools-menu-item" @click="openImportSettings">
+                        <span class="account-tools-menu-icon bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300">
+                          <Icon name="cog" size="sm" />
+                        </span>
+                        <span class="flex-1 text-left">{{ t('admin.accountImportSettings.title') }}</span>
+                      </button>
                       <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
                         <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
                           <Icon name="download" size="sm" />
@@ -514,10 +520,13 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <CodexTicketHistoryModal :show="showCodexTicketHistory" :account="codexTicketHistoryAcc" @close="closeCodexTicketHistory" />
+    <CodexModelQualityRecordModal :show="showCodexModelQuality" :account="codexModelQualityAcc" @close="closeCodexModelQuality" />
+    <IQTestModal :show="showIQTest" :account="iqTestingAcc" :accounts="accounts" @close="closeIQTestModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="codexTicketGlobalEnabled && !!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="!!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" :show-codex-model-quality="!!menu.acc && isCodexTicketAccount(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @codex-model-quality="handleViewCodexModelQuality" @schedule="handleSchedule" @iq-test="handleIQTest" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" @imported-and-edit="handleDataImportedAndEdit" />
+    <ImportDataModal :show="showImportData" :settings-open="showImportSettings" @close="showImportData = false" @settings="openImportSettings" @imported="handleDataImported" @imported-and-edit="handleDataImportedAndEdit" />
+    <AccountImportSettingsModal :show="showImportSettings" @close="showImportSettings = false" />
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="bulkEditTarget?.mode === 'selected' ? bulkEditTarget.accountIds : selIds"
@@ -568,11 +577,14 @@ import AccountTableFilters from '@/components/admin/account/AccountTableFilters.
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
+import AccountImportSettingsModal from '@/components/admin/account/AccountImportSettingsModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import CodexTicketHistoryModal from '@/components/account/CodexTicketHistoryModal.vue'
+import CodexModelQualityRecordModal from '@/components/admin/account/CodexModelQualityRecordModal.vue'
 import CodexTicketAlerts from '@/components/account/CodexTicketAlerts.vue'
+import IQTestModal from '@/components/admin/account/IQTestModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
@@ -714,6 +726,7 @@ const showCreate = ref(false)
 const showEdit = ref(false)
 const showSync = ref(false)
 const showImportData = ref(false)
+const showImportSettings = ref(false)
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
@@ -729,6 +742,8 @@ const showReAuth = ref(false)
 const showTest = ref(false)
 const showStats = ref(false)
 const showCodexTicketHistory = ref(false)
+const showCodexModelQuality = ref(false)
+const showIQTest = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
 const edAcc = ref<Account | null>(null)
@@ -739,6 +754,8 @@ const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
 const codexTicketHistoryAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
+const codexModelQualityAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
+const iqTestingAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
@@ -1521,6 +1538,7 @@ const isAnyModalOpen = computed(() => {
     showEdit.value ||
     showSync.value ||
     showImportData.value ||
+    showImportSettings.value ||
     showExportDataDialog.value ||
     showBulkEdit.value ||
     showTempUnsched.value ||
@@ -1529,6 +1547,8 @@ const isAnyModalOpen = computed(() => {
     showTest.value ||
     showStats.value ||
     showCodexTicketHistory.value ||
+    showCodexModelQuality.value ||
+    showIQTest.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
     showTLSFingerprintProfiles.value
@@ -1691,6 +1711,11 @@ const openSyncFromCrs = () => {
 const openImportData = () => {
   closeAccountToolsDropdown()
   showImportData.value = true
+}
+
+const openImportSettings = () => {
+  closeAccountToolsDropdown()
+  showImportSettings.value = true
 }
 
 const openExportDataDialogFromMenu = () => {
@@ -2522,6 +2547,7 @@ const handleExportData = async () => {
 const accountExportStepUp = useStepUp()
 const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
+const closeIQTestModal = () => { showIQTest.value = false; iqTestingAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = async (a: AccountListItem) => {
   const account = await loadAccountDetails(a)
@@ -2535,14 +2561,29 @@ const handleViewStats = async (a: AccountListItem) => {
   statsAcc.value = account
   showStats.value = true
 }
+const handleIQTest = async (a: AccountListItem) => {
+  const account = await loadAccountDetails(a)
+  if (!account) return
+  iqTestingAcc.value = account
+  showIQTest.value = true
+}
 const closeCodexTicketHistory = () => {
   showCodexTicketHistory.value = false
   codexTicketHistoryAcc.value = null
 }
 const handleViewCodexTicketHistory = (account: AccountListItem) => {
-  if (!codexTicketGlobalEnabled.value || !isCodexTicketAccount(account) || !isCodexTicketEnabled(account)) return
+  if (!isCodexTicketAccount(account) || !isCodexTicketEnabled(account)) return
   codexTicketHistoryAcc.value = { id: account.id, name: account.name }
   showCodexTicketHistory.value = true
+}
+const closeCodexModelQuality = () => {
+  showCodexModelQuality.value = false
+  codexModelQualityAcc.value = null
+}
+const handleViewCodexModelQuality = (account: AccountListItem) => {
+  if (!isCodexTicketAccount(account)) return
+  codexModelQualityAcc.value = { id: account.id, name: account.name }
+  showCodexModelQuality.value = true
 }
 const handleSchedule = async (a: Account) => {
   scheduleAcc.value = a

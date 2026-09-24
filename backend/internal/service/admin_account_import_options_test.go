@@ -24,7 +24,7 @@ func importOptionsInput() *CreateAccountInput {
 	return &CreateAccountInput{
 		Name: "imported", Platform: PlatformOpenAI, Type: AccountTypeSetupToken,
 		Credentials: map[string]any{"access_token": "test-token"}, Concurrency: 8,
-		SkipDefaultGroupBind: true,
+		SkipDefaultGroupBind: true, SkipImportDefaults: true,
 	}
 }
 

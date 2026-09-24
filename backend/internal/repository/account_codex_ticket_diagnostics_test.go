@@ -43,8 +43,8 @@ func (matcher ticketDiagnosticPayload) Match(value driver.Value) bool {
 func TestCodexTicketHistoryPersistsDiagnosticsAlongsideLegacyRows(t *testing.T) {
 	repo, mock := newCodexTicketCASRepo(t)
 	history := service.CodexTicketHistory{}
-	history.Append(service.CodexTicketAttempt{ID: "legacy", StartedAt: time.Unix(1, 0)})
-	previous, err := json.Marshal(history)
+	history.Append(service.CodexTicketAttempt{ID: "legacy", StartedAt: time.Now().Add(-time.Hour)})
+	previous, err := json.Marshal(map[string]any{service.OpenAICodexTicketHistoryKey: history})
 	require.NoError(t, err)
 	length, target, missing, status := 312, 292, 0, 200
 	attempt := service.CodexTicketAttempt{ID: "diagnostic", StartedAt: time.Now(), Reason: "ticket_length_mismatch",
@@ -53,7 +53,7 @@ func TestCodexTicketHistoryPersistsDiagnosticsAlongsideLegacyRows(t *testing.T) 
 		HarvestExchange: &service.CodexTicketExchange{CaptureMode: "raw", RequestedModel: "requested", ReportedModels: []string{"actual"},
 			Response: &service.CodexTicketHTTPMessage{StatusCode: 200, Body: `{"model":"actual"}`}}}
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT extra`).WithArgs(int64(41), service.OpenAICodexTicketHistoryKey).
+	mock.ExpectQuery(`SELECT extra`).WithArgs(int64(41)).
 		WillReturnRows(sqlmock.NewRows([]string{"history"}).AddRow(previous))
 	mock.ExpectExec(`UPDATE accounts SET extra`).WithArgs(int64(41), service.OpenAICodexTicketHistoryKey, ticketDiagnosticPayload{t}).
 		WillReturnResult(sqlmock.NewResult(0, 1))

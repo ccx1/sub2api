@@ -9,8 +9,8 @@ import (
 
 func TestAccountProxyRegionCountry(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode, country, currency, priceCountry, want string
-		wantErr                                           bool
+		name, mode, country, fallbackCountry, currency, priceCountry, want string
+		wantErr                                                            bool
 	}{
 		{name: "existing account remains unrestricted", currency: "JPY"},
 		{name: "yen", mode: "billing", currency: "JPY", want: "JP"},
@@ -19,13 +19,15 @@ func TestAccountProxyRegionCountry(t *testing.T) {
 		{name: "dollar ambiguous", mode: "billing", currency: "USD", wantErr: true},
 		{name: "euro ambiguous", mode: "billing", currency: "EUR", wantErr: true},
 		{name: "missing evidence", mode: "billing", wantErr: true},
+		{name: "fallback country", mode: "billing", fallbackCountry: "jp", currency: "USD", want: "JP"},
 		{name: "manual overrides currency", mode: "manual", country: " us ", currency: "JPY", want: "US"},
 		{name: "manual missing", mode: "manual", wantErr: true},
 		{name: "invalid country", mode: "manual", country: "Japan", wantErr: true},
+		{name: "invalid fallback country", mode: "billing", fallbackCountry: "Japan", wantErr: true},
 		{name: "invalid mode fails closed", mode: "anything", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			account := &Account{Extra: map[string]any{ProxyRegionModeExtraKey: tc.mode, ProxyRegionCountryExtraKey: tc.country},
+			account := &Account{Extra: map[string]any{ProxyRegionModeExtraKey: tc.mode, ProxyRegionCountryExtraKey: tc.country, ProxyRegionFallbackCountryExtraKey: tc.fallbackCountry},
 				Credentials: map[string]any{"billing_currency": tc.currency, "price_country": tc.priceCountry}}
 			got, err := account.ProxyRegionCountry()
 			if tc.wantErr {
@@ -51,16 +53,18 @@ func TestOAuthProxyRegionUsesSubscriptionCountryUnlessDisabled(t *testing.T) {
 }
 
 func TestPreserveAccountProxyRegion_DoesNotOverwriteConcurrentSettings(t *testing.T) {
-	current := map[string]any{ProxyRegionModeExtraKey: "manual", ProxyRegionCountryExtraKey: "PH"}
-	stale := map[string]any{ProxyRegionModeExtraKey: "billing", ProxyRegionCountryExtraKey: "JP", "other": true}
+	current := map[string]any{ProxyRegionModeExtraKey: "manual", ProxyRegionCountryExtraKey: "PH", ProxyRegionFallbackCountryExtraKey: "JP"}
+	stale := map[string]any{ProxyRegionModeExtraKey: "billing", ProxyRegionCountryExtraKey: "JP", ProxyRegionFallbackCountryExtraKey: "US", "other": true}
 	got := PreserveAccountProxyRegion(context.Background(), current, stale)
 	require.Equal(t, "manual", got[ProxyRegionModeExtraKey])
 	require.Equal(t, "PH", got[ProxyRegionCountryExtraKey])
+	require.Equal(t, "JP", got[ProxyRegionFallbackCountryExtraKey])
 	require.Equal(t, true, got["other"])
 	ctx := WithAccountProxyRegionWrite(context.Background(), map[string]any{ProxyRegionModeExtraKey: "off"})
 	got = PreserveAccountProxyRegion(ctx, current, map[string]any{ProxyRegionModeExtraKey: "off"})
 	require.Equal(t, "off", got[ProxyRegionModeExtraKey])
 	require.Equal(t, "PH", got[ProxyRegionCountryExtraKey])
+	require.Equal(t, "JP", got[ProxyRegionFallbackCountryExtraKey])
 }
 
 func TestProxyRegionSurvivesRandomProxyModeChanges(t *testing.T) {

@@ -34,7 +34,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	attempt int,
 	lastFailureReason string,
 	agentTaskRecoveryTried *bool,
-) (*OpenAIForwardResult, error) {
+) (returnResult *OpenAIForwardResult, returnErr error) {
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -68,6 +68,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
+	if codexRequestStrategyConnectionScope(ctx) == "" {
+		ctx = withCodexRequestStrategyConnectionScope(ctx, CodexRequestStrategyScopeDedicated)
+	}
+	strategyApplied, err := s.applyCodexRequestStrategy(ctx, payload, account, token)
+	if err != nil {
+		return nil, wrapOpenAIWSFallback("request_strategy", err)
+	}
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
 	turnState := ""
 	turnMetadata := ""
@@ -158,7 +165,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
-	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
+	forceNewConn := strategyApplied || (forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == "")
 	var ticketReceipt *openAICodexTicketWSReceipt
 	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
@@ -212,7 +219,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
 	defer acquireCancel()
 
-	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
+	acquireReq := openAIWSAcquireRequest{
 		Account:            account,
 		WSURL:              wsURL,
 		Headers:            wsHeaders,
@@ -228,7 +235,20 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			}
 			return ""
 		}(),
-	})
+	}
+	strategyScope := codexRequestStrategyConnectionScope(ctx)
+	if strategyScope == "" {
+		strategyScope = CodexRequestStrategyScopeDedicated
+	}
+	s.applyCodexRouteManagementPolicy(ctx, strategyScope, &acquireReq)
+	defer func() {
+		if errors.Is(returnErr, errOpenAIWSRouteAffinityUnavailable) {
+			model := canonicalOpenAIAccountSchedulingModel(account, originalModel)
+			s.pauseOpenAIModelForRouteAffinity(ctx, account, model, acquireReq.RouteFailureCooldownSeconds)
+			returnErr = wrapOpenAIWSFallback(openAIWSRouteAffinityUnavailableReason, returnErr)
+		}
+	}()
+	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, acquireReq)
 	if err != nil {
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
@@ -323,7 +343,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	ticketReceipt = confirmedOpenAICodexTicketWSReceipt(ticketReceipt, lease)
-	ticketReceipt.observeHandshake(ctx, s, lease.HandshakeHeaders())
 	ticketWatchdog := ticketReceipt.watch(ctx, s, openAIWSPayloadString(payload, "model"))
 	handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader))
 	logOpenAIWSModeDebug(
@@ -360,7 +379,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
-	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
+	wirePayload, rewriteErr := s.rewriteOpenAIRequestTimezonePayload(ctx, payloadAsJSONBytes(payload))
+	if rewriteErr != nil {
+		return nil, wrapOpenAIWSFallback("rewrite_request_timezone", rewriteErr)
+	}
+	if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 		reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

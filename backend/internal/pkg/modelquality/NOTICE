@@ -1,0 +1,34 @@
+ModelTrace numerical fingerprint scorer and reference bank
+Source: https://github.com/xqy2006/ModelTrace
+Revision: 55a2e4a
+
+The Go scoring implementation adapts fingerprint.py and static/fingerprint-core.js.
+data/unified_bank.json preserves the upstream model counts, robust features and
+calibration, with unused presentation/collection metadata removed. Small samples
+in testdata/reference.json are from data/gpt_reference.jsonl and
+data/claude_reference.jsonl; each fixture retains its upstream row ID and source.
+The reference bank is a finite candidate set. Its softmax probability is relative
+to those candidates and does not authenticate a model or measure intelligence.
+Local JSON and pattern validation is intentionally stricter than upstream parsing.
+
+MIT License
+
+Copyright (c) 2026 xqy2006
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

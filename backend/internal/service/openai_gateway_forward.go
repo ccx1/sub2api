@@ -113,6 +113,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	requestStrategyScope := CodexRequestStrategyScopeDedicated
+	if passthroughEnabled {
+		requestStrategyScope = CodexRequestStrategyScopePassthrough
+	}
+	if sanitizedBody, changed, policyErr := s.applyCodexRequestBodyPolicyForScope(ctx, body, account, requestStrategyScope); policyErr != nil {
+		return nil, fmt.Errorf("apply Codex request context policy: %w", policyErr)
+	} else if changed {
+		body = sanitizedBody
+	}
 	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
 		body, err = flattenOpenAIResponsesNamespaces(c, body)
@@ -1442,6 +1451,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			for _, v := range values {
 				req.Header.Add(key, v)
 			}
+		}
+	}
+	if policy, enabled := s.codexRequestStrategyPolicyForScope(ctx, CodexRequestStrategyScopeDedicated); enabled {
+		if err := ApplyCodexRequestHeaderPolicy(req.Header, policy, account); err != nil {
+			return nil, fmt.Errorf("apply Codex request header policy: %w", err)
 		}
 	}
 	// 客户端回带的 x-codex-turn-state 若已知由其他账号铸造（failover 换号），

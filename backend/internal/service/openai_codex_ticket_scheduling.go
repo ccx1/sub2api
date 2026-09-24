@@ -44,7 +44,7 @@ func (s *OpenAIGatewayService) reserveCodexTicketHarvest(ctx context.Context, ac
 		if err := s.checkCodexTicketBusinessIdle(ctx, account); err != nil {
 			return ctx, openAICodexTicketProxy{}, err
 		}
-		if cfg.TicketProtection().Enabled || account.CodexTicketProxyStrategy() == CodexTicketProxyStrategyRoundRobin {
+		if cfg.TicketProtection().Enabled || cfg.TicketProtection().ProxyIPProtectionEnabled || account.CodexTicketProxyStrategy() == CodexTicketProxyStrategyRoundRobin {
 			return ctx, openAICodexTicketProxy{}, errors.New("codex ticket shared scheduler unavailable")
 		}
 		proxy, err := s.selectOpenAICodexTicketProxy(ctx, account)
@@ -53,6 +53,9 @@ func (s *OpenAIGatewayService) reserveCodexTicketHarvest(ctx context.Context, ac
 	policy, err := s.scheduledCodexTicketProxyPolicy(ctx, account)
 	if err != nil {
 		return ctx, openAICodexTicketProxy{}, err
+	}
+	if cfg.TicketProtection().ProxyIPProtectionEnabled && policy.mode == CodexTicketProxyModeFixed && policy.proxyID == 0 && policy.url != "" {
+		return ctx, openAICodexTicketProxy{}, errors.New("codex ticket IP protection requires a managed harvest proxy; add and select the proxy in proxy management")
 	}
 	// 共享调度按全局配置做版本围栏，账号 Cookie 寿命只用于探测与票据有效性。
 	if policy.followBusiness && !account.IsRandomProxy() {
@@ -105,9 +108,11 @@ func (s *OpenAIGatewayService) reserveCodexTicketHarvest(ctx context.Context, ac
 		return ctx, proxy, errors.New("codex ticket reservation unavailable")
 	}
 	if reservation.Proxy != nil {
-		if err := validateProxyRegion(ctx, reservation.Proxy, policy.countryCode, s.accountRepo); err != nil {
-			_ = scheduler.FinishCodexTicket(ctx, CodexTicketFinishRequest{Reservation: reservation, Outcome: "canceled"})
-			return ctx, proxy, err
+		if !reservation.Proxy.RegionFallback {
+			if err := validateProxyRegion(ctx, reservation.Proxy, policy.countryCode, s.accountRepo); err != nil {
+				_ = scheduler.FinishCodexTicket(ctx, CodexTicketFinishRequest{Reservation: reservation, Outcome: "canceled"})
+				return ctx, proxy, err
+			}
 		}
 		proxy.url, proxy.proxyID, proxy.proxyName = reservation.Proxy.URL(), reservation.Proxy.ID, reservation.Proxy.Name
 	} else if request.Selection.CountryCode != "" && !request.AllowDirectOnEmpty {
@@ -158,6 +163,9 @@ func (s *OpenAIGatewayService) codexTicketPendingModels(ctx context.Context, acc
 	models, _ := codexTicketRetryModels(cfg, "")
 	pending := make([]string, 0, len(models))
 	for _, model := range models {
+		if s.codexModelQualityCircuitPaused(ctx, account, model) {
+			continue
+		}
 		if !isCodexTicketManualRetry(ctx) && !s.codexTicketInventoryNeedsRefresh(account, model, cfg, time.Now()) {
 			continue
 		}

@@ -582,6 +582,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
+	ctx = withCodexRequestStrategyConnectionScope(ctx, CodexRequestStrategyScopePassthrough)
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -736,6 +737,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// 保证不被覆盖丢失）。
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
+	if policy, enabled := s.codexRequestStrategyPolicyForScope(ctx, CodexRequestStrategyScopePassthrough); enabled {
+		if err := ApplyCodexRequestHeaderPolicy(req.Header, policy, account); err != nil {
+			return nil, fmt.Errorf("apply Codex request header policy: %w", err)
+		}
+	}
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {

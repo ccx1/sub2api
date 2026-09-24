@@ -68,8 +68,9 @@ func TestGetCodexTicketHistoryDefaultsAndDisabledAccount(t *testing.T) {
 
 func TestGetCodexTicketHistoryReturnsSelectedPageAndCumulativeSummary(t *testing.T) {
 	history := service.CodexTicketHistory{}
+	base := time.Now().UTC().Add(-2 * time.Hour)
 	for i := range 105 {
-		started := time.Date(2026, 9, 20, 0, i, 0, 0, time.UTC)
+		started := base.Add(time.Duration(i) * time.Minute)
 		history.Append(service.CodexTicketAttempt{ID: strconv.Itoa(i), Model: "gpt-6-astra",
 			StartedAt: started, FinishedAt: started.Add(time.Second), Success: i%2 == 0,
 			HarvestProxy: &service.CodexTicketProxySnapshot{Address: "http://proxy.example.test:8080"}})

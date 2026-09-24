@@ -87,7 +87,7 @@ func TestCompareAndSwapCodexTicketInvalidationPropagatesErrors(t *testing.T) {
 }
 
 func TestPrepareCodexTicketInvalidationDiscardsUnrelatedMetadataWithoutBlockingRevocation(t *testing.T) {
-	for _, field := range []string{"model", "attempt", "ticket attempt", "capture", "invalidation time", "expected model"} {
+	for _, field := range []string{"model", "attempt", "ticket attempt", "capture", "invalidation time", "before capture", "expected model"} {
 		t.Run(field, func(t *testing.T) {
 			account, replacement, event := codexTicketInvalidationFixture()
 			switch field {
@@ -101,6 +101,8 @@ func TestPrepareCodexTicketInvalidationDiscardsUnrelatedMetadataWithoutBlockingR
 				event.CapturedAt = event.CapturedAt.Add(time.Second)
 			case "invalidation time":
 				event.InvalidatedAt = time.Time{}
+			case "before capture":
+				event.InvalidatedAt = event.CapturedAt.Add(-time.Second)
 			case "expected model":
 				account.Extra["codex_turn_ticket:model"].(map[string]any)["model"] = "other-model"
 			}
@@ -190,4 +192,19 @@ func TestCodexTicketInvalidationPreservesCookieChangeReason(t *testing.T) {
 	var got service.CodexTicketInvalidation
 	require.NoError(t, json.Unmarshal([]byte(request.args[6].(string)), &got))
 	require.Equal(t, "cookie_changed", got.Reason)
+}
+
+func TestCodexTicketInvalidationPreservesQualityReasonAndSource(t *testing.T) {
+	for _, reason := range []string{"model_quality_capability_failed", "model_quality_model_mismatch", "model_quality_quarantine_persist_failed"} {
+		account, replacement, event := codexTicketInvalidationFixture()
+		event.Reason, event.Source = reason, "model_quality"
+		replacement["invalidation"] = event
+		request, err := prepareCodexTicketCAS(account, "model", replacement)
+		require.NoError(t, err)
+		require.True(t, request.withInvalidation)
+		var got service.CodexTicketInvalidation
+		require.NoError(t, json.Unmarshal([]byte(request.args[6].(string)), &got))
+		require.Equal(t, reason, got.Reason)
+		require.Equal(t, "model_quality", got.Source)
+	}
 }

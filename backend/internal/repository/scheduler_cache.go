@@ -956,7 +956,13 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold", "billing_currency", "price_country"}
+	keys := []string{
+		"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type",
+		"account_scheduling_threshold", "billing_currency", "price_country",
+		// 100% 配额在完整账号加载前即可停调；身份比对字段必须同时保留，
+		// 否则来自其它账号的旧快照会在候选投影中被误认为可信。
+		"email", "chatgpt_account_id", "workspace_id", "chatgpt_workspace_id", "organization_id", "org_id",
+	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -984,11 +990,13 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"proxy_mode",
 		service.ProxyRegionModeExtraKey,
 		service.ProxyRegionCountryExtraKey,
+		service.ProxyRegionFallbackCountryExtraKey,
 		"random_proxy_empty_pool_policy",
 		"random_proxy_pool_scope",
 		"random_proxy_pool_ids",
 		service.RandomProxyGroupIDExtraKey,
 		"random_proxy_max_reuse_minutes",
+		service.RandomProxyRegionFallbackExtraKey,
 		"codex_ticket_enabled",
 		service.CodexTicketProxyModeExtraKey,
 		service.CodexTicketProxyIDExtraKey,
@@ -1042,6 +1050,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_oauth_passthrough",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
+		// 与 credentials 一起供 Codex 快照身份校验，保留原有别名和优先级。
+		"email", "email_address", "chatgpt_account_id", "account_id",
+		"workspace_id", "chatgpt_workspace_id", "organization_id", "org_id",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",
 		"codex_5h_reset_at",

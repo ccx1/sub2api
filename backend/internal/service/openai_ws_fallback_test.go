@@ -28,6 +28,10 @@ func TestClassifyOpenAIWSAcquireError(t *testing.T) {
 		require.Equal(t, "preferred_conn_unavailable", classifyOpenAIWSAcquireError(errOpenAIWSPreferredConnUnavailable))
 	})
 
+	t.Run("route_affinity_unavailable", func(t *testing.T) {
+		require.Equal(t, "route_affinity_unavailable", classifyOpenAIWSAcquireError(errOpenAIWSRouteAffinityUnavailable))
+	})
+
 	t.Run("acquire_timeout", func(t *testing.T) {
 		require.Equal(t, "acquire_timeout", classifyOpenAIWSAcquireError(context.DeadlineExceeded))
 	})
@@ -120,6 +124,14 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("read_event", errors.New("io")))
 	require.Equal(t, "read_event", reason)
 	require.True(t, retryable)
+
+	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("route_affinity_unavailable", errOpenAIWSRouteAffinityUnavailable))
+	require.Equal(t, "route_affinity_unavailable", reason)
+	require.False(t, retryable)
+
+	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("write_request", errOpenAIWSRouteAffinityUnavailable))
+	require.Equal(t, "route_affinity_unavailable", reason)
+	require.False(t, retryable)
 }
 
 func TestOpenAIWSErrorHTTPStatus(t *testing.T) {
@@ -154,6 +166,17 @@ func TestResolveOpenAIWSFallbackErrorResponse(t *testing.T) {
 		require.Equal(t, "upstream_error", errType)
 		require.Equal(t, "forbidden", clientMessage)
 		require.Equal(t, "forbidden", upstreamMessage)
+	})
+
+	t.Run("route_affinity_unavailable_is_retryable_service_error", func(t *testing.T) {
+		statusCode, errType, clientMessage, upstreamMessage, ok := resolveOpenAIWSFallbackErrorResponse(
+			wrapOpenAIWSFallback("route_affinity_unavailable", errOpenAIWSRouteAffinityUnavailable),
+		)
+		require.True(t, ok)
+		require.Equal(t, http.StatusServiceUnavailable, statusCode)
+		require.Equal(t, "temporarily_unavailable", errType)
+		require.Equal(t, "当前模型的可用路由暂时不可用，请稍后重试", clientMessage)
+		require.Equal(t, clientMessage, upstreamMessage)
 	})
 
 	t.Run("non_fallback_error_not_resolved", func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1028,6 +1029,37 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 	return snapshot
 }
 
+// CodexUsageSnapshotExhaustionUntil 返回耗尽窗口的暂停边界；按采样时间锚定，
+// 最迟在快照失效时放行重新探测，与账号调度判断保持一致。
+func CodexUsageSnapshotExhaustionUntil(snapshot *OpenAICodexUsageSnapshot, now time.Time) (time.Time, bool) {
+	normalized := snapshot.Normalize()
+	if normalized == nil {
+		return time.Time{}, false
+	}
+	base := codexSnapshotBaseTime(snapshot, now)
+	var until time.Time
+	consider := func(used *float64, resetAfter *int) {
+		if used == nil || *used < 100 || math.IsNaN(*used) || math.IsInf(*used, 0) {
+			return
+		}
+		candidate := base.Add(openAICodexAutoPauseStaleAfter)
+		if resetAfter != nil {
+			if *resetAfter <= 0 {
+				return
+			}
+			if *resetAfter < int(openAICodexAutoPauseStaleAfter/time.Second) {
+				candidate = base.Add(time.Duration(*resetAfter) * time.Second)
+			}
+		}
+		if candidate.After(now) && candidate.After(until) {
+			until = candidate
+		}
+	}
+	consider(normalized.Used5hPercent, normalized.Reset5hSeconds)
+	consider(normalized.Used7dPercent, normalized.Reset7dSeconds)
+	return until, !until.IsZero()
+}
+
 func codexSnapshotBaseTime(snapshot *OpenAICodexUsageSnapshot, fallback time.Time) time.Time {
 	if snapshot == nil {
 		return fallback
@@ -1130,22 +1162,35 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 		return
 	}
 
+	unlock := lockOpenAICodexSnapshotWrite(accountID)
 	now := time.Now()
 	updates := buildCodexUsageExtraUpdates(snapshot, now)
 	if len(updates) == 0 {
+		unlock()
 		return
 	}
-	if !s.getCodexSnapshotThrottle().Allow(accountID, now) {
+	_, exhausted := CodexUsageSnapshotExhaustionUntil(snapshot, now)
+	if !exhausted && !s.getCodexSnapshotThrottle().Allow(accountID, now) {
+		unlock()
 		return
 	}
 
-	go func() {
+	persist := func() {
+		defer unlock()
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err == nil {
 			notifyOpenAIAutoReset(accountID)
+		} else {
+			logger.LegacyPrintf("service.openai_gateway", "persist codex quota snapshot failed: account_id=%d err=%v", accountID, err)
 		}
-	}()
+	}
+	// 100% 已影响调度，必须立即刷新仓库和调度快照，不能等待异步队列或节流窗口。
+	if exhausted {
+		persist()
+		return
+	}
+	go persist()
 }
 
 func (s *OpenAIGatewayService) UpdateCodexUsageSnapshotFromHeaders(ctx context.Context, accountID int64, headers http.Header) {

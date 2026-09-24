@@ -77,6 +77,10 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	}
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
+	wirePrewarmPayload, rewriteErr := s.rewriteOpenAIRequestTimezonePayload(ctx, prewarmPayloadJSON)
+	if rewriteErr != nil {
+		return wrapOpenAIWSFallback("rewrite_prewarm_timezone", rewriteErr)
+	}
 	prewarmModel, _ := prewarmPayload["model"].(string)
 	receipt := confirmedOpenAICodexTicketWSReceipt(nil, lease)
 	watchdog := receipt.watch(ctx, s, prewarmModel)
@@ -87,7 +91,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		}
 	}
 
-	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
+	if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePrewarmPayload), s.openAIWSWriteTimeout()); err != nil {
 		reportRandomProxyWSFailure(ctx, account, s.accountRepo, err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -683,6 +687,9 @@ func classifyOpenAIWSAcquireError(err error) string {
 	}
 	if errors.Is(err, errOpenAIWSPreferredConnUnavailable) {
 		return "preferred_conn_unavailable"
+	}
+	if errors.Is(err, errOpenAIWSRouteAffinityUnavailable) {
+		return "route_affinity_unavailable"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "acquire_timeout"

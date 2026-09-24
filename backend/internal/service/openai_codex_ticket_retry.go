@@ -58,6 +58,10 @@ func (s *OpenAIGatewayService) RetryOpenAICodexTicket(ctx context.Context, accou
 		return s.retryScheduledCodexTickets(manualCtx, account, models, cfg), nil
 	}
 	for _, model := range models {
+		if s.codexModelQualityCircuitPaused(ctx, account, model) {
+			result.Skipped++
+			continue
+		}
 		// The button is an explicit, one-shot retry. The next failure starts a
 		// fresh configured backoff sequence instead of inheriting the old one.
 		if key := codexTicketBackoffKey(account, token, model); key != "" {

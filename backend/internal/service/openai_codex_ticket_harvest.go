@@ -21,6 +21,9 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 	if s == nil || s.httpUpstream == nil || !s.openAICodexTicketProbeAllowed(ctx, account, "") {
 		return
 	}
+	if s.codexModelQualityCircuitPaused(ctx, account, model) {
+		return
+	}
 	key := openAICodexTicketKey(account.ID, model)
 	execute := func() (any, error) {
 		s.enqueueCodexTicketProbe(ctx, account, model, isCodexTicketManualRetry(ctx))
@@ -42,6 +45,9 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 	}
 	cfg := s.openAICodexTicketConfigForAccount(ctx, account)
 	if !s.openAICodexTicketGatedModelContext(ctx, model) {
+		return
+	}
+	if s.codexModelQualityCircuitPaused(ctx, account, model) {
 		return
 	}
 	now := time.Now()

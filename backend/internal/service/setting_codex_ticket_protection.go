@@ -25,6 +25,10 @@ func validateCodexTicketProtection(cfg *config.OpenAICodexTicketConfig) error {
 		{"rejection_retry_interval_seconds", p.RejectionRetryIntervalSeconds, 1, 86400},
 		{"rejection_retry_max_attempts", p.RejectionRetryMaxAttempts, 1, 1000},
 		{"rejection_retry_cooldown_seconds", p.RejectionRetryCooldownSeconds, 1, 86400},
+		{"proxy_ip_failure_account_threshold", p.ProxyIPFailureAccountThreshold, 1, 1000},
+		{"proxy_ip_failure_window_seconds", p.ProxyIPFailureWindowSeconds, 1, 86400},
+		{"proxy_ip_cooldown_seconds", p.ProxyIPCooldownSeconds, 1, 86400},
+		{"proxy_ip_max_rounds", p.ProxyIPMaxRounds, 1, 100},
 	}
 	for _, check := range checks {
 		if check.value < check.min || check.value > check.max {

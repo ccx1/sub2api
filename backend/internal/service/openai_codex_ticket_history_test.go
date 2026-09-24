@@ -69,8 +69,9 @@ func TestCodexTicketHistoryCountsWholeRoundAndRedactsProxy(t *testing.T) {
 
 func TestCodexTicketHistoryRetainsCumulativeTotalsAndPaginates(t *testing.T) {
 	history := CodexTicketHistory{}
+	base := time.Now().Add(-2 * time.Hour)
 	for i := 0; i < 123; i++ {
-		history.Append(CodexTicketAttempt{ID: fmt.Sprint(i), StartedAt: time.Unix(int64(i), 0), Success: i%2 == 0})
+		history.Append(CodexTicketAttempt{ID: fmt.Sprint(i), StartedAt: base.Add(time.Duration(i) * time.Minute), Success: i%2 == 0})
 	}
 	account := ticketTestAccount(41)
 	account.Extra = map[string]any{OpenAICodexTicketHistoryKey: history}

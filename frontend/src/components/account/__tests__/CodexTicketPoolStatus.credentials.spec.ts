@@ -10,7 +10,7 @@ import type { Account } from '@/types'
 type TicketStatus = NonNullable<Account['codex_turn_tickets']>[number]
 const compileMessages = (messages: Record<string, unknown>) => ({
   admin: { accounts: { openai: Object.fromEntries(Object.entries(messages)
-    .filter(([key, value]) => /^(codexTicketPool|codexTicketPrimary|codexTicketUsing|codexTurnTicket)/.test(key) && typeof value === 'string')
+    .filter(([key, value]) => /^(codexTicketPool|codexTicketPrimary|codexTicketUsing|codexTurnTicket|codexTicketQuality)/.test(key) && typeof value === 'string')
     .map(([key, value]) => [key, new Function(`return ${baseCompile(value as string, { mode: 'arrow' }).code}`)()])) } }
 })
 const messages = { zh: compileMessages(zhAccounts.accounts.openai), en: compileMessages(enAccounts.accounts.openai) }

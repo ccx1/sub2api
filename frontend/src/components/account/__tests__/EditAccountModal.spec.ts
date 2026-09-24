@@ -358,6 +358,120 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
+  it('loads and edits the billing fallback country across forwarding and ticket proxy choices', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { custom_flag: 'keep', proxy_region_mode: 'billing', proxy_region_fallback_country: ' jp ' }
+    account.credentials = { ...account.credentials, billing_currency: 'USD' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ proxies: [
+      { id: 1, country_code: 'JP' }, { id: 2, country_code: 'PH' }, { id: 3, country_code: 'US' }
+    ] as any })
+    const fallback = wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-fallback-country"]')
+    const selector = wrapper.getComponent({ name: 'ProxySelector' })
+    expect(fallback.element.value).toBe('JP')
+    expect(selector.props('proxies').map((proxy: { id: number }) => proxy.id)).toEqual([1])
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBe('JP')
+    expect(wrapper.getComponent(CodexTicketProxySettings).props('regionCountry')).toBe('JP')
+    expect(wrapper.text()).not.toContain('admin.accounts.proxyRegion.unknownBilling')
+
+    await fallback.setValue('PH')
+    expect(selector.props('proxies').map((proxy: { id: number }) => proxy.id)).toEqual([2])
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBe('PH')
+    expect(wrapper.getComponent(CodexTicketProxySettings).props('regionCountry')).toBe('PH')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      extra: expect.objectContaining({ custom_flag: 'keep', proxy_region_mode: 'billing', proxy_region_fallback_country: 'PH' }),
+      credentials: expect.objectContaining({ billing_currency: 'USD' })
+    }))
+    wrapper.unmount()
+  })
+
+  it.each(['billing', undefined])('explicitly clears a saved fallback country with %s region mode', async mode => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { ...(mode ? { proxy_region_mode: mode } : {}), proxy_region_fallback_country: 'JP' }
+    account.credentials = { ...account.credentials, billing_currency: 'USD' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="proxy-region-fallback-country"]').setValue('')
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBeUndefined()
+    expect(wrapper.text()).toContain('admin.accounts.proxyRegion.unknownBilling')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({
+      extra: expect.objectContaining({ proxy_region_mode: 'billing', proxy_region_fallback_country: '' })
+    }))
+    wrapper.unmount()
+  })
+
+  it('keeps dormant fallback inactive until an implicit OAuth account explicitly enables it', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { proxy_region_fallback_country: 'JP' }
+    account.credentials = { ...account.credentials, billing_currency: 'USD' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const fallback = wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-fallback-country"]')
+    expect(fallback.element.value).toBe('')
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBeUndefined()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra).not.toHaveProperty('proxy_region_mode')
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra.proxy_region_fallback_country).toBe('JP')
+
+    await fallback.setValue('JP')
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBe('JP')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra).toMatchObject({ proxy_region_mode: 'billing', proxy_region_fallback_country: 'JP' })
+    wrapper.unmount()
+  })
+
+  it.each([
+    { credentials: { price_country: 'PH', billing_currency: 'JPY' }, country: 'PH' },
+    { credentials: { billing_currency: 'JPY' }, country: 'JP' }
+  ])('prioritizes billing evidence over fallback country: $country', async ({ credentials, country }) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { proxy_region_mode: 'billing', proxy_region_fallback_country: 'US' }
+    account.credentials = { ...account.credentials, ...credentials }
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ proxies: [
+      { id: 1, country_code: 'JP' }, { id: 2, country_code: 'PH' }, { id: 3, country_code: 'US' }
+    ] as any })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-fallback-country"]').element.value).toBe('US')
+    expect(wrapper.getComponent({ name: 'ProxySelector' }).props('proxies')).toEqual([expect.objectContaining({ country_code: country })])
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBe(country)
+    expect(wrapper.getComponent(CodexTicketProxySettings).props('regionCountry')).toBe(country)
+    wrapper.unmount()
+  })
+
+  it('resets unsaved fallback edits when switching accounts without adding an implicit region policy', async () => {
+    const first = buildOpenAIOAuthParentAccount()
+    first.extra = { proxy_region_mode: 'billing', proxy_region_fallback_country: 'JP' }
+    const wrapper = mountModal(first)
+    await wrapper.get('[data-testid="proxy-region-fallback-country"]').setValue('PH')
+    const second = { ...buildOpenAIOAuthParentAccount(), id: 8, extra: { proxy_region_mode: 'billing', proxy_region_fallback_country: 'US' } }
+    await wrapper.setProps({ account: second })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-fallback-country"]').element.value).toBe('US')
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBe('US')
+
+    const third = { ...buildOpenAIOAuthParentAccount(), id: 9 }
+    await wrapper.setProps({ account: third })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-fallback-country"]').element.value).toBe('')
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBeUndefined()
+    updateAccountMock.mockReset().mockResolvedValue(third)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[0]).toBe(third.id)
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra).not.toHaveProperty('proxy_region_mode')
+    expect(updateAccountMock.mock.calls.at(-1)?.[1].extra).not.toHaveProperty('proxy_region_fallback_country')
+    wrapper.unmount()
+  })
+
   it('keeps implicit OAuth region policy omitted until the user explicitly disables it', async () => {
     const account = buildOpenAIOAuthParentAccount()
     account.credentials = { ...account.credentials, price_country: 'JP' }
@@ -394,17 +508,19 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('explicitly disables existing region matching without replacing a fixed proxy', async () => {
+  it.each(['billing', 'manual'])('explicitly disables existing %s region matching without replacing a fixed proxy', async mode => {
     const account = buildOpenAIOAuthParentAccount()
     account.proxy_id = 2
-    account.extra = { proxy_region_mode: 'manual', proxy_region_country: 'JP' }
+    account.extra = { proxy_region_mode: mode, proxy_region_country: 'JP', proxy_region_fallback_country: 'PH' }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     await wrapper.get('[data-testid="proxy-region-mode"]').setValue('off')
+    expect(wrapper.find('[data-testid="proxy-region-fallback-country"]').exists()).toBe(false)
+    expect(wrapper.getComponent(RandomProxySettings).props('regionCountry')).toBeUndefined()
     await wrapper.get('#edit-account-form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ proxy_id: 2, extra: expect.objectContaining({ proxy_region_mode: 'off', proxy_region_country: '' }) }))
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ proxy_id: 2, extra: expect.objectContaining({ proxy_region_mode: 'off', proxy_region_country: '', proxy_region_fallback_country: '' }) }))
     wrapper.unmount()
   })
 

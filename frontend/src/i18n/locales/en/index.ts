@@ -8,6 +8,8 @@ import misc from './misc'
 import sharedPool from './sharedPool'
 import accountProtection from './accountProtection'
 import codexTicketSettings from './codexTicketSettings'
+import codexModelQuality from './codexModelQuality'
+import codexRequestStrategy from './codexRequestStrategy'
 import proxyGroups from './proxyGroups'
 import accountProxyGroups from './accountProxyGroups'
 
@@ -22,6 +24,8 @@ export default {
   sharedPool,
   accountProtection,
   codexTicketSettings,
+  codexModelQuality,
+  codexRequestStrategy,
   proxyGroups,
   accountProxyGroups,
 }

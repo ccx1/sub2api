@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,11 +30,106 @@ type codexTicketDisabledAtReader interface {
 type codexSchedulerCandidate struct {
 	ID              string   `json:"id"`
 	Version         string   `json:"version"`
+	IP              string   `json:"ip,omitempty"`
 	Fixed           []string `json:"fixed"`
 	Healthy         bool     `json:"healthy"`
 	Degraded        bool     `json:"degraded"`
 	Quality         int      `json:"quality"`
 	AffinityVersion string   `json:"affinity_version"`
+}
+
+func codexProxyIPKey(proxy *service.Proxy, info *service.ProxyLatencyInfo) string {
+	if proxy == nil {
+		return ""
+	}
+	if service.ProxyLatencyMatchesProxy(info, proxy) {
+		if ip := net.ParseIP(strings.TrimSpace(info.IPAddress)); ip != nil {
+			return ip.String()
+		}
+	}
+	if ip := net.ParseIP(strings.Trim(strings.TrimSpace(proxy.Host), "[]")); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+// codexSchedulerCurrentCandidate refreshes the latest observed egress for an
+// already reserved proxy. Start may remember the observation; validation stays
+// read-only and only uses the most recent remembered value.
+func (a *ProxyPoolAllocator) codexSchedulerCurrentCandidate(ctx context.Context, proxy *service.Proxy, remember bool) (*codexSchedulerCandidate, error) {
+	if proxy == nil || proxy.ID <= 0 {
+		return nil, nil
+	}
+	health := map[int64]*service.ProxyLatencyInfo{}
+	if a.latencyCache != nil {
+		var err error
+		health, err = a.latencyCache.GetProxyLatencies(ctx, []int64{proxy.ID})
+		if err != nil {
+			return nil, err
+		}
+	}
+	ips, err := a.proxyIPIdentities(ctx, []*service.Proxy{proxy}, health, remember)
+	if err != nil {
+		return nil, err
+	}
+	return &codexSchedulerCandidate{
+		ID: strconv.FormatInt(proxy.ID, 10), Version: codexSchedulerVersion(proxy.URL()),
+		IP: ips[proxy.ID], Healthy: true, Fixed: []string{},
+		AffinityVersion: fmt.Sprintf("%x", sha256.Sum256([]byte(proxy.URL()))),
+	}, nil
+}
+
+func (a *ProxyPoolAllocator) codexSchedulerCurrentReservationProxy(ctx context.Context, r *service.CodexTicketReservation) (*service.Proxy, error) {
+	if r == nil || r.Proxy == nil {
+		return nil, nil
+	}
+	proxy := r.Proxy
+	if a.client == nil {
+		return proxy, nil
+	}
+	entity, err := a.client.Proxy.Get(ctx, proxy.ID)
+	if err != nil {
+		return nil, codexSchedulerWait("proxy_changed")
+	}
+	current := proxyEntityToService(entity)
+	if !current.IsActive() || current.IsExpired(time.Now()) || current.URL() != proxy.URL() {
+		return nil, codexSchedulerWait("proxy_changed")
+	}
+	return current, nil
+}
+
+func (a *ProxyPoolAllocator) codexSchedulerBusinessProxy(ctx context.Context, accountID int64) (*service.Proxy, error) {
+	if a == nil || a.rdb == nil || a.client == nil || accountID <= 0 {
+		return nil, nil
+	}
+	raw, err := a.rdb.Get(ctx, codexSchedulerAccountKey(accountID)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, errors.New("read codex ticket scheduler state failed")
+	}
+	var state struct {
+		Business *struct {
+			ID string `json:"id"`
+		} `json:"business"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil || state.Business == nil {
+		return nil, nil
+	}
+	id, err := strconv.ParseInt(state.Business.ID, 10, 64)
+	if err != nil || id <= 0 {
+		return nil, nil
+	}
+	entity, err := a.client.Proxy.Get(ctx, id)
+	if err != nil {
+		return nil, nil
+	}
+	proxy := proxyEntityToService(entity)
+	if !proxy.IsActive() || proxy.IsExpired(time.Now()) {
+		return nil, nil
+	}
+	return proxy, nil
 }
 
 func codexSchedulerAccountKey(id int64) string {
@@ -84,6 +180,11 @@ func (a *ProxyPoolAllocator) codexSchedulerInput(ctx context.Context, action str
 		"rejection_interval_ms": p.RejectionRetryIntervalSeconds * 1000,
 		"rejection_max":         p.RejectionRetryMaxAttempts,
 		"rejection_cooldown_ms": p.RejectionRetryCooldownSeconds * 1000,
+		"ip_enabled":            p.ProxyIPProtectionEnabled,
+		"ip_window_ms":          max(1, p.ProxyIPFailureWindowSeconds) * 1000,
+		"ip_failure_threshold":  max(1, p.ProxyIPFailureAccountThreshold),
+		"ip_cooldown_ms":        max(1, p.ProxyIPCooldownSeconds) * 1000,
+		"ip_max_rounds":         max(1, p.ProxyIPMaxRounds),
 		"pin_threshold":         max(1, cfg.ProxyFailureThreshold),
 		"session_mode":          cfg.SessionMode, "random_seed": uuid.NewString(), "next_epoch": uuid.NewString(),
 		"business_lease_seconds": int64(proxyPoolLeaseTTL.Seconds()),
@@ -174,7 +275,10 @@ func (a *ProxyPoolAllocator) codexSchedulerDeferredProxy(ctx context.Context, re
 		return nil
 	}
 	candidates, _, err := a.codexSchedulerCandidates(ctx, service.CodexTicketReserveRequest{
-		FixedProxy: proxy, Selection: service.ProxyPoolSelection{CountryCode: req.Selection.CountryCode},
+		FixedProxy: proxy, Selection: service.ProxyPoolSelection{
+			CountryCode:          req.Selection.CountryCode,
+			AllowCountryFallback: req.Selection.AllowCountryFallback,
+		},
 	})
 	if err != nil {
 		return err
@@ -239,13 +343,15 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 		return []codexSchedulerCandidate{{ID: "0", Version: "direct", Healthy: true, Fixed: []string{}}}, map[string]*service.Proxy{}, nil
 	}
 	ids := make([]int64, 0, len(items))
+	ipProxies := make([]*service.Proxy, 0, len(items))
 	for _, item := range items {
 		if item.proxy != nil {
 			ids = append(ids, item.proxy.ID)
+			ipProxies = append(ipProxies, item.proxy)
 		}
 	}
 	health := map[int64]*service.ProxyLatencyInfo{}
-	if req.PoolMode || req.Selection.CountryCode != "" {
+	if req.PoolMode || req.Selection.CountryCode != "" || a.latencyCache != nil {
 		if a.latencyCache == nil {
 			return nil, nil, errors.New("codex ticket proxy region cache unavailable")
 		}
@@ -253,6 +359,24 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 		health, err = a.latencyCache.GetProxyLatencies(ctx, ids)
 		if err != nil {
 			return nil, nil, err
+		}
+	}
+	identities, err := a.proxyIPIdentities(ctx, ipProxies, health, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	regionFallback := false
+	if req.Selection.CountryCode != "" {
+		regional := make([]proxyPoolCandidate, 0, len(items))
+		for _, item := range items {
+			if item.proxy != nil && proxyMatchesRegion(item.proxy, health[item.proxy.ID], req.Selection.CountryCode) {
+				regional = append(regional, item)
+			}
+		}
+		if len(regional) > 0 || !req.Selection.AllowCountryFallback {
+			items = regional
+		} else {
+			regionFallback = true
 		}
 	}
 	result, proxies := []codexSchedulerCandidate{}, map[string]*service.Proxy{}
@@ -264,14 +388,15 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 		if req.PoolMode && req.Selection.Restricted && !containsCodexProxyID(req.Selection.IDs, proxy.ID) {
 			continue
 		}
-		if !proxyMatchesRegion(proxy, health[proxy.ID], req.Selection.CountryCode) &&
+		if !regionFallback && !proxyMatchesRegion(proxy, health[proxy.ID], req.Selection.CountryCode) &&
 			!(req.PoolMode && codexSchedulerRegionPending(proxy, health[proxy.ID], req.Selection.CountryCode)) {
 			continue
 		}
 		quality, degraded, healthy := proxyPoolQuality(proxy, health[proxy.ID])
 		id := strconv.FormatInt(proxy.ID, 10)
-		result = append(result, codexSchedulerCandidate{ID: id, Version: codexSchedulerVersion(proxy.URL()), Fixed: append([]string{}, item.fixedIDs...), Healthy: healthy, Degraded: degraded,
+		result = append(result, codexSchedulerCandidate{ID: id, Version: codexSchedulerVersion(proxy.URL()), IP: identities[proxy.ID], Fixed: append([]string{}, item.fixedIDs...), Healthy: healthy, Degraded: degraded,
 			Quality: quality, AffinityVersion: fmt.Sprintf("%x", sha256.Sum256([]byte(proxy.URL())))})
+		proxy.RegionFallback = regionFallback
 		proxies[id] = proxy
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })

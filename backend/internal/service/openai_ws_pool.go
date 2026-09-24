@@ -40,6 +40,7 @@ var (
 	errOpenAIWSConnClosed               = errors.New("openai ws connection closed")
 	errOpenAIWSConnQueueFull            = errors.New("openai ws connection queue full")
 	errOpenAIWSPreferredConnUnavailable = errors.New("openai ws preferred connection unavailable")
+	errOpenAIWSRouteAffinityUnavailable = errors.New("openai ws route affinity unavailable")
 	errOpenAIWSPoolChanged              = errors.New("openai ws account pool changed")
 )
 
@@ -74,18 +75,27 @@ type openAIWSAcquireRequest struct {
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
-	HeadersFactory     func(context.Context, http.Header) (http.Header, error)
-	CodexTicketReceipt *openAICodexTicketWSReceipt
-	ProxyURL           string
-	PreferredConnID    string
+	HeadersFactory      func(context.Context, http.Header) (http.Header, error)
+	CodexTicketReceipt  *openAICodexTicketWSReceipt
+	CookieMode          string
+	CookiePolicyScope   string
+	CookiePolicyCurrent func(context.Context) string
+	ProxyURL            string
+	PreferredConnID     string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
 	ForcePreferredConn bool
+	// strict 使用已验证票据的 Cookie 亲和，prefer 允许退回软亲和。
+	RouteAffinityMode           string
+	RoutePrewarmConnections     int
+	RouteFailureCooldownSeconds int
+	RouteQualityBlocked         bool
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
 	codexTicket         openAICodexTicketWSIdentity
+	cookieMode          string
 	proxyIdentity       [32]byte
 	tlsProfile          string
 	betaFeatures        string
@@ -95,6 +105,8 @@ type openAIWSHandshakeCompatibilityKey struct {
 	threadID            string
 	clientRequestID     string
 	codexWindowID       string
+	strictRoute         string
+	strictRoutingHint   string
 }
 
 type openAIWSConnLease struct {
@@ -290,6 +302,8 @@ type openAIWSConn struct {
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	codexTicketReceipt     *openAICodexTicketWSReceipt
 	routingAffinity        string
+	routeFingerprint       string
+	routeRequest           *openAIWSAcquireRequest
 
 	leaseCh   chan struct{}
 	closedCh  chan struct{}
@@ -313,6 +327,7 @@ type openAIWSConn struct {
 	createdAtNano atomic.Int64
 	lastUsedNano  atomic.Int64
 	prewarmed     atomic.Bool
+	leasedBefore  atomic.Bool
 }
 
 func newOpenAIWSConn(id string, _ int64, ws openAIWSClientConn, handshakeHeaders http.Header) *openAIWSConn {
@@ -599,6 +614,9 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	if c.ws == nil {
 		return errOpenAIWSConnClosed
 	}
+	if err := c.validateRouteWrite(value); err != nil {
+		return err
+	}
 	if err := c.codexTicketReceipt.validate(time.Now()); err != nil {
 		return err
 	}
@@ -777,11 +795,19 @@ func (c *openAIWSConn) handshakeHeader(name string) string {
 }
 
 func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHandshakeCompatibilityKey) bool {
-	return c != nil && c.handshakeCompatibility == compatibility
+	if c == nil || compatibility.strictRoute != "" &&
+		(c.routeFingerprint != compatibility.strictRoute || c.routingAffinity != compatibility.strictRoutingHint) {
+		return false
+	}
+	return c.handshakeCompatibility == compatibility
 }
 
 func (c *openAIWSConn) matchesRoutingAffinity(routingAffinity string) bool {
 	return c != nil && c.routingAffinity == routingAffinity
+}
+
+func (c *openAIWSConn) matchesRouteFingerprint(routeFingerprint string) bool {
+	return c != nil && routeFingerprint != "" && c.routeFingerprint == routeFingerprint
 }
 
 func (c *openAIWSConn) isPrewarmed() bool {
@@ -1121,6 +1147,11 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
 	if lease != nil && lease.conn != nil {
+		if routeErr := validateOpenAIWSRouteRequest(req, time.Now()); routeErr != nil {
+			lease.MarkBroken()
+			lease.Release()
+			return nil, routeErr
+		}
 		if ticketErr := lease.conn.codexTicketReceipt.validate(time.Now()); ticketErr != nil {
 			lease.MarkBroken()
 			lease.Release()
@@ -1141,6 +1172,7 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 	}
 	if lease != nil && lease.conn != nil {
 		now := time.Now()
+		lease.conn.leasedBefore.Store(true)
 		lease.idleBefore = lease.conn.idleDuration(now)
 		lease.ageBefore = lease.conn.age(now)
 	}
@@ -1157,6 +1189,9 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 	if !validOpenAICodexTicketWSReceiptAccount(req) || req.CodexTicketReceipt != nil && !req.CodexTicketReceipt.ticket.matchesHeaders(req.Headers) {
 		return nil, ErrOpenAICodexTicketUnavailable
 	}
+	if err := validateOpenAIWSRouteRequest(req, time.Now()); err != nil {
+		return nil, err
+	}
 	if queueWait == nil {
 		queueWait = &openAIWSAcquireQueueWait{}
 	}
@@ -1165,6 +1200,7 @@ retryAcquire:
 	accountID := req.Account.ID
 	compatibility := normalizeOpenAIWSTicketCompatibility(req)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
+	routeMode := normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
 		return nil, errOpenAIWSConnQueueFull
@@ -1179,9 +1215,23 @@ retryAcquire:
 		ap.lastCleanupAt = now
 	}
 	pickStartedAt := time.Now()
+	routeTarget := openAIWSRequestRouteFingerprint(req.Headers)
 	allowReuse := !req.ForceNewConn
 	preferredConnID := stringsTrim(req.PreferredConnID)
 	forcePreferredConn := allowReuse && req.ForcePreferredConn
+	// 专用模式可领取尚未使用的预热连接；用过的连接仍不能跨会话复用。
+	if req.ForceNewConn && routeMode != CodexRouteAffinityOff {
+		if conn := pickUnusedOpenAIWSRouteConnLocked(ap, req); conn != nil && conn.tryAcquire() {
+			connPick := time.Since(pickStartedAt)
+			p.recordConnPickDuration(connPick)
+			ap.mu.Unlock()
+			closeOpenAIWSConns(evicted)
+			p.metrics.acquireReuseTotal.Add(1)
+			p.recordLastSuccessfulAcquire(accountID, acquireGeneration, req)
+			p.ensureTargetIdleAsync(accountID)
+			return &openAIWSConnLease{pool: p, accountID: accountID, conn: conn, connPick: connPick, reused: true}, nil
+		}
+	}
 
 	if allowReuse {
 		if forcePreferredConn {
@@ -1309,10 +1359,13 @@ retryAcquire:
 			}
 		}
 
-		// A routing hint is advisory at WebSocket dial time. Prefer a pooled
-		// connection whose handshake used the same hint, but do not make that
-		// preference a continuation compatibility requirement.
+		// 严格模式的兼容键包含票据路由标记；其它模式保留软亲和。
 		best := p.pickLeastBusyConnWithRoutingAffinityLocked(ap, compatibility, routingAffinity)
+		if routeMode != CodexRouteAffinityOff && routeTarget != "" {
+			if affine := p.pickLeastBusyConnWithRouteFingerprintLocked(ap, compatibility, routingAffinity, routeTarget); affine != nil {
+				best = affine
+			}
+		}
 		if best != nil && best.tryAcquire() {
 			connPick := time.Since(pickStartedAt)
 			p.recordConnPickDuration(connPick)
@@ -1336,7 +1389,7 @@ retryAcquire:
 		} else if best != nil {
 			p.dropDeadConnLocked(ap, best, &evicted)
 		}
-		if routingAffinity == "" || len(ap.conns)+ap.creating >= effectiveMaxConns {
+		if routeMode != CodexRouteAffinityStrict && (routingAffinity == "" || len(ap.conns)+ap.creating >= effectiveMaxConns) {
 			for _, conn := range ap.conns {
 				if conn == nil || conn == best || !conn.matchesHandshakeCompatibility(compatibility) {
 					continue
@@ -1369,6 +1422,9 @@ retryAcquire:
 
 	if !req.ForceNewConn && len(ap.conns)+ap.creating >= effectiveMaxConns {
 		affine := p.pickLeastBusyConnWithRoutingAffinityLocked(ap, compatibility, routingAffinity)
+		if routeMode == CodexRouteAffinityStrict && routeTarget != "" {
+			affine = p.pickLeastBusyConnWithRouteFingerprintLocked(ap, compatibility, routingAffinity, routeTarget)
+		}
 		if idle := p.pickOldestIdleConnWithoutHandshakeCompatibilityLocked(ap, compatibility); idle != nil {
 			delete(ap.conns, idle.id)
 			evicted = append(evicted, idle)
@@ -1442,6 +1498,14 @@ retryAcquire:
 			ap.mu.Unlock()
 			return nil, dialErr
 		}
+		if routeMode == CodexRouteAffinityStrict {
+			if routeTarget == "" || conn.routeFingerprint != routeTarget {
+				ap.signalChangedLocked()
+				ap.mu.Unlock()
+				conn.close()
+				return nil, errOpenAIWSRouteAffinityUnavailable
+			}
+		}
 		// Claim the freshly dialed connection before publishing it. Otherwise a
 		// topology waiter awakened below can take the free semaphore first and
 		// make the caller that paid for the dial queue behind it.
@@ -1474,12 +1538,20 @@ retryAcquire:
 	}
 
 acquireAtCapacity:
-	target := p.pickLeastBusyConnLocked(ap, req.PreferredConnID, compatibility)
+	var target *openAIWSConn
+	if routeMode == CodexRouteAffinityStrict && routeTarget != "" {
+		target = p.pickLeastBusyConnWithRouteFingerprintLocked(ap, compatibility, routingAffinity, routeTarget)
+	} else {
+		target = p.pickLeastBusyConnLocked(ap, req.PreferredConnID, compatibility)
+	}
 	connPick := time.Since(pickStartedAt)
 	p.recordConnPickDuration(connPick)
 	if target == nil {
 		ap.mu.Unlock()
 		closeOpenAIWSConns(evicted)
+		if routeMode == CodexRouteAffinityStrict {
+			return nil, errOpenAIWSRouteAffinityUnavailable
+		}
 		return nil, errOpenAIWSConnClosed
 	}
 	if int(target.waiters.Load()) >= p.queueLimitPerConn() {
@@ -1817,6 +1889,36 @@ func (p *openAIWSConnPool) pickLeastBusyConnWithRoutingAffinityLocked(
 	return best
 }
 
+func (p *openAIWSConnPool) pickLeastBusyConnWithRouteFingerprintLocked(
+	ap *openAIWSAccountPool,
+	compatibility openAIWSHandshakeCompatibilityKey,
+	routingAffinity string,
+	routeFingerprint string,
+) *openAIWSConn {
+	if ap == nil || routeFingerprint == "" {
+		return nil
+	}
+	var best *openAIWSConn
+	var bestWaiters int32
+	var bestLastUsed time.Time
+	for _, conn := range ap.conns {
+		if conn == nil ||
+			!conn.matchesHandshakeCompatibility(compatibility) ||
+			!conn.matchesRoutingAffinity(routingAffinity) ||
+			!conn.matchesRouteFingerprint(routeFingerprint) {
+			continue
+		}
+		waiters := conn.waiters.Load()
+		lastUsed := conn.lastUsedAt()
+		if best == nil || waiters < bestWaiters || (waiters == bestWaiters && lastUsed.Before(bestLastUsed)) {
+			best = conn
+			bestWaiters = waiters
+			bestLastUsed = lastUsed
+		}
+	}
+	return best
+}
+
 func accountPoolLoadLocked(ap *openAIWSAccountPool) (inflight int, waiters int) {
 	if ap == nil {
 		return 0, 0
@@ -1865,6 +1967,13 @@ func (p *openAIWSConnPool) ensureTargetIdleAsync(accountID int64) {
 	if ap.lastAcquire == nil {
 		return
 	}
+	if normalizeOpenAIWSRouteAffinityMode(ap.lastAcquire.RouteAffinityMode) != CodexRouteAffinityOff && ap.lastAcquire.RoutePrewarmConnections == 0 {
+		return
+	}
+	if normalizeOpenAIWSRouteAffinityMode(ap.lastAcquire.RouteAffinityMode) != CodexRouteAffinityOff &&
+		openAIWSRequestRouteFingerprint(ap.lastAcquire.Headers) == "" {
+		return
+	}
 	if ap.prewarmActive {
 		return
 	}
@@ -1881,10 +1990,15 @@ func (p *openAIWSConnPool) ensureTargetIdleAsync(accountID int64) {
 	}
 	target := p.targetConnCountLocked(ap, effectiveMaxConns)
 	current := len(ap.conns) + ap.creating
+	if normalizeOpenAIWSRouteAffinityMode(ap.lastAcquire.RouteAffinityMode) != CodexRouteAffinityOff {
+		// 其它模型/会话/票据的空闲连接不能抵扣当前亲和的备用数量。
+		current = countOpenAIWSRouteIdleLocked(ap, *ap.lastAcquire) + ap.creating
+		target = ap.lastAcquire.RoutePrewarmConnections
+	}
 	if current >= target {
 		return
 	}
-	need = target - current
+	need = min(target-current, effectiveMaxConns-len(ap.conns)-ap.creating)
 	if need <= 0 {
 		return
 	}
@@ -1915,6 +2029,9 @@ func (p *openAIWSConnPool) targetConnCountLocked(ap *openAIWSAccountPool, maxCon
 	}
 	if minIdle > maxConns {
 		minIdle = maxConns
+	}
+	if ap.lastAcquire != nil && normalizeOpenAIWSRouteAffinityMode(ap.lastAcquire.RouteAffinityMode) != CodexRouteAffinityOff {
+		minIdle = min(ap.lastAcquire.RoutePrewarmConnections, maxConns)
 	}
 
 	inflight, waiters := accountPoolLoadLocked(ap)
@@ -1991,6 +2108,15 @@ func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequ
 		}
 		if !sameOpenAIWSPrewarmTarget(req, *ap.lastAcquire) {
 			staleTarget = true
+			ap.signalChangedLocked()
+			ap.mu.Unlock()
+			conn.close()
+			continue
+		}
+		routeMode := normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode)
+		if routeMode != CodexRouteAffinityOff && !openAIWSConnMatchesRouteRequest(conn, req) {
+			ap.prewarmFails++
+			ap.prewarmFailAt = time.Now()
 			ap.signalChangedLocked()
 			ap.mu.Unlock()
 			conn.close()
@@ -2144,6 +2270,10 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	if err := validateOpenAIWSCookiePolicyDial(ctx, req); err != nil {
+		return nil, err
+	}
+	filterCodexCookieHeader(headers, openAIWSCookieMode(req))
 	if !validOpenAICodexTicketWSReceiptAccount(req) || req.CodexTicketReceipt != nil && !req.CodexTicketReceipt.ticket.matchesHeaders(headers) {
 		return nil, ErrOpenAICodexTicketUnavailable
 	}
@@ -2155,7 +2285,14 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		discardExpiredOpenAICodexTicketWSHandshake(&req, time.Now())
 		headers = req.Headers
 	}
+	req.Headers = headers
+	if err := validateOpenAIWSRouteRequest(req, time.Now()); err != nil {
+		return nil, err
+	}
 	conn, status, handshakeHeaders, err := p.dialWithAccountTransport(ctx, req, headers)
+	if receipt := req.CodexTicketReceipt; receipt != nil && receipt.service != nil {
+		receipt.observeHandshake(ctx, receipt.service, handshakeHeaders)
+	}
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2183,7 +2320,21 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	pooledConn.onPeerClosed.Store(&evict)
 	pooledConn.handshakeCompatibility = normalizeOpenAIWSTicketCompatibility(req)
 	pooledConn.codexTicketReceipt = req.CodexTicketReceipt
-	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
+	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(headers)
+	pooledConn.routeFingerprint = openAIWSHandshakeRouteFingerprint(headers, handshakeHeaders)
+	if err := validateOpenAIWSRouteRequest(req, time.Now()); err != nil {
+		pooledConn.close()
+		return nil, err
+	}
+	if normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode) == CodexRouteAffinityStrict &&
+		!openAIWSConnMatchesRouteRequest(pooledConn, req) {
+		pooledConn.close()
+		return nil, errOpenAIWSRouteAffinityUnavailable
+	}
+	if normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode) == CodexRouteAffinityStrict {
+		pooledConn.routeRequest = cloneOpenAIWSAcquireRequestPtr(&req)
+		pooledConn.routeRequest.HeadersFactory = nil
+	}
 	return pooledConn, nil
 }
 
@@ -2349,6 +2500,13 @@ func cloneOpenAIWSAcquireRequest(req openAIWSAcquireRequest) openAIWSAcquireRequ
 	copied.WSURL = stringsTrim(req.WSURL)
 	copied.ProxyURL = stringsTrim(req.ProxyURL)
 	copied.PreferredConnID = stringsTrim(req.PreferredConnID)
+	copied.RouteAffinityMode = normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode)
+	if copied.RoutePrewarmConnections < 0 {
+		copied.RoutePrewarmConnections = 0
+	}
+	if copied.RouteFailureCooldownSeconds < 0 {
+		copied.RouteFailureCooldownSeconds = 0
+	}
 	return copied
 }
 
@@ -2361,9 +2519,16 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 }
 
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
-	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
-		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSTicketCompatibility(a) == normalizeOpenAIWSTicketCompatibility(b)
+	mode := normalizeOpenAIWSRouteAffinityMode(a.RouteAffinityMode)
+	if stringsTrim(a.WSURL) != stringsTrim(b.WSURL) || stringsTrim(a.ProxyURL) != stringsTrim(b.ProxyURL) ||
+		normalizeOpenAIWSTicketCompatibility(a) != normalizeOpenAIWSTicketCompatibility(b) ||
+		mode != normalizeOpenAIWSRouteAffinityMode(b.RouteAffinityMode) {
+		return false
+	}
+	// 关闭路由管理时保持原有语义：hint 变化不使健康预热连接作废。
+	return mode == CodexRouteAffinityOff || a.RoutePrewarmConnections == b.RoutePrewarmConnections &&
+		openAIWSRequestRouteFingerprint(a.Headers) == openAIWSRequestRouteFingerprint(b.Headers) &&
+		normalizeOpenAIWSRoutingAffinity(a.Headers) == normalizeOpenAIWSRoutingAffinity(b.Headers)
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
@@ -2453,6 +2618,17 @@ func normalizeOpenAIWSRoutingAffinity(headers http.Header) string {
 		}
 	}
 	return ""
+}
+
+func normalizeOpenAIWSRouteAffinityMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case CodexRouteAffinityStrict:
+		return CodexRouteAffinityStrict
+	case CodexRouteAffinityPrefer:
+		return CodexRouteAffinityPrefer
+	default:
+		return CodexRouteAffinityOff
+	}
 }
 
 func cloneHeader(src http.Header) http.Header {

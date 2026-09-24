@@ -98,6 +98,9 @@ const (
 	RandomProxyEmptyPoolPolicyReject   = "reject"
 	RandomProxyEmptyPoolPolicyDisable  = "disable"
 	RandomProxyEmptyPoolPolicyDirect   = "direct"
+	RandomProxyRegionFallbackExtraKey  = "random_proxy_region_fallback"
+	RandomProxyRegionFallbackNone      = "none"
+	RandomProxyRegionFallbackPool      = "pool"
 )
 
 // NormalizeProxyModeExtra canonicalizes proxy-related extra keys before they
@@ -118,6 +121,21 @@ func NormalizeProxyModeExtra(extra map[string]any) map[string]any {
 			delete(extra, RandomProxyGroupIDExtraKey)
 			delete(extra, RandomProxyPoolScopeExtraKey)
 			delete(extra, RandomProxyPoolIDsExtraKey)
+			delete(extra, RandomProxyRegionFallbackExtraKey)
+		}
+	}
+	if rawFallback, exists := extra[RandomProxyRegionFallbackExtraKey]; exists {
+		if fallback, ok := rawFallback.(string); ok {
+			switch strings.ToLower(strings.TrimSpace(fallback)) {
+			case RandomProxyRegionFallbackNone:
+				extra[RandomProxyRegionFallbackExtraKey] = RandomProxyRegionFallbackNone
+			case RandomProxyRegionFallbackPool:
+				extra[RandomProxyRegionFallbackExtraKey] = RandomProxyRegionFallbackPool
+			default:
+				delete(extra, RandomProxyRegionFallbackExtraKey)
+			}
+		} else {
+			delete(extra, RandomProxyRegionFallbackExtraKey)
 		}
 	}
 
@@ -165,6 +183,15 @@ func (a *Account) RandomProxyEmptyPoolPolicy() string {
 	default:
 		return RandomProxyEmptyPoolPolicyReject
 	}
+}
+
+func (a *Account) RandomProxyRegionFallbackEnabled() bool {
+	if a == nil || a.Extra == nil {
+		return true
+	}
+	fallback, _ := a.Extra[RandomProxyRegionFallbackExtraKey].(string)
+	// 地区代理回退默认开启；只有显式选择“仅使用账号地区代理”时关闭。
+	return !strings.EqualFold(strings.TrimSpace(fallback), RandomProxyRegionFallbackNone)
 }
 
 // RandomProxySelector is implemented by repositories that can choose one
@@ -290,10 +317,36 @@ func (a *Account) isSchedulableAt(now time.Time) bool {
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		return false
 	}
+	// 额度耗尽独立于预警阈值，粘性会话和插件出站也必须遵守。
+	if a.IsOpenAICodexQuotaExhausted(now) {
+		return false
+	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return false
 	}
 	return true
+}
+
+// IsOpenAICodexQuotaExhausted 检查尚未重置的可信用量；缺少重置时间时，
+// 只允许带有效采样时间的快照暂停调度，确保两小时过期后可以重新探测。
+func (a *Account) IsOpenAICodexQuotaExhausted(now time.Time) bool {
+	if a == nil || a.Platform != PlatformOpenAI || !openAICodexSnapshotIdentityTrusted(a) {
+		return false
+	}
+	for _, window := range []string{"5h", "7d"} {
+		used, ok := resolveOpenAIQuotaUtilization(a.Extra, window, now)
+		if !ok || used < 1 {
+			continue
+		}
+		if _, hasReset := openAICodexWindowResetAt(a.Extra, window); !hasReset {
+			updatedAt, err := parseTime(firstStringValue(a.Extra, "codex_usage_updated_at"))
+			if err != nil || updatedAt.After(now) {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // IsCredentialUsableForShadow 报告本账号(作为某 spark 影子的母账号)的凭据/传输是否可被影子透传使用。

@@ -80,6 +80,9 @@ func (e *openAIWSFallbackError) Unwrap() error {
 }
 
 func wrapOpenAIWSFallback(reason string, err error) error {
+	if errors.Is(err, errOpenAIWSRouteAffinityUnavailable) {
+		reason = openAIWSRouteAffinityUnavailableReason
+	}
 	return &openAIWSFallbackError{Reason: strings.TrimSpace(reason), Err: err}
 }
 

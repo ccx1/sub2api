@@ -517,6 +517,7 @@ type OpenAIGatewayService struct {
 	openaiCodexTicketCooldown      sync.Map
 	openaiCodexTicketBackoff       sync.Map
 	openaiCodexTicketFlight        singleflight.Group
+	openaiCodexCookieProjections   codexCookieProjectionCache
 	openaiCodexTicketQueues        sync.Map
 	openaiCodexTicketAdmissionMu   sync.Mutex
 	openaiCodexTicketManualPending atomic.Int32
@@ -525,6 +526,7 @@ type OpenAIGatewayService struct {
 	openaiCodexTicketCancel        context.CancelFunc
 	openaiCodexTicketDone          chan struct{}
 	openaiCodexTicketStopped       bool
+	codexModelQuality              codexModelQualityRuntime
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -795,7 +797,8 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 		"ws_unsupported",
 		"auth_failed",
 		"invalid_encrypted_content",
-		"previous_response_not_found":
+		"previous_response_not_found",
+		"route_affinity_unavailable":
 		return reason, false
 	}
 
@@ -877,6 +880,13 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 		if statusCode == 0 {
 			statusCode = http.StatusTooManyRequests
 		}
+	case "route_affinity_unavailable":
+		if statusCode == 0 {
+			statusCode = http.StatusServiceUnavailable
+		}
+		errType = "temporarily_unavailable"
+		// 不把内部的路由状态错误透传给客户端，统一返回可重试提示。
+		upstreamMessage = "当前模型的可用路由暂时不可用，请稍后重试"
 	default:
 		if statusCode == 0 {
 			return 0, "", "", "", false
@@ -896,6 +906,8 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 			upstreamMessage = "upstream authentication failed"
 		case "upstream_rate_limited":
 			upstreamMessage = "upstream rate limit exceeded, please retry later"
+		case "route_affinity_unavailable":
+			upstreamMessage = "当前模型的可用路由暂时不可用，请稍后重试"
 		default:
 			upstreamMessage = "Upstream request failed"
 		}

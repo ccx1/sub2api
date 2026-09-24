@@ -12,6 +12,8 @@ func codexTicketLeaf(ticket *openAICodexTicket) *openAICodexTicket {
 		return nil
 	}
 	copy := *ticket
+	// 发送投影不进入库存或候选；原票仍按完整凭据复验。
+	copy.CookieMode, copy.CookiePolicyVerified, copy.CookiePolicyProofKey = "", false, ""
 	copy.CookieSessionKeys = append([]string(nil), ticket.CookieSessionKeys...)
 	copy.Cookies = nil
 	for _, cookie := range ticket.Cookies {

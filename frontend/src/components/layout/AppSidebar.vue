@@ -796,6 +796,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/account-protection', label: t('accountProtection.title'), icon: ShieldIcon },
     { path: '/admin/codex-ticket-settings', label: t('codexTicketSettings.title'), icon: ShieldIcon },
+    { path: '/admin/codex-request-strategy', label: t('codexRequestStrategy.title'), icon: ShieldIcon },
     { path: '/admin/shared-pool', label: t('sharedPool.adminTitle'), icon: UsersIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },

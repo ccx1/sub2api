@@ -93,6 +93,11 @@ func isOpenAIAccount(account *Account) bool {
 // handleOpenAIAccountUpstreamError expects canonicalModel to be the model used
 // for scheduling after applying account mapping exactly once.
 func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) bool {
+	if s != nil && account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && statusCode != http.StatusServiceUnavailable {
+		// 账号级熔断只接受连续 503；即使后续在鉴权、上下文或模型规则分支
+		// 提前返回，也必须打断此前的 503 序列。
+		s.clearOpenAITransient503Failure(account.ID)
+	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
@@ -104,6 +109,10 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// Capacity shedding describes this request, not account health. Keep the
 	// account schedulable while the request-local retry budget handles recovery.
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIRequestScopedCapacityShed("", responseBody) {
+		// 请求级容量耗尽不代表账号失效，也不能延续此前的账号级 503 连续计数。
+		if s != nil {
+			s.clearOpenAITransient503Failure(account.ID)
+		}
 		return false
 	}
 	stateCtx, cancel := openAIAccountStateContext(ctx)
@@ -160,6 +169,7 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// account available to other models and avoids the account runtime blocker.
 	if s.rateLimitService != nil && statusCode != http.StatusUnauthorized && len(canonicalModel) > 0 && strings.TrimSpace(canonicalModel[0]) != "" &&
 		s.rateLimitService.HandleTempUnschedulable(stateCtx, account, statusCode, responseBody, canonicalModel[0]) {
+		s.clearOpenAITransient503Failure(account.ID)
 		return true
 	}
 	if statusCode == http.StatusTooManyRequests && s.rateLimitService != nil && len(canonicalModel) > 0 &&
@@ -182,6 +192,11 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// same-account retry budget. Recording the generic account+model transient
 	// cooldown here would block the next approved retry before that budget is used.
 	poolModeRetryable := account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode)
+	if !shouldDisable && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey &&
+		statusCode == http.StatusServiceUnavailable && account.ShouldHandleErrorCode(statusCode) && !poolModeRetryable {
+		accountDecision := s.recordOpenAITransient503Failure(account, time.Now())
+		s.blockOpenAIAccountAfterTransientFailure(stateCtx, account, statusCode, responseBody, accountDecision)
+	}
 	if !shouldDisable && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey &&
 		shouldCooldownOpenAITransientUpstreamError(statusCode, responseBody) && !poolModeRetryable {
 		model := ""
@@ -463,6 +478,9 @@ func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientState(accountID i
 		return
 	}
 	state.recordSuccess(accountID, model)
+	// 成功请求同时清除账号级 503 连续失败计数，避免恢复后再次失败时
+	// 沿用恢复前的旧计数。
+	state.recordSuccess(accountID, openAITransientAccountFailureModelKey)
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountModelRuntimeBlocked(account *Account, requestedModel string) bool {

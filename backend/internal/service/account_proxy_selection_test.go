@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 type randomProxySelectorStub struct {
@@ -40,6 +42,23 @@ func TestResolveRandomProxyAssignsEphemeralProxy(t *testing.T) {
 	if account.Proxy != proxy || account.ProxyID == nil || *account.ProxyID != proxy.ID {
 		t.Fatalf("account proxy was not assigned: proxy=%#v proxy_id=%v", account.Proxy, account.ProxyID)
 	}
+}
+
+func TestResolveAccountProxyPoolSelectionCarriesRegionFallback(t *testing.T) {
+	account := randomProxyAccount(RandomProxyEmptyPoolPolicyReject)
+	selection, err := ResolveAccountProxyPoolSelection(context.Background(), account, nil)
+	require.NoError(t, err)
+	require.True(t, selection.AllowCountryFallback)
+
+	account.Extra[RandomProxyRegionFallbackExtraKey] = RandomProxyRegionFallbackPool
+	selection, err = ResolveAccountProxyPoolSelection(context.Background(), account, nil)
+	require.NoError(t, err)
+	require.True(t, selection.AllowCountryFallback)
+
+	account.Extra[RandomProxyRegionFallbackExtraKey] = RandomProxyRegionFallbackNone
+	selection, err = ResolveAccountProxyPoolSelection(context.Background(), account, nil)
+	require.NoError(t, err)
+	require.False(t, selection.AllowCountryFallback)
 }
 
 func TestResolveRandomProxyEmptyPoolPolicies(t *testing.T) {
@@ -107,6 +126,7 @@ func TestNormalizeProxyModeExtra(t *testing.T) {
 		{name: "random keeps group", input: map[string]any{ProxyModeExtraKey: "random", RandomProxyGroupIDExtraKey: float64(3)}, want: map[string]any{ProxyModeExtraKey: "random", RandomProxyGroupIDExtraKey: int64(3)}},
 		{name: "policy canonicalized", input: map[string]any{RandomProxyEmptyPoolPolicyExtraKey: " Direct "}, want: map[string]any{RandomProxyEmptyPoolPolicyExtraKey: RandomProxyEmptyPoolPolicyDirect}},
 		{name: "invalid policy dropped", input: map[string]any{RandomProxyEmptyPoolPolicyExtraKey: "drop"}, want: map[string]any{}},
+		{name: "region fallback canonicalized", input: map[string]any{ProxyModeExtraKey: "random", RandomProxyRegionFallbackExtraKey: " Pool "}, want: map[string]any{ProxyModeExtraKey: ProxyModeRandom, RandomProxyRegionFallbackExtraKey: RandomProxyRegionFallbackPool}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

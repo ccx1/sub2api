@@ -174,6 +174,12 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 		var lastRetryResp *http.Response
 		var lastRetryBody []byte
 
+		// 单账号容量 503 继续使用有界原地重试，避免进入全局模型冷却后
+		// 后续请求只收到缓存的 503，失去直接重试上游的恢复机会。
+		if isModelCapacityExhausted && resp.StatusCode == http.StatusServiceUnavailable && isSingleAccountRetry(p.ctx) {
+			return s.handleSingleAccountRetryInPlace(p, resp, respBody, baseURL, antigravityModelCapacityRetryWait, modelName)
+		}
+
 		// MODEL_CAPACITY_EXHAUSTED 使用独立的重试参数（60 次，固定 1s 间隔）
 		maxAttempts := antigravitySmartRetryMaxAttempts
 		if isModelCapacityExhausted {

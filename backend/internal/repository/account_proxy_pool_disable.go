@@ -51,8 +51,10 @@ const disableBalancedProxyAccountSQL = `WITH disabled AS (
  AND a.extra->'random_proxy_pool_scope' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_scope'
  AND a.extra->'random_proxy_pool_ids' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_pool_ids'
  AND a.extra->'random_proxy_group_id' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_group_id'
+ AND a.extra->'random_proxy_region_fallback' IS NOT DISTINCT FROM $3::jsonb->'random_proxy_region_fallback'
  AND a.extra->'proxy_region_mode' IS NOT DISTINCT FROM $3::jsonb->'proxy_region_mode'
  AND a.extra->'proxy_region_country' IS NOT DISTINCT FROM $3::jsonb->'proxy_region_country'
+ AND a.extra->'proxy_region_fallback_country' IS NOT DISTINCT FROM $3::jsonb->'proxy_region_fallback_country'
  AND (COALESCE(btrim(a.extra->>'proxy_region_mode'), 'off') <> 'billing' OR (
   a.credentials->>'billing_currency' IS NOT DISTINCT FROM $4::jsonb->>'billing_currency'
   AND a.credentials->>'price_country' IS NOT DISTINCT FROM $4::jsonb->>'price_country'))

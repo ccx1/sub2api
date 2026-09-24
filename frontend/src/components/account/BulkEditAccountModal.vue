@@ -697,6 +697,7 @@
             v-model:group-id="randomProxyGroupId"
             v-model:group-error="randomProxyGroupError"
             v-model:policy="randomProxyEmptyPoolPolicy"
+            v-model:region-fallback="randomProxyRegionFallback"
             v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
             :proxies="proxies"
             :region-country="enableProxyRegion ? resolveAccountProxyRegion(proxyRegion).country : ''"
@@ -1559,7 +1560,7 @@ import CodexTicketProxySettings from '@/components/account/CodexTicketProxySetti
 import { readCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
-import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope, type RandomProxyRegionFallback } from '@/utils/randomProxy'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1763,6 +1764,7 @@ const randomProxyEnabled = ref(false)
 const enableCodexTicketProxy = ref(false)
 const codexTicketProxy = ref(readCodexTicketProxy())
 const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
+const randomProxyRegionFallback = ref<RandomProxyRegionFallback>('pool')
 const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
 const randomProxyPoolIds = ref<number[]>([])
 const randomProxyGroupId = ref<number | null>(null)
@@ -2032,7 +2034,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.proxy_id = randomProxyEnabled.value || proxyId.value === null ? 0 : proxyId.value
     const extra = ensureExtra()
     if (randomProxyEnabled.value) {
-      Object.assign(extra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value }))
+      Object.assign(extra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value, regionFallback: randomProxyRegionFallback.value }))
     } else {
       extra.proxy_mode = ''
     }
@@ -2519,6 +2521,7 @@ watch(
       enableRpmLimit.value = false
       randomProxyEnabled.value = false
       randomProxyEmptyPoolPolicy.value = 'reject'
+      randomProxyRegionFallback.value = 'pool'
       randomProxyPoolScope.value = 'all'
       randomProxyPoolIds.value = []
       randomProxyGroupId.value = null

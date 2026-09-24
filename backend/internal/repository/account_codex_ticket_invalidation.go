@@ -34,16 +34,16 @@ func prepareCodexTicketInvalidation(key string, used, expected codexTicketRevoca
 	if err != nil || fieldsErr != nil || event.Model != model || (fields[0] != "" && fields[0] != model) ||
 		(fields[1] != "" && fields[1] != model) || event.AttemptID != fields[3] ||
 		fields[2] != fields[3] || len(event.AttemptID) > 128 ||
-		!event.CapturedAt.Equal(captured) || event.InvalidatedAt.IsZero() {
+		!event.CapturedAt.Equal(captured) || event.InvalidatedAt.IsZero() || event.InvalidatedAt.Before(captured) {
 		return nil, errors.New("codex ticket invalidation does not match the sent ticket")
 	}
 	switch event.Reason {
-	case "response_model_mismatch", "response_ticket_rejected", "cookie_changed":
+	case "response_model_mismatch", "response_ticket_rejected", "cookie_changed", "model_quality_capability_failed", "model_quality_model_mismatch", "model_quality_quarantine_persist_failed":
 	default:
 		event.Reason = "unknown"
 	}
 	switch event.Source {
-	case "http", "websocket", "websocket_handshake", "websocket_prewarm":
+	case "http", "websocket", "websocket_handshake", "websocket_prewarm", "model_quality":
 	default:
 		event.Source = "unknown"
 	}

@@ -47,7 +47,12 @@ func EvaluateAccountSchedulingThreshold(account *Account, thresholds map[string]
 	threshold, ok := resolveEffectiveAccountSchedulingThreshold(account, thresholds, decision.Platform)
 	decision.ThresholdPercent = threshold
 	if !ok || threshold >= 100 {
-		return decision
+		if decision.Platform != PlatformOpenAI {
+			return decision
+		}
+		// 关闭提前暂停仍须排除已耗尽的 OpenAI 配额窗口。
+		threshold = 100
+		decision.ThresholdPercent = threshold
 	}
 
 	var winner *accountSchedulingThresholdCandidate

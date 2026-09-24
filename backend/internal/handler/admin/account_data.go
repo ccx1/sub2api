@@ -60,6 +60,9 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
+	ProtectionEnabled  *bool          `json:"protection_enabled,omitempty"`
+	CodexTicketEnabled *bool          `json:"codex_ticket_enabled,omitempty"`
+	UseImportDefaults  *bool          `json:"use_import_defaults,omitempty"`
 	Name               string         `json:"name"`
 	Notes              *string        `json:"notes,omitempty"`
 	Platform           string         `json:"platform"`
@@ -75,6 +78,7 @@ type DataAccount struct {
 }
 
 type DataImportRequest struct {
+	UseImportDefaults    *bool       `json:"use_import_defaults"`
 	Data                 DataPayload `json:"data"`
 	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
 	ProtectionEnabled    *bool       `json:"protection_enabled"`
@@ -408,6 +412,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 
 		var proxyID *int64
+		if item.ProxyKey != nil && *item.ProxyKey == "" {
+			proxyID = new(int64(0))
+		}
 		if item.ProxyKey != nil && *item.ProxyKey != "" {
 			if id, ok := proxyKeyToID[*item.ProxyKey]; ok {
 				proxyID = &id
@@ -440,8 +447,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,
-			ProtectionEnabled:    req.ProtectionEnabled,
-			CodexTicketEnabled:   req.CodexTicketEnabled,
+			ProtectionEnabled:    firstAccountImportOption(item.ProtectionEnabled, req.ProtectionEnabled),
+			CodexTicketEnabled:   firstAccountImportOption(item.CodexTicketEnabled, req.CodexTicketEnabled),
+			SkipImportDefaults:   skipAccountImportDefaults(firstAccountImportOption(item.UseImportDefaults, req.UseImportDefaults)),
 		}
 
 		created, err := h.adminService.CreateAccount(ctx, accountInput)

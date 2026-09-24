@@ -130,20 +130,31 @@ describe('shared pool subscription group settings', () => {
     expect(saveSettings).toHaveBeenCalledWith({ ...persistedOriginal, subscription_group_ids: {} })
   })
 
-  it('offers active paid standard non-exclusive groups from the matching platform', async () => {
+  it('offers active paid standard groups, including exclusive groups, for tier routing', async () => {
     const wrapper = render()
     await wrapper.get('[data-tier-platform="openai"] [data-add-rule]').trigger('click')
     const openaiSelect = wrapper.getComponent<typeof Select>('[data-group-select]')
     await open(openaiSelect)
-    expect(openaiSelect.findAll('[role="option"]').map(option => option.text())).toEqual(['Group 1 · 1x', 'Group 2 · 1x', 'Group 4 · 1x'])
+    expect(openaiSelect.findAll('[role="option"]').map(option => option.text())).toEqual(['Group 1 · 1x', 'Group 2 · 1x', 'Group 4 · 1x', 'Group 7 · 1x'])
     expect(openaiSelect.props('modelValue')).toEqual([])
-    expect(openaiSelect.props('options').map(option => option.value)).toEqual(['1', '2', '4'])
+    expect(openaiSelect.props('options').map(option => option.value)).toEqual(['1', '2', '4', '7'])
     await wrapper.get('[data-tier-platform="gemini"] [data-add-rule]').trigger('click')
     const geminiSelect = wrapper.getComponent<typeof Select>('[data-tier-platform="gemini"] [data-group-select]')
     await open(geminiSelect)
     expect(geminiSelect.findAll('[role="option"]').map(option => option.text())).toEqual(['Group 5 · 1x'])
     expect(defaultSelect(wrapper).props('options').map(option => option.value)).toEqual(['1', '2', '4'])
     expect(defaultSelect(wrapper, 'gemini').props('options').map(option => option.value)).toEqual(['5'])
+  })
+
+  it('persists an exclusive group selected for a subscription tier without exposing it as a default', async () => {
+    const wrapper = render()
+    await addRule(wrapper, 'openai', 'Plus', 7)
+    await save(wrapper)
+    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      default_group_ids: persistedOriginal.default_group_ids,
+      subscription_group_ids: { openai: { plus: [7] } }
+    }))
+    expect(defaultSelect(wrapper).props('options').map(option => option.value)).not.toContain('7')
   })
 
   it('rejects duplicate tiers instead of silently overwriting a rule', async () => {
@@ -277,6 +288,7 @@ describe('shared pool subscription group settings', () => {
     const wrapper = render({ ...original, default_group_ids: { openai: [1, 2, 1] }, subscription_group_ids: { openai: { pro: [4] } } })
     expect(defaultSelect(wrapper).props('modelValue')).toEqual(['1', '2'])
     expect(wrapper.getComponent<typeof Select>('[data-group-select]').props('modelValue')).toEqual(['4'])
+    expect(wrapper.get('[data-group-select] [data-testid="selected-tag"]').text()).toContain('Group 4 · 1x')
     await save(wrapper)
     expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
       default_group_ids: { openai: [1, 2] }, subscription_group_ids: { openai: { pro: [4] } }

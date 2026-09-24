@@ -71,11 +71,11 @@ describe('shared account creation and edit boundaries', () => {
     expect(update.mock.lastCall?.[1]).not.toHaveProperty('dispatch_consent')
   })
 
-  it('exposes concurrency, proxy and cooldown without identity or authorization changes when editing', async () => {
+  it('exposes name, concurrency, proxy and cooldown without platform or authorization changes when editing', async () => {
     const wrapper = render(true)
     expect(wrapper.findComponent({ name: 'BaseDialog' }).props('width')).toBe('normal')
     expect(wrapper.text()).toContain(account.name)
-    expect(wrapper.find('#shared-name').exists()).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('#shared-name').element.value).toBe(account.name)
     expect(wrapper.find('[data-platform]').exists()).toBe(false)
     expect(wrapper.find('[data-account-type]').exists()).toBe(false)
     expect(wrapper.findComponent(SharedCredentialsForm).exists()).toBe(false)
@@ -86,6 +86,28 @@ describe('shared account creation and edit boundaries', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(update).toHaveBeenCalledWith(7, { ...unchangedFields, concurrency: 5 })
+  })
+
+  it('renames an imported account with the trimmed custom name', async () => {
+    const wrapper = render(true, { name: 'imported-account@example.com' })
+    expect(wrapper.get<HTMLInputElement>('#shared-name').element.value).toBe('imported-account@example.com')
+    await wrapper.get('#shared-name').setValue('  我的 Codex 账号  ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(7, { ...unchangedFields, name: '我的 Codex 账号', concurrency: 2 })
+    expect(wrapper.emitted('saved')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it.each(['', '   '])('rejects an empty custom name when editing: %j', async name => {
+    const wrapper = render(true)
+    await wrapper.get('#shared-name').setValue(name)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('admin.accounts.enterAccountName')
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('only sends proxy_url when replacement is selected, including an empty random-pool replacement', async () => {

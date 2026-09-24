@@ -1648,7 +1648,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="filterProxiesByRegion(proxies, resolveAccountProxyRegion(proxyRegion, account.credentials).country, form.proxy_id)" :disabled="randomProxyEnabled" />
+        <ProxySelector v-model="form.proxy_id" :proxies="filterProxiesByRegion(proxies, randomProxyRegionCountry || '', form.proxy_id)" :disabled="randomProxyEnabled" />
         <RandomProxySettings
           v-model:enabled="randomProxyEnabled"
           v-model:scope="randomProxyPoolScope"
@@ -1656,6 +1656,7 @@
           v-model:group-id="randomProxyGroupId"
           v-model:group-error="randomProxyGroupError"
           v-model:policy="randomProxyEmptyPoolPolicy"
+          v-model:region-fallback="randomProxyRegionFallback"
           v-model:max-reuse-minutes="randomProxyMaxReuseMinutes"
           :proxies="proxies"
           :region-country="randomProxyRegionCountry"
@@ -1666,6 +1667,7 @@
       <AccountProxyRegionSettings
         v-if="!isSparkShadow"
         v-model="proxyRegion"
+        v-model:fallback-country="proxyRegionFallbackCountry"
         :credentials="account.credentials"
         :proxies="proxies"
         :proxy-id="form.proxy_id"
@@ -1678,7 +1680,7 @@
         v-if="supportsCodexTicketProxy(account)"
         v-model="codexTicketProxy"
         :region-enabled="proxyRegion.mode !== 'off'"
-        :region-country="resolveAccountProxyRegion(proxyRegion, account.credentials).country"
+        :region-country="randomProxyRegionCountry"
         :proxies="proxies"
         :disabled="submitting"
       />
@@ -3204,14 +3206,14 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
 import AccountProxyRegionSettings from '@/components/account/AccountProxyRegionSettings.vue'
-import { accountProxyRegionExtra, accountProxyRegionValidationError, filterProxiesByRegion, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
+import { accountProxyRegionExtra, accountProxyRegionValidationError, filterProxiesByRegion, normalizeProxyRegionCountry, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
 import CodexTicketCredentialSettings from '@/components/account/CodexTicketCredentialSettings.vue'
 import { readCodexTicketCredential, codexTicketCredentialExtra, codexTicketCredentialValidationError } from '@/utils/codexTicketCredential'
 import { readCodexTicketProxy, supportsCodexTicketProxy, codexTicketProxyExtra, codexTicketProxyValidationError } from '@/utils/codexTicketProxy'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
-import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
+import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyGroupId, normalizeRandomProxyRegionFallback, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope, type RandomProxyRegionFallback } from '@/utils/randomProxy'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -3319,9 +3321,18 @@ const proxyRegion = computed({
   get: () => proxyRegionSelection.value ?? readAccountProxyRegion({ proxy_region_mode: props.account?.type === 'oauth' ? 'billing' : 'off' }),
   set: value => { proxyRegionSelection.value = value }
 })
+const proxyRegionFallbackSelection = ref('')
+const proxyRegionFallbackCountry = computed({
+  get: () => proxyRegionFallbackSelection.value,
+  set: value => {
+    proxyRegionSelection.value = { ...proxyRegion.value }
+    proxyRegionFallbackSelection.value = normalizeProxyRegionCountry(value)
+  }
+})
 const codexTicketProxy = ref(readCodexTicketProxy())
 const codexTicketCredential = ref(readCodexTicketCredential())
 const randomProxyEmptyPoolPolicy = ref<RandomProxyEmptyPoolPolicy>('reject')
+const randomProxyRegionFallback = ref<RandomProxyRegionFallback>('pool')
 const randomProxyPoolScope = ref<RandomProxyPoolScope>('all')
 const randomProxyPoolIds = ref<number[]>([])
 const randomProxyGroupId = ref<number | null>(null)
@@ -3329,7 +3340,7 @@ const randomProxyGroupError = ref<string | null>(null)
 const randomProxyMaxReuseMinutes = ref(0)
 const dailyCooldown = ref(normalizeDailyCooldown())
 const randomProxyRegionCountry = computed(() => {
-  return resolveAccountProxyRegion(proxyRegion.value, props.account?.credentials).country || undefined
+  return resolveAccountProxyRegion(proxyRegion.value, props.account?.credentials, proxyRegionFallbackCountry.value).country || undefined
 })
 
 const handleRandomProxyChange = (enabled: boolean) => {
@@ -4250,10 +4261,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
   const extra = newAccount.extra as Record<string, unknown> | undefined
   proxyRegionSelection.value = extra?.proxy_region_mode !== undefined ? readAccountProxyRegion(extra) : null
+  // 隐式 OAuth 地区策略不使用兜底，编辑前不能预览成已启用。
+  proxyRegionFallbackSelection.value = extra?.proxy_region_mode === 'billing' ? normalizeProxyRegionCountry(extra?.proxy_region_fallback_country) : ''
   codexTicketProxy.value = readCodexTicketProxy(extra)
   codexTicketCredential.value = readCodexTicketCredential(extra)
   randomProxyEnabled.value = extra?.proxy_mode === 'random'
   randomProxyEmptyPoolPolicy.value = normalizeRandomProxyEmptyPoolPolicy(extra?.random_proxy_empty_pool_policy)
+  randomProxyRegionFallback.value = normalizeRandomProxyRegionFallback(extra?.random_proxy_region_fallback)
   randomProxyPoolScope.value = normalizeRandomProxyPoolScope(extra?.random_proxy_pool_scope)
   randomProxyPoolIds.value = normalizeRandomProxyPoolIds(extra?.random_proxy_pool_ids)
   randomProxyGroupId.value = normalizeRandomProxyGroupId(extra?.random_proxy_group_id)
@@ -5263,13 +5277,15 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
   const nextExtra: Record<string, unknown> = { ...currentExtra }
   if (proxyRegionSelection.value !== null) {
     Object.assign(nextExtra, accountProxyRegionExtra(proxyRegion.value))
+    // 后端保留省略的地区键，清空或关闭兜底时需显式提交空值。
+    nextExtra.proxy_region_fallback_country = proxyRegion.value.mode === 'billing' ? proxyRegionFallbackCountry.value : ''
   }
   if (supportsCodexTicketProxy(props.account)) {
     Object.assign(nextExtra, codexTicketProxyExtra(codexTicketProxy.value))
     Object.assign(nextExtra, codexTicketCredentialExtra(codexTicketCredential.value))
   }
   if (randomProxyEnabled.value) {
-    Object.assign(nextExtra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value }))
+    Object.assign(nextExtra, randomProxyExtra(randomProxyPoolScope.value, randomProxyPoolIds.value, { policy: randomProxyEmptyPoolPolicy.value, maxReuseMinutes: randomProxyMaxReuseMinutes.value, groupId: randomProxyGroupId.value, regionFallback: randomProxyRegionFallback.value }))
     updatePayload.proxy_id = 0
   } else {
     // 后端会保留省略的路由键，关闭已有随机模式必须显式提交空值。
@@ -5280,6 +5296,7 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
     delete nextExtra.random_proxy_pool_ids
     delete nextExtra.random_proxy_group_id
     delete nextExtra.random_proxy_max_reuse_minutes
+    delete nextExtra.random_proxy_region_fallback
   }
   updatePayload.extra = dailyCooldown.value.enabled || currentExtra.daily_cooldown
     ? withDailyCooldownExtra(nextExtra, dailyCooldown.value)

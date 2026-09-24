@@ -125,6 +125,7 @@ func (a *ProxyPoolAllocator) readFixedAccounts(ctx context.Context, ids []int64)
 
 type proxyPoolLeaseCandidate struct {
 	ID       string   `json:"id"`
+	IP       string   `json:"ip,omitempty"`
 	Fixed    []string `json:"fixed"`
 	Quality  int      `json:"quality"`
 	Degraded bool     `json:"degraded"`
@@ -140,10 +141,26 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 	if err != nil {
 		return nil, fmt.Errorf("read proxy pool health: %w", err)
 	}
-	candidates = filterProxyPoolRegion(candidates, health, selection.CountryCode)
+	regionFallback := false
+	if selection.CountryCode != "" {
+		regional := filterProxyPoolRegion(candidates, health, selection.CountryCode)
+		if len(regional) > 0 || !selection.AllowCountryFallback {
+			candidates = regional
+		} else {
+			regionFallback = true
+		}
+	}
+	poolProxies := make([]*service.Proxy, 0, len(candidates))
+	for _, candidate := range candidates {
+		poolProxies = append(poolProxies, candidate.proxy)
+	}
+	ips, err := a.proxyIPIdentities(ctx, poolProxies, health, true)
+	if err != nil {
+		return nil, err
+	}
 	// Lua 按输入次序打破同档平局，每次独立打散，避免代理 ID 形成固定优先级。
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
-	keys, leases, proxies := prepareProxyPoolLeases(candidates, health)
+	keys, leases, proxies := prepareProxyPoolLeases(candidates, health, ips)
 	member := strconv.FormatInt(selection.AccountID, 10)
 	if selection.AccountID <= 0 {
 		member = "request:" + uuid.NewString()
@@ -165,10 +182,14 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 		}
 		return nil, a.codexSchedulerTemporaryProxyWait(ctx, reason)
 	}
-	return proxies[selected], nil
+	selectedProxy := proxies[selected]
+	if selectedProxy != nil {
+		selectedProxy.RegionFallback = regionFallback
+	}
+	return selectedProxy, nil
 }
 
-func prepareProxyPoolLeases(candidates []proxyPoolCandidate, health map[int64]*service.ProxyLatencyInfo) ([]string, []proxyPoolLeaseCandidate, map[string]*service.Proxy) {
+func prepareProxyPoolLeases(candidates []proxyPoolCandidate, health map[int64]*service.ProxyLatencyInfo, ips map[int64]string) ([]string, []proxyPoolLeaseCandidate, map[string]*service.Proxy) {
 	keys := make([]string, 0, len(candidates))
 	leases := make([]proxyPoolLeaseCandidate, 0, len(candidates))
 	proxies := make(map[string]*service.Proxy, len(candidates))
@@ -181,7 +202,8 @@ func prepareProxyPoolLeases(candidates []proxyPoolCandidate, health map[int64]*s
 		fixed := append([]string{}, candidate.fixedIDs...)
 		keys = append(keys, proxyPoolLeaseKey(id))
 		version := fmt.Sprintf("%x", sha256.Sum256([]byte(candidate.proxy.URL())))
-		leases = append(leases, proxyPoolLeaseCandidate{ID: id, Fixed: fixed, Quality: quality, Degraded: degraded, Version: version})
+		leases = append(leases, proxyPoolLeaseCandidate{ID: id, IP: ips[candidate.proxy.ID],
+			Fixed: fixed, Quality: quality, Degraded: degraded, Version: version})
 		proxies[id] = candidate.proxy
 	}
 	return keys, leases, proxies

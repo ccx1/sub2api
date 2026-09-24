@@ -419,6 +419,8 @@ type CreateAccountInput struct {
 	ProbeEnabled       *bool
 	ProtectionEnabled  *bool
 	CodexTicketEnabled *bool
+	// SkipImportDefaults applies only to creation and is set from explicit caller intent.
+	SkipImportDefaults bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.

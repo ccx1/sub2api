@@ -409,6 +409,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/:id/codex-ticket", h.Admin.Account.SetCodexTicketEnabled)
 		accounts.GET("/:id/codex-ticket/history", h.Admin.Account.GetCodexTicketHistory)
 		accounts.GET("/:id/codex-ticket/runtime-status", h.Admin.Account.GetCodexTicketRuntimeStatus)
+		accounts.GET("/:id/codex-ticket/model-quality", h.Admin.Account.GetCodexModelQuality)
+		accounts.POST("/:id/codex-ticket/model-quality", h.Admin.Account.RetryCodexModelQuality)
+		accounts.POST("/:id/codex-ticket/diagnostic", h.Admin.Account.DiagnoseCodexModelQuality)
 		accounts.POST("/:id/codex-ticket/request-preview", h.Admin.Account.PreviewCodexTicketRequest)
 		accounts.POST("/:id/codex-ticket/retry", h.Admin.Account.RetryCodexTicket)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
@@ -425,6 +428,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/opencode-go-usage/refresh", h.Admin.Account.RefreshOpenCodeGoUsage)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
+		accounts.POST("/:id/pelican-test", h.Admin.Account.PelicanTest)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
@@ -613,8 +617,15 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		adminSettings.GET("/account-import", h.Admin.Setting.GetAccountImportSettings)
+		adminSettings.PUT("/account-import", h.Admin.Setting.UpdateAccountImportSettings)
 		adminSettings.GET("/codex-tickets", h.Admin.Setting.GetCodexTicketSettings)
 		adminSettings.PUT("/codex-tickets", h.Admin.Setting.UpdateCodexTicketSettings)
+		adminSettings.GET("/codex-tickets/ip-status", h.Admin.Setting.GetCodexTicketIPStatus)
+		adminSettings.GET("/codex-model-quality", h.Admin.Setting.GetCodexModelQualityPolicy)
+		adminSettings.PUT("/codex-model-quality", h.Admin.Setting.UpdateCodexModelQualityPolicy)
+		adminSettings.GET("/codex-request-strategy", h.Admin.Setting.GetCodexRequestStrategyPolicy)
+		adminSettings.PUT("/codex-request-strategy", h.Admin.Setting.UpdateCodexRequestStrategyPolicy)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)
@@ -772,12 +783,14 @@ func registerUserAttributeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/pelican-test-results", h.Admin.ScheduledTest.ListPelicanHistory)
 	plans := admin.Group("/scheduled-test-plans")
 	{
 		plans.POST("", h.Admin.ScheduledTest.Create)
 		plans.PUT("/:id", h.Admin.ScheduledTest.Update)
 		plans.DELETE("/:id", h.Admin.ScheduledTest.Delete)
 		plans.GET("/:id/results", h.Admin.ScheduledTest.ListResults)
+		plans.GET("/:id/results/:resultID", h.Admin.ScheduledTest.GetResult)
 	}
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)

@@ -19,6 +19,7 @@ local function readproxy(id, version)
   return value and cjson.decode(value) or {g=0, state='available', until_at=0}
 end
 local function writeproxy(id, version, p) redis.call('SET', proxykey(id, version), cjson.encode(p)) end
+` + codexSchedulerIPProtection + `
 local function save() redis.call('SET', KEYS[1], cjson.encode(a)) end
 local function reply(state, reason, wait, proxy, retry)
   local result = {waiting=wait or false, token=a.token or '', session_epoch=a.session_epoch or '', proxy_id=proxy or a.proxy or '0',
@@ -141,6 +142,8 @@ local function transportuntil(c)
 end
 local function guard(c, harvest)
   if c.id == '0' then return true, false, 0, '', 0 end
+  local ipreason,ipuntil=ipwait(c)
+  if ipreason~='' then return false,false,0,ipreason,ipuntil end
   local p = readproxy(c.id, c.version)
   if p.owner and n(p.lease) > now then return false, false, n(p.g), 'half_open_busy', n(p.lease) end
   local cooldown=transportuntil(c)

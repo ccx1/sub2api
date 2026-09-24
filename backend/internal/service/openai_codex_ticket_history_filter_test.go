@@ -61,6 +61,37 @@ func TestCodexTicketHistoryProjectsRevocationBeforeTTLWithoutChangingAttempts(t 
 	require.Nil(t, stored.Items[1].Invalidation)
 }
 
+func TestCodexTicketHistoryPrunesRecordsOutsideTwelveHours(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	history := CodexTicketHistory{Items: []CodexTicketAttempt{
+		{ID: "future", StartedAt: now.Add(time.Minute)},
+		{ID: "boundary", StartedAt: now.Add(-OpenAICodexTicketHistoryRetention)},
+		{ID: "recent", StartedAt: now.Add(-11 * time.Hour)},
+		{ID: "expired", StartedAt: now.Add(-OpenAICodexTicketHistoryRetention - time.Nanosecond)},
+		{ID: "missing-time"},
+	}}
+
+	history.PruneCodexTicketHistory(now)
+
+	require.Equal(t, []string{"future", "recent", "boundary"}, []string{history.Items[0].ID, history.Items[1].ID, history.Items[2].ID})
+}
+
+func TestGetCodexTicketHistoryHidesLegacyRecordsOutsideTwelveHours(t *testing.T) {
+	now := time.Now().UTC()
+	history := CodexTicketHistory{}
+	history.Append(CodexTicketAttempt{ID: "expired", StartedAt: now.Add(-13 * time.Hour)})
+	history.Append(CodexTicketAttempt{ID: "recent", StartedAt: now.Add(-11 * time.Hour)})
+	account := ticketTestAccount(41)
+	account.Extra = map[string]any{OpenAICodexTicketHistoryKey: history}
+
+	got, err := GetCodexTicketHistory(account, 1, 20)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"recent"}, []string{got.Items[0].ID})
+	require.Equal(t, 1, got.Total)
+	require.EqualValues(t, 2, got.Summary.Total)
+}
+
 func TestCodexTicketHistoryFiltersBeforePaginationAndPreservesOptions(t *testing.T) {
 	account, base := ticketHistoryLifecycleFixture(t)
 	from, to := base.Add(2*time.Minute), base.Add(4*time.Minute)

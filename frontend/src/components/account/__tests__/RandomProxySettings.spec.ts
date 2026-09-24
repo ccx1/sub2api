@@ -82,6 +82,15 @@ describe('RandomProxySettings', () => {
       .toEqual(['reject', 'disable', 'direct'])
   })
 
+  it('offers region-first selection with pool fallback', async () => {
+    const wrapper = mountSettings([1], 'JP')
+    expect(wrapper.get('[data-testid="random-proxy-region-fallback"]').element).toHaveProperty('value', 'pool')
+    await wrapper.get('[data-testid="random-proxy-region-fallback"]').setValue('none')
+    expect(wrapper.emitted('update:regionFallback')?.at(-1)).toEqual(['none'])
+    await wrapper.get('[data-testid="random-proxy-region-fallback"]').setValue('pool')
+    expect(wrapper.emitted('update:regionFallback')?.at(-1)).toEqual(['pool'])
+  })
+
   it('hides scheduled rotation while preserving the legacy stored value', async () => {
     const wrapper = mountSettings([1])
     await wrapper.setProps({ maxReuseMinutes: 120 })

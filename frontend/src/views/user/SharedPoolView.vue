@@ -17,13 +17,15 @@
           <div v-if="summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <div v-for="metric in summaryMetrics" :key="metric.key" class="card min-w-0 p-4"><p class="text-xs text-gray-500 dark:text-dark-400">{{ t(`sharedPool.${metric.key}`) }}</p><p class="mt-2 break-all text-xl font-semibold">{{ money(metric.value) }}</p></div>
           </div>
-          <SharedAutoTransferSettings />
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap gap-2">
               <button class="btn btn-primary" :disabled="!config?.platforms.length" @click="openCreate">{{ t('sharedPool.create') }}</button>
               <button class="btn btn-secondary" :disabled="!config?.platforms.length" @click="openImport()">{{ t('sharedPool.importAccounts') }}</button>
             </div>
-            <button class="btn btn-secondary" :disabled="transferring || !summary || summary.available <= 0" @click="confirmTransfer = true">{{ t('sharedPool.transfer') }}</button>
+            <div class="flex flex-wrap items-center gap-3">
+              <SharedAutoTransferSettings />
+              <button class="btn btn-secondary" :disabled="transferring || !summary || summary.available <= 0" @click="confirmTransfer = true">{{ t('sharedPool.transfer') }}</button>
+            </div>
           </div>
           <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('sharedPool.pendingHint') }}</p>
           <p v-if="config && !config.platforms.length" class="text-sm text-amber-600">{{ t('sharedPool.noPlatforms') }}</p>

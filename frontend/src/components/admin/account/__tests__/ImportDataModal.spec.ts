@@ -101,7 +101,7 @@ describe('admin account ImportDataModal', () => {
     await importAndEditButton(wrapper).trigger('click')
     await flushPromises()
 
-    expect(batchCreate).toHaveBeenCalledWith([accountPayload], { protection_enabled: true, codex_ticket_enabled: true })
+    expect(batchCreate).toHaveBeenCalledWith([accountPayload], { use_import_defaults: true })
     expect(wrapper.emitted('imported-and-edit')).toEqual([[[71, 72]]])
     expect(wrapper.emitted('imported')).toBeUndefined()
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportCompletedWithErrors')
@@ -115,7 +115,7 @@ describe('admin account ImportDataModal', () => {
     await flushPromises()
 
     expect(importData).toHaveBeenCalledWith({
-      data: dataPayload, skip_default_group_bind: true, protection_enabled: true, codex_ticket_enabled: true
+      data: dataPayload, skip_default_group_bind: true, use_import_defaults: true
     })
     expect(wrapper.emitted('imported')).toEqual([[]])
     expect(wrapper.emitted('imported-and-edit')).toBeUndefined()
@@ -125,7 +125,6 @@ describe('admin account ImportDataModal', () => {
   it('merges multiple files and edits the exact IDs returned by data import', async () => {
     const wrapper = mountModal()
     const input = wrapper.get('input[type="file"]')
-    await wrapper.get('[aria-labelledby="import-ticket-label"]').trigger('click')
     const files = ['first.json', 'second.json'].map(name => new File([JSON.stringify(dataPayload)], name, { type: 'application/json' }))
     Object.defineProperty(input.element, 'files', { value: files })
     await input.trigger('change')
@@ -135,7 +134,9 @@ describe('admin account ImportDataModal', () => {
     await flushPromises()
 
     expect(importData.mock.calls[0]?.[0].data.accounts).toEqual([accountPayload, accountPayload])
-    expect(importData.mock.calls[0]?.[0]).toMatchObject({ protection_enabled: true, codex_ticket_enabled: false })
+    expect(importData.mock.calls[0]?.[0]).toMatchObject({ use_import_defaults: true })
+    expect(importData.mock.calls[0]?.[0]).not.toHaveProperty('protection_enabled')
+    expect(importData.mock.calls[0]?.[0]).not.toHaveProperty('codex_ticket_enabled')
     expect(wrapper.emitted('imported-and-edit')).toEqual([[[71, 72]]])
     wrapper.unmount()
   })
@@ -176,7 +177,7 @@ describe('admin account ImportDataModal', () => {
     await wrapper.get('form').trigger('submit')
 
     expect(importData).toHaveBeenCalledOnce()
-    expect(wrapper.findAll('[role="switch"]').every(button => (button.element as HTMLButtonElement).disabled)).toBe(true)
+    expect(wrapper.get('[data-testid="open-import-settings"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('button[form="import-data-form"]').attributes('disabled')).toBeDefined()
     resolveImport(successfulImport)
     await flushPromises()
@@ -186,35 +187,36 @@ describe('admin account ImportDataModal', () => {
 
   it.each([
     [true, true], [true, false], [false, true], [false, false]
-  ])('passes independent protection=%s and ticket=%s options for array and bundle imports', async (protection, ticket) => {
+  ])('preserves explicit account protection=%s and ticket=%s while requesting backend defaults', async (protection, ticket) => {
     batchCreate.mockResolvedValue({ success: 0, failed: 0, results: [] })
     const wrapper = mountModal()
-    if (!protection) await wrapper.get('[aria-labelledby="import-protection-label"]').trigger('click')
-    if (!ticket) await wrapper.get('[aria-labelledby="import-ticket-label"]').trigger('click')
-    expect(wrapper.get('[aria-labelledby="import-protection-label"]').attributes('aria-checked')).toBe(String(protection))
-    expect(wrapper.get('[aria-labelledby="import-ticket-label"]').attributes('aria-checked')).toBe(String(ticket))
-    const options = { protection_enabled: protection, codex_ticket_enabled: ticket }
+    const explicitAccount = { ...accountPayload, protection_enabled: protection, codex_ticket_enabled: ticket }
+    const options = { use_import_defaults: true }
 
-    await wrapper.get('textarea').setValue(JSON.stringify([accountPayload]))
+    await wrapper.get('textarea').setValue(JSON.stringify([explicitAccount]))
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(batchCreate).toHaveBeenCalledWith([accountPayload], options)
+    expect(batchCreate).toHaveBeenCalledWith([explicitAccount], options)
 
-    await wrapper.get('textarea').setValue(JSON.stringify(dataPayload))
+    const explicitData = { ...dataPayload, accounts: [explicitAccount] }
+    await wrapper.get('textarea').setValue(JSON.stringify(explicitData))
     await importAndEditButton(wrapper).trigger('click')
     await flushPromises()
-    expect(importData).toHaveBeenCalledWith({ data: dataPayload, skip_default_group_bind: true, ...options })
+    expect(importData).toHaveBeenCalledWith({ data: explicitData, skip_default_group_bind: true, ...options })
     wrapper.unmount()
   })
 
-  it('defaults both independent switches to enabled on each modal opening', async () => {
+  it('opens shared settings without resetting pasted data or closing the underlying import dialog', async () => {
     const wrapper = mountModal()
-    await wrapper.get('[aria-labelledby="import-protection-label"]').trigger('click')
-    await wrapper.get('[aria-labelledby="import-ticket-label"]').trigger('click')
-    await wrapper.setProps({ show: false })
-    await wrapper.setProps({ show: true })
-
-    expect(wrapper.findAll('[role="switch"]').map(button => button.attributes('aria-checked'))).toEqual(['true', 'true'])
+    await wrapper.get('textarea').setValue(JSON.stringify(dataPayload))
+    await wrapper.get('[data-testid="open-import-settings"]').trigger('click')
+    expect(wrapper.emitted('settings')).toEqual([[]])
+    await wrapper.setProps({ settingsOpen: true })
+    wrapper.getComponent(BaseDialogStub).vm.$emit('close')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.setProps({ settingsOpen: false })
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe(JSON.stringify(dataPayload))
+    expect(wrapper.findAll('[role="switch"]')).toHaveLength(0)
     wrapper.unmount()
   })
 

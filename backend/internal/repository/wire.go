@@ -74,6 +74,7 @@ var ProviderSet = wire.NewSet(
 	NewSharedPoolAutoTransferRepository,
 	NewCompositeModelRouteRepository,
 	NewProxyPoolAllocator,
+	wire.Bind(new(service.CodexIPStatusReader), new(*ProxyPoolAllocator)),
 	NewAccountRepositoryWithProxyPool,
 	NewAdminAccountRepositoryWithProxyPool,
 	NewScheduledTestPlanRepository,   // 定时测试计划仓储

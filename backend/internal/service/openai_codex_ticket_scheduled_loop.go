@@ -84,6 +84,9 @@ func (s *OpenAIGatewayService) refreshScheduledCodexTickets(ctx context.Context,
 				if ctx.Err() != nil {
 					return
 				}
+				if s.codexModelQualityCircuitPaused(ctx, account, model) {
+					continue
+				}
 				s.probeOnceOpenAICodexTicket(ctx, cloneOpenAICodexTicketAccount(account), model)
 			}
 		}(cloneOpenAICodexTicketAccount(account), models)
@@ -94,6 +97,10 @@ func (s *OpenAIGatewayService) refreshScheduledCodexTickets(ctx context.Context,
 func (s *OpenAIGatewayService) retryScheduledCodexTickets(ctx context.Context, account *Account, models []string, cfg config.OpenAICodexTicketConfig) CodexTicketRetryResult {
 	result := CodexTicketRetryResult{Models: []string{}}
 	for _, model := range models {
+		if s.codexModelQualityCircuitPaused(ctx, account, model) {
+			result.Skipped++
+			continue
+		}
 		result.Models = append(result.Models, model)
 	}
 	result.Scheduled = len(result.Models)

@@ -145,7 +145,8 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 	if account.Type != AccountTypeOAuth || !account.IsOpenAIOAuthLike() {
 		return nil, nil
 	}
-	if !account.IsActive() || account.IsInDailyCooldown(time.Now()) {
+	if !account.IsActive() || account.IsInDailyCooldown(time.Now()) ||
+		s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) || !account.IsSchedulable() {
 		return nil, nil
 	}
 	if err := ResolveRandomProxyFromSource(ctx, account, s.accountRepo); err != nil {

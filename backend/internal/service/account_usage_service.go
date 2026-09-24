@@ -926,13 +926,20 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, u
 		return
 	}
 
-	go func() {
+	unlock := lockOpenAICodexSnapshotWrite(accountID)
+	persist := func() {
+		defer unlock()
 		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer updateCancel()
 		if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err == nil {
 			notifyOpenAIAutoReset(accountID)
 		}
-	}()
+	}
+	if (&Account{Platform: PlatformOpenAI, Extra: updates}).IsOpenAICodexQuotaExhausted(time.Now()) {
+		persist()
+		return
+	}
+	go persist()
 }
 
 func extractOpenAICodexProbeUpdates(resp *http.Response) (map[string]any, error) {

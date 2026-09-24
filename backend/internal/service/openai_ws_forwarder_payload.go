@@ -188,6 +188,15 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
+	strategyScope := codexRequestStrategyConnectionScope(ctx)
+	if strategyScope == "" {
+		strategyScope = CodexRequestStrategyScopeDedicated
+	}
+	if policy, enabled := s.codexRequestStrategyPolicyForScope(ctx, strategyScope); enabled {
+		if err := ApplyCodexRequestHeaderPolicy(headers, policy, account); err != nil {
+			return nil, sessionResolution, fmt.Errorf("apply Codex request header policy: %w", err)
+		}
+	}
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	logOpenAIRoutingDiagnostics(
 		ctx,

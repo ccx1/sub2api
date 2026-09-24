@@ -3104,6 +3104,49 @@ func TestOpenAIUpdateCodexUsageSnapshotFromHeaders(t *testing.T) {
 	}
 }
 
+func TestCodexUsageSnapshotExhaustionUntilHonorsResetAndFallback(t *testing.T) {
+	now := time.Now().UTC()
+	used := 100.0
+	resetAfter := 90
+	until, exhausted := CodexUsageSnapshotExhaustionUntil(&OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:       &used,
+		PrimaryResetAfterSeconds: &resetAfter,
+	}, now)
+	require.True(t, exhausted)
+	require.WithinDuration(t, now.Add(90*time.Second), until, time.Second)
+
+	resetAfter = 0
+	until, exhausted = CodexUsageSnapshotExhaustionUntil(&OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:       &used,
+		PrimaryResetAfterSeconds: &resetAfter,
+	}, now)
+	require.False(t, exhausted)
+	require.Zero(t, until)
+
+	until, exhausted = CodexUsageSnapshotExhaustionUntil(&OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent: &used,
+	}, now)
+	require.True(t, exhausted)
+	require.WithinDuration(t, now.Add(openAICodexAutoPauseStaleAfter), until, time.Second)
+}
+
+func TestOpenAIUpdateCodexUsageSnapshotFromHeadersBypassesThrottleAtExhaustion(t *testing.T) {
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: make(chan map[string]any, 1)}
+	svc := &OpenAIGatewayService{accountRepo: repo, codexSnapshotThrottle: newAccountWriteThrottle(time.Hour)}
+	svc.codexSnapshotThrottle.lastByID[123] = time.Now()
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-after-seconds", "600")
+
+	svc.UpdateCodexUsageSnapshotFromHeaders(context.Background(), 123, headers)
+	select {
+	case updates := <-repo.updateExtraCalls:
+		require.Equal(t, 100.0, updates["codex_7d_used_percent"])
+	default:
+		t.Fatal("exhausted Codex snapshot must bypass the write throttle and persist before returning")
+	}
+}
+
 func TestOpenAIResponsesRequestPathSuffix(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

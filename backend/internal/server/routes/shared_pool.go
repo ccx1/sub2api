@@ -48,4 +48,5 @@ func registerAdminSharedPoolRoutes(admin *gin.RouterGroup, h *handler.SharedPool
 	p.PUT("/user-rates/:id", h.AdminSaveUserRate)
 	p.GET("/earnings", h.AdminEarnings)
 	p.GET("/user-earnings", h.AdminUserEarnings)
+	p.POST("/users/:id/transfer", h.AdminTransfer)
 }

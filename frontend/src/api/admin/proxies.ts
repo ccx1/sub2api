@@ -16,6 +16,25 @@ import type {
   AdminDataImportResult
 } from '@/types'
 
+export type CodexProxyIPStatusKind = 'cooling' | 'disabled'
+
+export interface CodexProxyIPStatus {
+  ip: string
+  status: CodexProxyIPStatusKind
+  until_at: string | null
+  rounds: number
+  failed_accounts: number
+  last_failure_at: string | null
+}
+
+export interface CodexProxyIPStatusPage {
+  items: CodexProxyIPStatus[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 function assertProxyArray(value: unknown): asserts value is Proxy[] {
   if (!Array.isArray(value)) {
     throw new Error('Invalid proxy list response')
@@ -53,6 +72,25 @@ export async function list(
     signal: options?.signal
   })
   assertProxyArray(data?.items)
+  return data
+}
+
+/** List IPs currently cooling down or permanently disabled by Codex ticket protection. */
+export async function listCodexIPStatus(options?: {
+  status?: CodexProxyIPStatusKind
+  page?: number
+  pageSize?: number
+  signal?: AbortSignal
+}): Promise<CodexProxyIPStatusPage> {
+  const { data } = await apiClient.get<CodexProxyIPStatusPage>('/admin/settings/codex-tickets/ip-status', {
+    params: {
+      status: options?.status || undefined,
+      page: options?.page ?? 1,
+      page_size: options?.pageSize ?? 10
+    },
+    signal: options?.signal
+  })
+  if (!Array.isArray(data?.items)) throw new Error('Invalid Codex proxy IP status response')
   return data
 }
 
@@ -300,6 +338,7 @@ export const proxiesAPI = {
   deleteGroup,
   batchSetGroup,
   list,
+  listCodexIPStatus,
   getAll,
   getAllWithCount,
   getById,

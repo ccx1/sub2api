@@ -149,12 +149,19 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	// Get proxy URL: prefer input.ProxyID, fallback to session.ProxyURL
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err != nil {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
+		if *input.ProxyID < 0 {
+			return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_INVALID", "proxy_id must be >= 0")
 		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
+		if *input.ProxyID == 0 {
+			proxyURL = ""
+		} else {
+			proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+			if err != nil {
+				return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
+			}
+			if proxy != nil {
+				proxyURL = proxy.URL()
+			}
 		}
 	}
 

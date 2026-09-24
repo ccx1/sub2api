@@ -41,6 +41,7 @@ if q.action=='business' then
   if not a.started then return waiting('attempt_not_started',0) end
   local candidates=q.candidates
   local pin=eligiblepin('business',candidates)
+  if pin and ipwait(pin)~='' then pin=nil end
   if a.follow_business then
     if a.proxy=='0' and #candidates==0 then save();return reply('running','pool_empty',false,'0') end
     pin=nil

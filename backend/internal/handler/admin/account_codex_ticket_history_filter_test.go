@@ -30,7 +30,7 @@ func TestGetCodexTicketHistoryRejectsInvalidFiltersBeforeLoading(t *testing.T) {
 }
 
 func TestGetCodexTicketHistoryCombinesFiltersWithLifecycleAndPagination(t *testing.T) {
-	base := time.Date(2026, 9, 21, 1, 0, 0, 0, time.UTC)
+	base := time.Now().UTC().Add(-2 * time.Hour)
 	expires := base.Add(time.Hour)
 	history := service.CodexTicketHistory{}
 	for _, item := range []service.CodexTicketAttempt{
@@ -51,7 +51,7 @@ func TestGetCodexTicketHistoryCombinesFiltersWithLifecycleAndPagination(t *testi
 	}
 	query := url.Values{"page": {"2"}, "page_size": {"1"}, "result": {"success"}, "ticket_status": {"invalidated"},
 		"model": {" gpt-6-astra "}, "reason": {"invalidation:response_model_mismatch"},
-		"started_from": {base.Add(time.Minute).Format(time.RFC3339)}, "started_to": {base.Add(2 * time.Minute).Format(time.RFC3339)}}
+		"started_from": {base.Add(time.Minute).Format(time.RFC3339Nano)}, "started_to": {base.Add(2 * time.Minute).Format(time.RFC3339Nano)}}
 	result := ticketHistoryRequest(&ticketHistoryAdminStub{account: account}, "/accounts/41/codex-ticket/history?"+query.Encode())
 	require.Equal(t, http.StatusOK, result.Code)
 	var envelope struct {

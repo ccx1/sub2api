@@ -56,7 +56,7 @@ func (s *OpenAIGatewayService) codexTicketBindingForConfig(account *Account, cfg
 	extra := make(map[string]any)
 	for _, key := range []string{ProxyModeExtraKey, OpenAICodexTicketEnabledExtraKey,
 		RandomProxyEmptyPoolPolicyExtraKey, RandomProxyPoolScopeExtraKey,
-		RandomProxyPoolIDsExtraKey, RandomProxyGroupIDExtraKey, RandomProxyMaxReuseMinutesExtraKey,
+		RandomProxyPoolIDsExtraKey, RandomProxyGroupIDExtraKey, RandomProxyMaxReuseMinutesExtraKey, RandomProxyRegionFallbackExtraKey,
 		DailyCooldownExtraKey, "enable_tls_fingerprint", "tls_fingerprint_builtin", "tls_fingerprint_profile_id",
 		"codex_fingerprint_mode", AntiDegradeMarkerExtraKey, AntiDegradationExtraKey} {
 		extra[key] = account.Extra[key]
@@ -131,6 +131,9 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	if (ticket.Verified || ticket.VerificationSkipped) && s.settingService != nil {
 		s.settingService.codexTicketPublishMu.RLock()
 		defer s.settingService.codexTicketPublishMu.RUnlock()
+	}
+	if (ticket.Verified || ticket.VerificationSkipped) && s.codexModelQualityCircuitPaused(ctx, account, ticket.Model) {
+		return false
 	}
 	copyTicket := *codexTicketLeaf(ticket)
 	copyTicket.Model, copyTicket.AccountID = normalizeOpenAICodexTicketModel(ticket.Model), account.ID

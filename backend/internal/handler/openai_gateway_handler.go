@@ -50,9 +50,92 @@ type OpenAIGatewayHandler struct {
 	cfg                        *config.Config
 }
 
+const openAICyberIdentityMetricsLogInterval = 1024
+
+var openAICyberIdentityMetricsLogCounter atomic.Uint64
+
 type openAIWSTurnChannelMappingSnapshot struct {
 	turn    int
 	mapping service.ChannelMappingResult
+}
+
+type openAIWSCyberTurnContext struct {
+	body     []byte
+	identity service.CyberSessionIdentityResolution
+}
+
+type openAIWSCyberIdentityBinding struct {
+	mu                       sync.Mutex
+	bound                    service.CyberSessionIdentityResolution
+	connectionHeaderIdentity service.CyberSessionIdentityResolution
+	headersCaptured          bool
+}
+
+type openAIWSCyberIdentityDecision struct {
+	observed     service.CyberSessionIdentityResolution
+	effective    service.CyberSessionIdentityResolution
+	reject       bool
+	identitySwap bool
+}
+
+func (b *openAIWSCyberIdentityBinding) resolve(apiKeyID int64, c *gin.Context, payload []byte, enabled, strict bool) openAIWSCyberIdentityDecision {
+	observed := service.ResolveCyberSessionIdentity(apiKeyID, c, payload)
+	decision := openAIWSCyberIdentityDecision{observed: observed, effective: observed}
+	if !enabled {
+		return decision
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.headersCaptured {
+		b.connectionHeaderIdentity = service.ResolveCyberSessionIdentity(apiKeyID, c, nil)
+		b.headersCaptured = true
+	}
+
+	switch observed.Metadata.Status {
+	case service.OpenAIClientSessionIdentityResolved:
+		if !b.bound.Resolved() {
+			b.bound = observed
+			return decision
+		}
+		if b.bound.BlockKey != observed.BlockKey {
+			// Upgrade headers are connection-static. If the first frame bound a
+			// body thread and a later frame omits it, the static header is not an
+			// explicit identity switch.
+			if observed.Metadata.Source == service.OpenAIClientSessionIdentitySourceHeader &&
+				b.connectionHeaderIdentity.Resolved() &&
+				observed.BlockKey == b.connectionHeaderIdentity.BlockKey {
+				decision.effective = service.InheritCyberSessionIdentity(b.bound)
+				return decision
+			}
+			decision.reject = true
+			decision.identitySwap = true
+		}
+		return decision
+	case service.OpenAIClientSessionIdentityMissing:
+		if b.bound.Resolved() {
+			decision.effective = service.InheritCyberSessionIdentity(b.bound)
+			return decision
+		}
+	case service.OpenAIClientSessionIdentityConflict, service.OpenAIClientSessionIdentityInvalid:
+		if b.bound.Resolved() {
+			decision.reject = true
+			return decision
+		}
+	}
+	decision.reject = strict
+	return decision
+}
+
+func cyberIdentityRejectionMetadata(decision openAIWSCyberIdentityDecision) service.OpenAIClientSessionIdentityMetadata {
+	if !decision.identitySwap {
+		return decision.observed.Metadata
+	}
+	return service.OpenAIClientSessionIdentityMetadata{
+		Status: service.OpenAIClientSessionIdentityConflict,
+		Kind:   decision.observed.Metadata.Kind,
+		Source: service.OpenAIClientSessionIdentitySourceConnection,
+	}
 }
 
 func advanceOpenAIWSCyberBlockState(blocked, pending, marked bool, turnErr error) (bool, bool) {
@@ -71,14 +154,19 @@ func advanceOpenAIWSCyberBlockState(blocked, pending, marked bool, turnErr error
 }
 
 var errOpenAIWSUnsupportedModelSwitch = errors.New("selected account does not support websocket model switch")
+var errOpenAIWSLocalAdmissionRejected = errors.New("openai websocket request rejected by local admission policy")
 
 func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 	cause := fmt.Errorf("%w: model %q", errOpenAIWSUnsupportedModelSwitch, strings.TrimSpace(model))
 	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model switch requires reconnect", cause)
 }
 
+func newOpenAIWSLocalAdmissionCloseError(reason string) error {
+	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, reason, errOpenAIWSLocalAdmissionRejected)
+}
+
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err)
+	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !errors.Is(err, errOpenAIWSLocalAdmissionRejected) && !service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -2441,9 +2529,19 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
-	// The first response.create frame is available here, so explicit IDs are
-	// checked directly and body-derived sessions use the coarse scope gate.
-	if cyberBlockKey := findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey.ID, c, firstMessage); cyberBlockKey != "" {
+	cyberSessionBlockEnabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context())
+	cyberSessionIdentityStrict := cyberSessionBlockEnabled && h.gatewayService.CyberSessionIdentityStrictEnabled(c.Request.Context())
+	cyberIdentityBinding := &openAIWSCyberIdentityBinding{}
+	firstIdentityDecision := cyberIdentityBinding.resolve(apiKey.ID, c, firstMessage, cyberSessionBlockEnabled, cyberSessionIdentityStrict)
+	observeOpenAICyberSessionIdentity(firstIdentityDecision.observed, firstIdentityDecision.reject, firstIdentityDecision.identitySwap)
+	if firstIdentityDecision.reject {
+		metadata := cyberIdentityRejectionMetadata(firstIdentityDecision)
+		writeCyberSessionIdentityRejectedWSError(c.Request.Context(), wsConn, metadata)
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid or conflicting session identity")
+		h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, reqModel, metadata)
+		return
+	}
+	if cyberBlockKey := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), firstIdentityDecision.effective); cyberBlockKey != "" {
 		writeCyberSessionBlockedWSError(c.Request.Context(), wsConn)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "session blocked by cyber-security policy")
 		h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, reqModel, cyberBlockKey)
@@ -2452,18 +2550,21 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	cyberBlockedThisConn := false
 	cyberBlockPendingAfterFailover := false
 	var cyberTurnBodiesMu sync.Mutex
-	cyberTurnBodies := map[int][]byte{1: append([]byte(nil), firstMessage...)}
-	setCyberTurnBody := func(turn int, payload []byte) {
+	cyberTurnBodies := map[int]openAIWSCyberTurnContext{1: {
+		body:     append([]byte(nil), firstMessage...),
+		identity: firstIdentityDecision.effective,
+	}}
+	setCyberTurnBody := func(turn int, payload []byte, identity service.CyberSessionIdentityResolution) {
 		cyberTurnBodiesMu.Lock()
-		cyberTurnBodies[turn] = append([]byte(nil), payload...)
+		cyberTurnBodies[turn] = openAIWSCyberTurnContext{body: append([]byte(nil), payload...), identity: identity}
 		cyberTurnBodiesMu.Unlock()
 	}
-	takeCyberTurnBody := func(turn int) []byte {
+	takeCyberTurnBody := func(turn int) openAIWSCyberTurnContext {
 		cyberTurnBodiesMu.Lock()
-		body := cyberTurnBodies[turn]
+		turnContext := cyberTurnBodies[turn]
 		delete(cyberTurnBodies, turn)
 		cyberTurnBodiesMu.Unlock()
-		return body
+		return turnContext
 	}
 
 	// 解析渠道级模型映射
@@ -2800,6 +2901,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// turn 级定价：首轮回退到 TurnStarted 的所属 turn 时刻；后续 turn 由
 		// BeforeTurn 重新冻结 pricingAt 并按最新门复核当前账号。
 		var turnPricing openAIWSTurnPricing
+		var wsCodexQuotaBlockedUntil atomic.Int64
 		var turnSettlement atomic.Pointer[service.SharedPoolSettlementTerms]
 		turnSettlement.Store(account.SharedPoolSettlement)
 		// Passthrough ingress does not invoke BeforeTurn for the first frame.
@@ -2818,7 +2920,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
-				setCyberTurnBody(turn, payload)
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
 				// BeforeTurn 中保留同一检查作为防御式兜底。
@@ -2826,6 +2927,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
 				if turn == 1 {
+					setCyberTurnBody(turn, payload, firstIdentityDecision.effective)
 					return nil
 				}
 				if !gjson.ValidBytes(payload) {
@@ -2838,6 +2940,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if model == "" {
 					model = reqModel
 				}
+				cyberEnabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context())
+				cyberStrict := cyberEnabled && h.gatewayService.CyberSessionIdentityStrictEnabled(c.Request.Context())
+				identityDecision := cyberIdentityBinding.resolve(apiKey.ID, c, payload, cyberEnabled, cyberStrict)
+				observeOpenAICyberSessionIdentity(identityDecision.observed, identityDecision.reject, identityDecision.identitySwap)
+				if identityDecision.reject {
+					metadata := cyberIdentityRejectionMetadata(identityDecision)
+					writeCyberSessionIdentityRejectedWSError(c.Request.Context(), wsConn, metadata)
+					h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, model, metadata)
+					return newOpenAIWSLocalAdmissionCloseError("invalid or conflicting session identity")
+				}
+				if cyberBlockKey := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), identityDecision.effective); cyberBlockKey != "" {
+					writeCyberSessionBlockedWSError(c.Request.Context(), wsConn)
+					h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, model, cyberBlockKey)
+					return newOpenAIWSLocalAdmissionCloseError("session blocked by cyber-security policy")
+				}
+				setCyberTurnBody(turn, payload, identityDecision.effective)
 				// 分组级模型白名单：后续 turn 同样校验客户端模型（省略 model 时
 				// 沿用会话实际生效模型，含 session.update 轮换后的模型），不通过
 				// 则关闭整条连接，与推理强度 deny 一致。实际生效模型始终参与校验；
@@ -2881,6 +2999,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(ctx, apiKey.GroupID)
+				if blockedUntil := wsCodexQuotaBlockedUntil.Load(); blockedUntil > 0 {
+					if time.Now().Before(time.Unix(blockedUntil, 0)) {
+						return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account quota is exhausted, please reconnect", errOpenAIWSLocalAdmissionRejected)
+					}
+					wsCodexQuotaBlockedUntil.Store(0)
+				}
 				latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(turnCtx, account)
 				if vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",
@@ -2888,6 +3012,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.String("reason", reason))
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
+				}
+				if !h.gatewayService.IsAccountSchedulableNow(turnCtx, latest) {
+					reqLog.Info("openai.websocket_turn_account_unschedulable",
+						zap.Int("turn", turn),
+						zap.Int64("account_id", account.ID))
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer schedulable, please reconnect", errOpenAIWSLocalAdmissionRejected)
 				}
 				turnSettlement.Store(latest.SharedPoolSettlement)
 				turnPricing.freeze(turnAt)
@@ -2927,7 +3057,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				billingSnapshot.SharedPoolSettlement = turnSettlement.Load()
 				billingAccount := &billingSnapshot
 				turnStart := getTurnStart(turn)
-				cyberBlockBody := takeCyberTurnBody(turn)
+				cyberTurnContext := takeCyberTurnBody(turn)
+				cyberBlockBody := cyberTurnContext.body
 				// 每次 attempt 都清 cyber mark；failover 链结束前保留 recorded guard，
 				// 避免同一逻辑 turn 换号后重复落风控。CyberBlocked 必须在 submit 前
 				// 同步预捕获（task 闭包由 worker 池异步执行，届时 mark 已清除）。
@@ -2956,7 +3087,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				turnUsageFields := turnMapping.ToUsageFields(turnRequestedModel, turnUpstreamModel)
 				cyberMarked := service.GetOpsCyberPolicy(c) != nil
-				h.recordCyberPolicyIfMarked(c, apiKey, billingAccount, subscription, turnRequestedModel, turnErr != nil, cyberBlockBody, turnUsageFields, requestPayloadHash)
+				var cyberIdentityOverride *service.CyberSessionIdentityResolution
+				if cyberTurnContext.identity.Metadata.Status != "" {
+					cyberIdentityOverride = &cyberTurnContext.identity
+				}
+				h.recordCyberPolicyIfMarkedWithIdentity(c, apiKey, billingAccount, subscription, turnRequestedModel, turnErr != nil, cyberBlockBody, turnUsageFields, requestPayloadHash, cyberIdentityOverride)
 				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
 					cyberBlockedThisConn,
 					cyberBlockPendingAfterFailover,
@@ -2990,6 +3125,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				)
 				// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 				if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
+					if snapshot := service.ParseCodexRateLimitHeaders(result.ResponseHeaders); snapshot != nil {
+						if until, exhausted := service.CodexUsageSnapshotExhaustionUntil(snapshot, time.Now()); exhausted {
+							wsCodexQuotaBlockedUntil.Store(until.Unix())
+						}
+					}
 					h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
 				}
 				scheduleModel := turnUpstreamModel
@@ -3918,6 +4058,115 @@ func writeCyberSessionBlockedWSError(ctx context.Context, conn *coderws.Conn) {
 	_ = conn.Write(writeCtx, coderws.MessageText, payload)
 }
 
+func writeCyberSessionIdentityRejectedWSError(ctx context.Context, conn *coderws.Conn, metadata service.OpenAIClientSessionIdentityMetadata) {
+	if conn == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	code, message := cyberSessionIdentityError(metadata)
+	payload, err := json.Marshal(gin.H{
+		"event_id": "evt_cyber_session_identity_rejected",
+		"type":     "error",
+		"error": gin.H{
+			"type":    "invalid_request_error",
+			"code":    code,
+			"message": message,
+		},
+	})
+	if err != nil {
+		payload = []byte(`{"event_id":"evt_cyber_session_identity_rejected","type":"error","error":{"type":"invalid_request_error","code":"cyber_session_identity_required","message":"A stable thread_id or session_id is required"}}`)
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_ = conn.Write(writeCtx, coderws.MessageText, payload)
+}
+
+func observeOpenAICyberSessionIdentity(identity service.CyberSessionIdentityResolution, strictRejected, wsIdentitySwap bool) {
+	service.ObserveOpenAICyberSessionIdentity(identity.Metadata, identity.Inherited, strictRejected, wsIdentitySwap)
+	if openAICyberIdentityMetricsLogCounter.Add(1)%openAICyberIdentityMetricsLogInterval != 0 {
+		return
+	}
+	metrics := service.SnapshotOpenAICyberSessionIdentityMetrics()
+	logger.L().Info("openai.cyber_session_identity_metrics",
+		zap.Uint64("total", metrics.Total),
+		zap.Uint64("resolved", metrics.Resolved),
+		zap.Uint64("missing", metrics.Missing),
+		zap.Uint64("conflict", metrics.Conflict),
+		zap.Uint64("invalid", metrics.Invalid),
+		zap.Uint64("inherited", metrics.Inherited),
+		zap.Uint64("strict_rejected", metrics.StrictRejected),
+		zap.Uint64("ws_identity_swap", metrics.WSIdentitySwap),
+	)
+}
+
+func cyberSessionIdentityError(metadata service.OpenAIClientSessionIdentityMetadata) (string, string) {
+	switch metadata.Status {
+	case service.OpenAIClientSessionIdentityConflict:
+		return "cyber_session_identity_conflict", "Conflicting session identities were provided; send one stable thread_id or session_id"
+	case service.OpenAIClientSessionIdentityInvalid:
+		return "cyber_session_identity_invalid", "The session identity is invalid; send a valid thread_id or session_id"
+	default:
+		return "cyber_session_identity_required", "A stable thread_id or session_id is required"
+	}
+}
+
+func (h *OpenAIGatewayHandler) writeCyberSessionIdentityRejected(c *gin.Context, apiKey *service.APIKey, model string, format cyberSessionBlockFormat, metadata service.OpenAIClientSessionIdentityMetadata) {
+	code, message := cyberSessionIdentityError(metadata)
+	if format == cyberBlockFormatResponses && service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+		service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusBadRequest)
+		if writeResponsesFailedSSE(c, "invalid_request_error", code, message) {
+			h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, model, metadata)
+			return
+		}
+	}
+	switch format {
+	case cyberBlockFormatAnthropic:
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{
+			"type":    "invalid_request_error",
+			"message": message,
+		}})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type":    "invalid_request_error",
+			"code":    code,
+			"message": message,
+		}})
+	}
+	h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, model, metadata)
+}
+
+func (h *OpenAIGatewayHandler) enqueueCyberSessionIdentityRejectedOpsEntry(c *gin.Context, apiKey *service.APIKey, model string, metadata service.OpenAIClientSessionIdentityMetadata) {
+	if h.opsService == nil || c == nil || apiKey == nil {
+		return
+	}
+	c.Set(opsDedicatedErrorRecordedKey, true)
+	meta := cyberPolicyOpsErrorMeta{Model: model, InboundEndpoint: GetInboundEndpoint(c), CreatedAt: time.Now(), IdentityStatus: string(metadata.Status), IdentityKind: metadata.Kind, IdentitySource: metadata.Source}
+	meta.RequestID = c.Writer.Header().Get("X-Request-Id")
+	if c.Request != nil && c.Request.URL != nil {
+		meta.RequestPath = c.Request.URL.Path
+	}
+	if v, ok := c.Get(opsStreamKey); ok {
+		meta.Stream, _ = v.(bool)
+	}
+	requestCtx := context.Background()
+	if c.Request != nil {
+		requestCtx = c.Request.Context()
+		meta.ClientRequestID, _ = requestCtx.Value(ctxkey.ClientRequestID).(string)
+		meta.UserAgent = c.GetHeader("User-Agent")
+		meta.ClientIP = strings.TrimSpace(ip.GetClientIP(c))
+	}
+	meta.Platform = resolveOpsPlatform(requestCtx, apiKey, guessPlatformFromPath(meta.RequestPath))
+	meta.APIKeyID = apiKey.ID
+	meta.GroupID = apiKey.GroupID
+	meta.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
+	if apiKey.User != nil {
+		meta.UserID = apiKey.User.ID
+	}
+	enqueueOpsErrorLog(h.opsService, buildCyberSessionIdentityRejectedOpsEntry(meta))
+}
+
 // cyberPolicyRecordedKey guards against double-firing recordCyberPolicyIfMarked
 // within one request (e.g. in a retry/failover loop).
 const cyberPolicyRecordedKey = "ops_cyber_recorded"
@@ -3925,22 +4174,26 @@ const cyberPolicyRecordedKey = "ops_cyber_recorded"
 // cyberPolicyOpsErrorMeta carries request-scoped fields captured outside the
 // async goroutine for building the cyber ops_error_logs entry.
 type cyberPolicyOpsErrorMeta struct {
-	RequestID       string
-	ClientRequestID string
-	Platform        string
-	Model           string
-	RequestPath     string
-	Stream          bool
-	InboundEndpoint string
-	UserAgent       string
-	APIKeyPrefix    string
-	UserID          int64
-	APIKeyID        int64
-	AccountID       int64
-	GroupID         *int64
-	ClientIP        string
-	CreatedAt       time.Time
-	SessionBlockKey string
+	RequestID         string
+	ClientRequestID   string
+	Platform          string
+	Model             string
+	RequestPath       string
+	Stream            bool
+	InboundEndpoint   string
+	UserAgent         string
+	APIKeyPrefix      string
+	UserID            int64
+	APIKeyID          int64
+	AccountID         int64
+	GroupID           *int64
+	ClientIP          string
+	CreatedAt         time.Time
+	SessionBlockKey   string
+	IdentityStatus    string
+	IdentityKind      string
+	IdentitySource    string
+	IdentityInherited bool
 }
 
 // buildCyberPolicyOpsErrorEntry builds the ops_error_logs entry for an upstream
@@ -3964,7 +4217,7 @@ func buildCyberPolicyOpsErrorEntry(meta cyberPolicyOpsErrorMeta, mark *service.C
 		Severity:          "P3",
 		StatusCode:        mark.UpstreamStatus,
 		IsBusinessLimited: true,
-		ErrorMessage:      "cyber_policy: " + mark.Message,
+		ErrorMessage:      appendCyberIdentityMetadata("cyber_policy: "+mark.Message, meta),
 		// 原始 body 直接入队；ops service 落库前统一走 sanitizeErrorBodyForStorage 脱敏与截断。
 		ErrorBody:   mark.Body,
 		ErrorSource: "upstream_http",
@@ -3985,6 +4238,60 @@ func buildCyberPolicyOpsErrorEntry(meta cyberPolicyOpsErrorMeta, mark *service.C
 		entry.ClientIP = &meta.ClientIP
 	}
 	return entry
+}
+
+func buildCyberSessionIdentityRejectedOpsEntry(meta cyberPolicyOpsErrorMeta) *service.OpsInsertErrorLogInput {
+	rt := int16(service.RequestTypeCyberBlocked)
+	entry := &service.OpsInsertErrorLogInput{
+		RequestID:         meta.RequestID,
+		ClientRequestID:   meta.ClientRequestID,
+		Platform:          meta.Platform,
+		Model:             meta.Model,
+		RequestPath:       meta.RequestPath,
+		Stream:            meta.Stream,
+		InboundEndpoint:   meta.InboundEndpoint,
+		RequestType:       &rt,
+		UserAgent:         meta.UserAgent,
+		APIKeyPrefix:      meta.APIKeyPrefix,
+		ErrorPhase:        "request",
+		ErrorType:         "cyber_session_identity_rejected",
+		Severity:          "P3",
+		StatusCode:        http.StatusBadRequest,
+		IsBusinessLimited: true,
+		ErrorMessage:      appendCyberIdentityMetadata("cyber_session_identity_rejected: request rejected before account selection", meta),
+		ErrorSource:       "gateway_local",
+		ErrorOwner:        "client",
+		CreatedAt:         meta.CreatedAt,
+	}
+	if meta.UserID > 0 {
+		entry.UserID = &meta.UserID
+	}
+	if meta.APIKeyID > 0 {
+		entry.APIKeyID = &meta.APIKeyID
+	}
+	entry.GroupID = meta.GroupID
+	if meta.ClientIP != "" {
+		entry.ClientIP = &meta.ClientIP
+	}
+	return entry
+}
+
+func appendCyberIdentityMetadata(message string, meta cyberPolicyOpsErrorMeta) string {
+	status := strings.TrimSpace(meta.IdentityStatus)
+	if status == "" {
+		return message
+	}
+	message += "; session_identity_status=" + status
+	if kind := strings.TrimSpace(meta.IdentityKind); kind != "" {
+		message += "; session_identity_kind=" + kind
+	}
+	if source := strings.TrimSpace(meta.IdentitySource); source != "" {
+		message += "; session_identity_source=" + source
+	}
+	if meta.IdentityInherited {
+		message += "; session_identity_inherited=true"
+	}
+	return message
 }
 
 // 双语单串：网关客户端面向中英用户，且本错误无 i18n 协商通道。
@@ -4044,19 +4351,25 @@ const (
 	cyberBlockFormatAnthropic
 )
 
-// rejectIfCyberSessionBlocked checks the session-block table BEFORE account
-// selection. Returns true when the request was rejected (response already
-// written + ops entry enqueued). Fail-open: disabled switch / empty key /
-// store error → false.
+// rejectIfCyberSessionBlocked resolves and observes request identity before
+// account selection. Strict identity validation is opt-in and only active
+// while the main Cyber session-block switch is enabled.
 func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKey *service.APIKey, body []byte, model string, format cyberSessionBlockFormat) bool {
 	if h == nil || h.gatewayService == nil || apiKey == nil {
 		return false
 	}
-	// 开关默认关：先走 ~ns 级缓存开关检查，再付出 key 派生(gjson+sha256)成本。
-	if enabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context()); !enabled {
+	identity := service.ResolveCyberSessionIdentity(apiKey.ID, c, body)
+	enabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context())
+	strictRejected := enabled && h.gatewayService.CyberSessionIdentityStrictEnabled(c.Request.Context()) && !identity.Resolved()
+	observeOpenAICyberSessionIdentity(identity, strictRejected, false)
+	if strictRejected {
+		h.writeCyberSessionIdentityRejected(c, apiKey, model, format, identity.Metadata)
+		return true
+	}
+	if !enabled {
 		return false
 	}
-	key := findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey.ID, c, body)
+	key := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), identity)
 	if key == "" {
 		return false
 	}
@@ -4125,7 +4438,9 @@ func cyberSessionScopeKey(apiKeyID int64, c *gin.Context) string {
 	if c == nil {
 		return ""
 	}
-	return service.CyberSessionScopeKey(apiKeyID, strings.TrimSpace(ip.GetClientIP(c)), c.GetHeader("User-Agent"))
+	// Legacy transcript scope is retained only for compatibility tests and old
+	// callers; Cyber writes now use typed identity keys with an empty scope.
+	return fmt.Sprintf("cyber-scope:%d:%s:%s", apiKeyID, strings.TrimSpace(ip.GetClientIP(c)), c.GetHeader("User-Agent"))
 }
 
 // enqueueCyberSessionBlockedOpsEntry captures request meta and enqueues the
@@ -4171,6 +4486,10 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 // 当前请求已发给用户，本方法只做事后记录，不影响响应。forwardErrored 为 true 时才写用量行，
 // 避免与正常 RecordUsage(forward 成功路径)重复。每请求至多记录一次。
 func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockBody []byte, channelFields service.ChannelUsageFields, requestPayloadHash string) {
+	h.recordCyberPolicyIfMarkedWithIdentity(c, apiKey, account, subscription, model, forwardErrored, cyberBlockBody, channelFields, requestPayloadHash, nil)
+}
+
+func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithIdentity(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockBody []byte, channelFields service.ChannelUsageFields, requestPayloadHash string, identityOverride *service.CyberSessionIdentityResolution) {
 	mark := service.GetOpsCyberPolicy(c)
 	if mark == nil {
 		return
@@ -4231,33 +4550,40 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	}
 	// 提前拍成标量，避免在下方 goroutine 内访问 gin.Context。
 	sessionID := service.ExtractClientSessionID(c)
+	identity := service.ResolveCyberSessionIdentity(apiKeyID, c, cyberBlockBody)
+	if identityOverride != nil {
+		identity = *identityOverride
+	}
 	nativeCompactionV2 := service.IsOpenAINativeCompactionV2(c)
 	apiKeyPrefix := ""
 	if apiKey != nil {
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
 	}
 	opsMeta := cyberPolicyOpsErrorMeta{
-		RequestID:       requestID,
-		ClientRequestID: clientRequestID,
-		Platform:        platform,
-		Model:           model,
-		RequestPath:     requestPath,
-		Stream:          stream,
-		InboundEndpoint: inboundEndpoint,
-		UserAgent:       userAgent,
-		APIKeyPrefix:    apiKeyPrefix,
-		UserID:          userID,
-		APIKeyID:        apiKeyID,
-		AccountID:       accountID,
-		GroupID:         groupID,
-		ClientIP:        clientIPStr,
-		CreatedAt:       time.Now(),
+		RequestID:         requestID,
+		ClientRequestID:   clientRequestID,
+		Platform:          platform,
+		Model:             model,
+		RequestPath:       requestPath,
+		Stream:            stream,
+		InboundEndpoint:   inboundEndpoint,
+		UserAgent:         userAgent,
+		APIKeyPrefix:      apiKeyPrefix,
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		ClientIP:          clientIPStr,
+		CreatedAt:         time.Now(),
+		IdentityStatus:    string(identity.Metadata.Status),
+		IdentityKind:      identity.Metadata.Kind,
+		IdentitySource:    identity.Metadata.Source,
+		IdentityInherited: identity.Inherited,
 	}
 	if gwSvc != nil && apiKey != nil {
-		plan := buildCyberSessionBlockWritePlan(apiKey.ID, c, cyberBlockBody)
-		if len(plan.keys) > 0 {
+		if identity.BlockKey != "" {
 			blockCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			gwSvc.MarkCyberSessionBlocked(blockCtx, plan.scopeKey, plan.keys)
+			gwSvc.MarkCyberSessionBlocked(blockCtx, "", []string{identity.BlockKey})
 			cancel()
 		}
 	}

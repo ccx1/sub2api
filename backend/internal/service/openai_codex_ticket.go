@@ -52,11 +52,15 @@ type openAICodexTicket struct {
 	Model               string                   `json:"model"`
 	State               string                   `json:"state"`
 	CredentialMode      string                   `json:"credential_mode,omitempty"`
-	Cookies             []*http.Cookie           `json:"cookies,omitempty"`
-	CookieSessionKeys   []string                 `json:"cookie_session_keys,omitempty"`
-	Length              int                      `json:"length"`
-	CapturedAt          time.Time                `json:"captured_at"`
-	ExpiresAt           time.Time                `json:"expires_at"`
+	// 发送投影仅属于已验证的运行时 receipt，不改变库存原票和撤销身份。
+	CookieMode           string         `json:"-"`
+	CookiePolicyVerified bool           `json:"-"`
+	CookiePolicyProofKey string         `json:"-"`
+	Cookies              []*http.Cookie `json:"cookies,omitempty"`
+	CookieSessionKeys    []string       `json:"cookie_session_keys,omitempty"`
+	Length               int            `json:"length"`
+	CapturedAt           time.Time      `json:"captured_at"`
+	ExpiresAt            time.Time      `json:"expires_at"`
 	// IssuedAt and StateExpiresAt are derived from the STATE protocol metadata.
 	// RevalidateAt is the configured soft refresh deadline; it must not make a
 	// still-live STATE unusable.
@@ -151,6 +155,17 @@ type OpenAICodexTicketStatus struct {
 	ReserveCount            int        `json:"reserve_count"`
 	ExpiringCount           int        `json:"expiring_count"`
 	NextExpiresAt           *time.Time `json:"next_expires_at,omitempty"`
+	// Quality fields are the latest persisted model quality result. They are
+	// deliberately a compact summary so ticket/usage views never expose test
+	// prompts, tokens or transport details.
+	QualityStatus    string     `json:"quality_status,omitempty"`
+	QualityReason    string     `json:"quality_reason,omitempty"`
+	QualityCheckedAt *time.Time `json:"quality_checked_at,omitempty"`
+	// QualityPaused is true when a confirmed quality failure blocks this model
+	// at the same admission gate as a missing ticket.
+	QualityPaused            bool   `json:"quality_paused,omitempty"`
+	RouteAffinityStatus      string `json:"route_affinity_status,omitempty"`
+	RouteAffinityConnections int    `json:"route_affinity_connections,omitempty"`
 }
 
 func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) []OpenAICodexTicketStatus {
@@ -288,10 +303,23 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketSnapshot(ctx context.Contex
 	if !codexTicketConfigGatesModel(cfg, model) {
 		return nil, nil
 	}
+	if cfg.FailClosed && s.codexModelQualityPaused(ctx, account, model) {
+		return nil, ErrOpenAICodexTicketUnavailable
+	}
 	ticket := s.lookupOpenAICodexTicketForConfig(account, model, cfg)
-	if ticket.usable(time.Now(), account, cfg) {
-		ticket.applyHeaders(h)
-		return &openAICodexTicketReceipt{account: cloneOpenAICodexTicketAccount(account), ticket: *ticket, config: cfg, service: s}, nil
+	if ticket != nil && ticket.usable(time.Now(), account, cfg) {
+		projected, err := s.prepareCodexCookieTicket(ctx, account, ticket, cfg)
+		if err != nil {
+			return nil, err
+		}
+		if projected == nil || !projected.usable(time.Now(), account, cfg) {
+			if cfg.FailClosed {
+				return nil, ErrOpenAICodexTicketUnavailable
+			}
+			return nil, nil
+		}
+		projected.applyHeaders(h)
+		return &openAICodexTicketReceipt{account: cloneOpenAICodexTicketAccount(account), ticket: *projected, config: cfg, service: s}, nil
 	}
 	if !cfg.FailClosed {
 		return nil, nil
@@ -349,6 +377,9 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccountContext(ctx context
 	model := normalizeOpenAICodexTicketModel(outboundModel)
 	if !codexTicketConfigGatesModel(cfg, model) {
 		return false
+	}
+	if s.codexModelQualityPaused(ctx, account, model) {
+		return true
 	}
 	account = s.codexTicketSchedulingAccount(ctx, account)
 	if account == nil {
@@ -410,9 +441,28 @@ func (s *OpenAIGatewayService) StartOpenAICodexTicketHarvester() {
 	done := make(chan struct{})
 	s.openaiCodexTicketCancel = cancel
 	s.openaiCodexTicketDone = done
+	// Initialize the quality runtime before starting the asynchronous loops.
+	// The admin "diagnose now" endpoint can be called immediately after the
+	// service is constructed; without this eager state, its worker admission
+	// sees a nil runtime context and reports a false capacity hit.
+	s.codexModelQuality.mu.Lock()
+	s.codexModelQuality.ctx = ctx
+	if s.codexModelQuality.anomalies == nil {
+		s.codexModelQuality.anomalies = make(map[string]time.Time)
+	}
+	if s.codexModelQuality.activeByAccount == nil {
+		s.codexModelQuality.activeByAccount = make(map[int64]int)
+	}
+	s.codexModelQuality.mu.Unlock()
 	go func() {
 		defer close(done)
+		qualityDone := make(chan struct{})
+		go func() {
+			defer close(qualityDone)
+			s.runCodexModelQualityLoop(ctx)
+		}()
 		s.openAICodexTicketHarvestLoop(ctx)
+		<-qualityDone
 	}()
 	logger.L().Info("openai_codex_ticket harvester started")
 }
@@ -479,6 +529,9 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 		for _, model := range cfg.Models {
 			model := normalizeOpenAICodexTicketModel(model)
 			if model == "" {
+				continue
+			}
+			if s.codexModelQualityCircuitPaused(ctx, &account, model) {
 				continue
 			}
 			// 主备均有效且备用未临近过期时，本周期才停止采集。

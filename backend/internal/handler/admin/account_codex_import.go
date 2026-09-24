@@ -22,6 +22,9 @@ import (
 const codexImportClockSkewSeconds int64 = 120
 
 type CodexSessionImportRequest struct {
+	ProtectionEnabled       *bool          `json:"protection_enabled"`
+	CodexTicketEnabled      *bool          `json:"codex_ticket_enabled"`
+	UseImportDefaults       *bool          `json:"use_import_defaults"`
 	Content                 string         `json:"content"`
 	Contents                []string       `json:"contents"`
 	Name                    string         `json:"name"`
@@ -345,6 +348,9 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			AutoPauseOnExpired:    autoPauseOnExpired,
 			SkipDefaultGroupBind:  skipDefaultGroupBind,
 			SkipMixedChannelCheck: skipMixedChannelCheck,
+			ProtectionEnabled:     req.ProtectionEnabled,
+			CodexTicketEnabled:    req.CodexTicketEnabled,
+			SkipImportDefaults:    skipAccountImportDefaults(req.UseImportDefaults),
 		})
 		if createErr != nil {
 			result.Failed++

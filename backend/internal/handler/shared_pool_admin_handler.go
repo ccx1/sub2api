@@ -110,3 +110,12 @@ func (h *SharedPoolHandler) AdminUserEarnings(c *gin.Context) {
 	data, err := h.earnings.UserEarnings(c.Request.Context())
 	sharedReply(c, data, err)
 }
+
+// AdminTransfer 将指定用户当前可结算的共享收益转入其站内余额。
+func (h *SharedPoolHandler) AdminTransfer(c *gin.Context) {
+	userID, ok := sharedID(c)
+	if !ok {
+		return
+	}
+	h.transferEarnings(c, userID)
+}

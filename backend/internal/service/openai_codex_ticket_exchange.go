@@ -41,23 +41,26 @@ type CodexTicketExchange struct {
 }
 
 type codexTicketExchangeCapture struct {
-	exchange *CodexTicketExchange
-	network  *codextickettrace.Recorder
+	exchange   *CodexTicketExchange
+	network    *codextickettrace.Recorder
+	responseID *string
 }
 
 // 仅合成打票探测提供 Attempt；实验报文只写管理员专用历史，不写通用日志。
 func startCodexTicketExchange(in openAICodexTicketProbeInput, req *http.Request) *codexTicketExchangeCapture {
-	if in.Attempt == nil || req == nil {
+	if req == nil || in.ResponseID == nil && in.Attempt == nil {
 		return nil
 	}
-	c := &codexTicketExchangeCapture{exchange: &CodexTicketExchange{CaptureMode: "raw", RequestedModel: in.Model}}
+	c := &codexTicketExchangeCapture{exchange: &CodexTicketExchange{CaptureMode: "raw", RequestedModel: in.Model}, responseID: in.ResponseID}
 	ctx, network := codextickettrace.WithRecorder(req.Context())
 	*req = *req.WithContext(ctx)
 	c.network = network
-	if !codexTicketProbeBusiness(in) {
-		in.Attempt.HarvestExchange = c.exchange
-	} else {
-		in.Attempt.BusinessExchange = c.exchange
+	if in.Attempt != nil {
+		if !codexTicketProbeBusiness(in) {
+			in.Attempt.HarvestExchange = c.exchange
+		} else {
+			in.Attempt.BusinessExchange = c.exchange
+		}
 	}
 	if codexTicketQualityEnabled(in) {
 		// 质量探测保留状态与模型声明摘要，不额外留存多轮凭据报文。
@@ -92,7 +95,9 @@ func (c *codexTicketExchangeCapture) captureResponse(resp *http.Response) {
 	if c == nil {
 		return
 	}
-	c.exchange.Network = c.network.Snapshot()
+	if c.network != nil {
+		c.exchange.Network = c.network.Snapshot()
+	}
 	if resp == nil {
 		return
 	}

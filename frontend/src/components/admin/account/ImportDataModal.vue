@@ -61,19 +61,11 @@
         ></textarea>
       </div>
 
-      <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
-        <div class="flex items-center justify-between gap-3">
-          <span id="import-protection-label" class="text-sm text-gray-700 dark:text-dark-200">
-            {{ t('admin.accounts.dataImportProtection') }}
-          </span>
-          <Toggle v-model="protectionEnabled" :disabled="importing" aria-labelledby="import-protection-label" />
-        </div>
-        <div class="flex items-center justify-between gap-3">
-          <span id="import-ticket-label" class="text-sm text-gray-700 dark:text-dark-200">
-            {{ t('admin.accounts.dataImportCodexTicket') }}
-          </span>
-          <Toggle v-model="codexTicketEnabled" :disabled="importing" aria-labelledby="import-ticket-label" />
-        </div>
+      <div class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+        <p class="text-xs text-gray-600 dark:text-dark-300">{{ t('admin.accountImportSettings.importHint') }}</p>
+        <button type="button" class="text-sm text-primary-600 underline dark:text-primary-400" :disabled="importing" data-testid="open-import-settings" @click="emit('settings')">
+          {{ t('admin.accountImportSettings.title') }}
+        </button>
       </div>
 
       <div
@@ -132,7 +124,6 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import Toggle from '@/components/common/Toggle.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type {
@@ -144,12 +135,14 @@ import type {
 
 interface Props {
   show: boolean
+  settingsOpen?: boolean
 }
 
 interface Emits {
   (e: 'close'): void
   (e: 'imported'): void
   (e: 'imported-and-edit', accountIds: number[]): void
+  (e: 'settings'): void
 }
 
 const props = defineProps<Props>()
@@ -160,8 +153,6 @@ const appStore = useAppStore()
 
 const importing = ref(false)
 const editAfterImport = ref(false)
-const protectionEnabled = ref(true)
-const codexTicketEnabled = ref(true)
 const jsonText = ref('')
 const files = ref<File[]>([])
 const dragDepth = ref(0)
@@ -188,8 +179,6 @@ watch(
   () => props.show,
   (open) => {
     if (open) {
-      protectionEnabled.value = true
-      codexTicketEnabled.value = true
       jsonText.value = ''
       files.value = []
       dragDepth.value = 0
@@ -213,7 +202,7 @@ const handleFileChange = (event: Event) => {
 }
 
 const handleClose = () => {
-  if (importing.value) return
+  if (importing.value || props.settingsOpen) return
   if (hasCreatedData.value) {
     hasCreatedData.value = false
     emit('imported')
@@ -358,15 +347,15 @@ const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
 
 const importParsedPayload = async (payload: unknown): Promise<AdminDataImportResult> => {
   if (isAccountArrayPayload(payload)) {
-    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload, importOptions()))
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload, { use_import_defaults: true }))
   }
   if (hasAccountsArrayOnly(payload)) {
-    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload.accounts, importOptions()))
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload.accounts, { use_import_defaults: true }))
   }
   return adminAPI.accounts.importData({
     data: payload as AdminDataPayload,
     skip_default_group_bind: true,
-    ...importOptions()
+    use_import_defaults: true
   })
 }
 
@@ -404,14 +393,9 @@ const importSelectedFiles = async (): Promise<AdminDataImportResult | null> => {
   return adminAPI.accounts.importData({
     data: dataPayload,
     skip_default_group_bind: true,
-    ...importOptions()
+    use_import_defaults: true
   })
 }
-
-const importOptions = () => ({
-  protection_enabled: protectionEnabled.value,
-  codex_ticket_enabled: codexTicketEnabled.value
-})
 
 const handleImport = async (editAfter = false) => {
   if (importing.value) return

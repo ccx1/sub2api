@@ -445,6 +445,23 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/codex-request-strategy',
+    name: 'AdminCodexRequestStrategy',
+    component: () => import('@/views/admin/CodexRequestStrategyView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Request Strategy',
+      titleKey: 'codexRequestStrategy.title',
+      descriptionKey: 'codexRequestStrategy.description'
+    }
+  },
+  {
+    path: '/admin/openai-request-settings',
+    name: 'AdminOpenAIRequestSettings',
+    redirect: '/admin/codex-request-strategy#timezone',
+  },
+  {
     path: '/admin/account-protection',
     name: 'AdminAccountProtection',
     component: () => import('@/views/admin/ProtectionSettingsView.vue'),
@@ -585,6 +602,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/SharedPoolView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true, title: 'Shared Pool Management', titleKey: 'sharedPool.adminTitle', descriptionKey: 'sharedPool.adminDescription' }
   },
+
   {
     path: '/admin/plugins',
     name: 'AdminPlugins',

@@ -117,6 +117,12 @@ func ValidateRandomProxyPoolExtra(extra map[string]any) error {
 	if scope == RandomProxyPoolSelected && len(ids) == 0 {
 		return infraerrors.BadRequest("EMPTY_RANDOM_PROXY_POOL", "请至少选择一条代理，或切换为整个代理池")
 	}
+	if raw, exists := extra[RandomProxyRegionFallbackExtraKey]; exists && raw != nil {
+		fallback, ok := raw.(string)
+		if !ok || (strings.TrimSpace(fallback) != RandomProxyRegionFallbackNone && strings.TrimSpace(fallback) != RandomProxyRegionFallbackPool) {
+			return infraerrors.BadRequest("INVALID_RANDOM_PROXY_REGION_FALLBACK", "随机代理地区回退策略无效")
+		}
+	}
 	groupID, valid := parseRandomProxyGroupID(extra[RandomProxyGroupIDExtraKey])
 	if !valid || (scope == RandomProxyPoolGroup && groupID == 0) {
 		return infraerrors.BadRequest("INVALID_RANDOM_PROXY_GROUP", "请选择有效的代理分组")
@@ -153,7 +159,7 @@ func selectAccountRandomProxy(ctx context.Context, a *Account, selector RandomPr
 		if selection.Restricted && proxy != nil && !slices.Contains(selection.IDs, proxy.ID) {
 			return nil, nil
 		}
-		if proxy != nil {
+		if proxy != nil && !proxy.RegionFallback {
 			if err := validateProxyRegion(ctx, proxy, selection.CountryCode, selector); err != nil {
 				return nil, err
 			}
@@ -187,7 +193,7 @@ func selectAccountRandomProxy(ctx context.Context, a *Account, selector RandomPr
 // 组成员每次从数据库解析，组的增删成员会在下一次选路立即生效。
 // 空组及无法解析的组仍为受限空池，不能退化成全局随机。
 func ResolveAccountProxyPoolSelection(ctx context.Context, a *Account, source any) (ProxyPoolSelection, error) {
-	selection := ProxyPoolSelection{AccountID: a.ID, MaxReuseDuration: a.RandomProxyMaxReuseDuration()}
+	selection := ProxyPoolSelection{AccountID: a.ID, AllowCountryFallback: a.RandomProxyRegionFallbackEnabled(), MaxReuseDuration: a.RandomProxyMaxReuseDuration()}
 	country, err := a.ProxyRegionCountry()
 	if err != nil {
 		return selection, err

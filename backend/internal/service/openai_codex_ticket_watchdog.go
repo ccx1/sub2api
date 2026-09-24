@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -24,7 +25,7 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketRequest(account *Account, m
 	if err != nil {
 		return err
 	}
-	if receipt != nil && receipt.ticket.usesCookies() && len(receipt.ticket.cookiesForURL(req.URL)) == 0 {
+	if receipt != nil && receipt.ticket.usesCookies() && len(receipt.ticket.rawCookiesForURL(req.URL)) == 0 {
 		receipt.ticket.clearHeaders(req.Header)
 		if receipt.config.FailClosed {
 			return ErrOpenAICodexTicketUnavailable
@@ -44,13 +45,16 @@ func (s *OpenAIGatewayService) validateOpenAICodexTicketSend(req *http.Request, 
 	}
 	cfg := s.openAICodexTicketConfigForAccount(req.Context(), account)
 	if !cfg.FailClosed || !codexTicketConfigGatesModel(cfg, receipt.ticket.Model) {
-		return nil
+		return s.validateCodexCookieProjectionSend(req, account, receipt, cfg)
 	}
 	ticket := &receipt.ticket
 	if !ticket.usable(time.Now(), account, cfg) ||
 		s.codexTicketRevoked(openAICodexTicketKey(account.ID, ticket.Model), ticket) ||
-		ticket.usesCookies() && len(ticket.cookiesForURL(req.URL)) == 0 {
+		ticket.usesCookies() && len(ticket.rawCookiesForURL(req.URL)) == 0 {
 		return ErrOpenAICodexTicketUnavailable
+	}
+	if err := s.validateCodexCookieProjectionSend(req, account, receipt, cfg); err != nil {
+		return err
 	}
 	// 请求头组装与业务准入后再核验，并保持实际发送的凭据与快照一致。
 	ticket.applyHeaders(req.Header)
@@ -76,6 +80,7 @@ func (s *OpenAIGatewayService) observeOpenAICodexTicketResponse(req *http.Reques
 	// receipt used by this in-flight request; the scheduler must revalidate the
 	// candidate before publishing it, while this request keeps its old snapshot.
 	if response.StatusCode != http.StatusOK || response.Body == nil {
+		s.markCodexModelQualityAnomaly(receipt.account.ID, receipt.ticket.Model)
 		return
 	}
 	if !receipt.ticket.usesCookies() && codexTicketStateRejected(returned, config.NormalizeOpenAICodexTicketConfig(receipt.config)) {
@@ -86,7 +91,9 @@ func (s *OpenAIGatewayService) observeOpenAICodexTicketResponse(req *http.Reques
 	observer := newOpenAICodexTicketResponseObserver(receipt.ticket.Model)
 	observer.diagnostics = &codexTicketResponseDiagnostics{wireStatus: response.StatusCode, signals: signals}
 	response.Body = &openAICodexTicketObservedBody{ReadCloser: response.Body,
-		observer: observer, mismatch: func(models []string, signals *CodexTicketSignals) {
+		qualityContext: req.Context(),
+		quality:        func() { s.markCodexModelQualityAnomaly(receipt.account.ID, receipt.ticket.Model) },
+		observer:       observer, mismatch: func(models []string, signals *CodexTicketSignals) {
 			detail := newCodexTicketInvalidation("response_model_mismatch", "http", models)
 			detail.Signals = signals
 			invalidate(detail)
@@ -95,9 +102,12 @@ func (s *OpenAIGatewayService) observeOpenAICodexTicketResponse(req *http.Reques
 
 type openAICodexTicketObservedBody struct {
 	io.ReadCloser
-	mu       sync.Mutex
-	observer *openAICodexTicketResponseObserver
-	mismatch func([]string, *CodexTicketSignals)
+	mu             sync.Mutex
+	observer       *openAICodexTicketResponseObserver
+	mismatch       func([]string, *CodexTicketSignals)
+	quality        func()
+	qualityOnce    sync.Once
+	qualityContext context.Context
 }
 
 func (b *openAICodexTicketObservedBody) Read(p []byte) (int, error) {
@@ -108,6 +118,9 @@ func (b *openAICodexTicketObservedBody) Read(p []byte) (int, error) {
 		b.observer.Finish()
 	}
 	completed, matches := b.observer.Result()
+	cancelled := b.qualityContext != nil && b.qualityContext.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	interrupted := err != nil && !b.observer.protocolCompleted
+	anomaly := !cancelled && (b.observer.failed || b.observer.protocolCompleted && (!completed || !matches) || interrupted)
 	var models []string
 	var signals *CodexTicketSignals
 	if completed && !matches {
@@ -117,6 +130,9 @@ func (b *openAICodexTicketObservedBody) Read(p []byte) (int, error) {
 		}
 	}
 	b.mu.Unlock()
+	if anomaly && b.quality != nil {
+		b.qualityOnce.Do(b.quality)
+	}
 	if completed && !matches {
 		b.mismatch(models, signals)
 	}

@@ -3260,7 +3260,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		if updates.ProxyID != nil && !randomProxyModeUpdate {
 			extraExpression = "(" + extraExpression + ") - '" + service.ProxyModeExtraKey + "' - '" + service.RandomProxyEmptyPoolPolicyExtraKey +
-				"' - '" + service.RandomProxyGroupIDExtraKey + "' - '" + service.RandomProxyPoolScopeExtraKey + "' - '" + service.RandomProxyPoolIDsExtraKey + "'"
+				"' - '" + service.RandomProxyGroupIDExtraKey + "' - '" + service.RandomProxyPoolScopeExtraKey + "' - '" + service.RandomProxyPoolIDsExtraKey + "' - '" + service.RandomProxyRegionFallbackExtraKey + "'"
 		}
 		eligibleAccount := "platform IN (" + ollamaCloudUsagePlatformsSQL + ") AND type = 'apikey'"
 		groupIdentityChanged := ""

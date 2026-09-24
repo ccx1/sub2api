@@ -16,6 +16,11 @@ export interface CodexTicketProtectionSettings {
   rejection_retry_interval_seconds?: number
   rejection_retry_max_attempts?: number
   rejection_retry_cooldown_seconds?: number
+  proxy_ip_protection_enabled?: boolean
+  proxy_ip_failure_account_threshold?: number
+  proxy_ip_failure_window_seconds?: number
+  proxy_ip_cooldown_seconds?: number
+  proxy_ip_max_rounds?: number
 }
 
 export interface CodexTicketSettings {

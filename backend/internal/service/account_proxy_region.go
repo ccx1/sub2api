@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	ProxyRegionModeExtraKey    = "proxy_region_mode"
-	ProxyRegionCountryExtraKey = "proxy_region_country"
+	ProxyRegionModeExtraKey            = "proxy_region_mode"
+	ProxyRegionCountryExtraKey         = "proxy_region_country"
+	ProxyRegionFallbackCountryExtraKey = "proxy_region_fallback_country"
 )
 
 var ErrProxyRegionUnknown = errors.New("proxy region cannot be determined from billing; choose a country manually")
@@ -47,6 +48,10 @@ func ValidateProxyRegionExtra(extra map[string]any) error {
 	if (!ok && extra[ProxyRegionCountryExtraKey] != nil) || (strings.TrimSpace(country) != "" && normalizeProxyRegionCountry(country) == "") || (mode == "manual" && normalizeProxyRegionCountry(country) == "") {
 		return infraerrors.BadRequest("INVALID_PROXY_REGION_COUNTRY", "请选择有效的两位国家代码")
 	}
+	fallback, ok := extra[ProxyRegionFallbackCountryExtraKey].(string)
+	if (!ok && extra[ProxyRegionFallbackCountryExtraKey] != nil) || (strings.TrimSpace(fallback) != "" && normalizeProxyRegionCountry(fallback) == "") {
+		return infraerrors.BadRequest("INVALID_PROXY_REGION_FALLBACK_COUNTRY", "代理地区兜底国家必须是有效的两位国家代码")
+	}
 	return nil
 }
 
@@ -68,6 +73,9 @@ func (a *Account) ProxyRegionCountry() (string, error) {
 		}
 		if country := proxyBillingCurrencyCountries[strings.ToUpper(strings.TrimSpace(a.GetCredential("billing_currency")))]; country != "" {
 			return country, nil
+		}
+		if fallback, _ := a.Extra[ProxyRegionFallbackCountryExtraKey].(string); normalizeProxyRegionCountry(fallback) != "" {
+			return normalizeProxyRegionCountry(fallback), nil
 		}
 		return "", ErrProxyRegionUnknown
 	case "off":
@@ -94,5 +102,8 @@ func normalizeProxyRegionExtra(extra map[string]any) {
 	}
 	if country, ok := extra[ProxyRegionCountryExtraKey].(string); ok {
 		extra[ProxyRegionCountryExtraKey] = strings.ToUpper(strings.TrimSpace(country))
+	}
+	if fallback, ok := extra[ProxyRegionFallbackCountryExtraKey].(string); ok {
+		extra[ProxyRegionFallbackCountryExtraKey] = strings.ToUpper(strings.TrimSpace(fallback))
 	}
 }

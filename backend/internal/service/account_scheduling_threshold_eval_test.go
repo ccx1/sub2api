@@ -222,6 +222,27 @@ func TestEvaluateAccountSchedulingThreshold_OpenAIPausesFreshExhaustedSnapshot(t
 	require.True(t, resetAt.Equal(*decision.Until))
 }
 
+func TestEvaluateAccountSchedulingThreshold_OpenAIExhaustedSnapshotIgnoresDisabledWarningThreshold(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(3 * time.Hour)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Extra: map[string]any{
+			"codex_5h_used_percent": 100.0,
+			"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
+		},
+	}
+
+	decision := EvaluateAccountSchedulingThreshold(account, map[string]int{PlatformOpenAI: 100}, now)
+
+	require.True(t, decision.ShouldPause)
+	require.Equal(t, 100, decision.ThresholdPercent)
+	require.Equal(t, 100.0, decision.UsedPercent)
+	require.Equal(t, resetAt, *decision.Until)
+}
+
 func TestEvaluateAccountSchedulingThreshold_OpenAIPausesFreshExhaustedSevenDayWindow(t *testing.T) {
 	t.Parallel()
 

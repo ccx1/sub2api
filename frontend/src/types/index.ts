@@ -1303,6 +1303,12 @@ export interface Account {
     reserve_count?: number
     expiring_count?: number
     next_expires_at?: string
+    route_affinity_status?: 'off' | 'unknown' | 'available' | 'unavailable'
+    route_affinity_connections?: number
+    quality_status?: 'pending' | 'running' | 'passed' | 'suspect' | 'inconclusive' | 'quarantined' | 'skipped' | 'stale'
+    quality_reason?: string
+    quality_checked_at?: string
+    quality_paused?: boolean
   }>
   codex_ticket_global_enabled?: boolean
   codex_ticket_enabled?: boolean
@@ -1630,6 +1636,9 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
+  use_import_defaults?: boolean
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1753,6 +1762,9 @@ export interface AdminDataProxy {
 }
 
 export interface AdminDataAccount {
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
+  use_import_defaults?: boolean
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1785,6 +1797,9 @@ export interface AdminDataImportResult {
 }
 
 export interface CodexSessionImportRequest {
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
+  use_import_defaults?: boolean
   content?: string
   contents?: string[]
   name?: string
@@ -1805,6 +1820,9 @@ export interface CodexSessionImportRequest {
 }
 
 export interface OpenAICodexPATCreateRequest {
+  protection_enabled?: boolean
+  codex_ticket_enabled?: boolean
+  use_import_defaults?: boolean
   access_token: string
   name?: string
   notes?: string | null
@@ -2566,7 +2584,16 @@ export interface TotpLogin2FARequest {
 
 // ==================== Scheduled Test Types ====================
 
+export interface PelicanTestConfig {
+  prompt: string
+  reasoning_effort: string
+  parallel_count: number
+  model_id?: string
+}
+
 export interface ScheduledTestPlan {
+  pelican_config?: PelicanTestConfig
+  running_until?: string | null
   id: number
   account_id: number
   model_id: string
@@ -2581,6 +2608,7 @@ export interface ScheduledTestPlan {
 }
 
 export interface ScheduledTestResult {
+  pelican_config?: PelicanTestConfig
   id: number
   plan_id: number
   status: string
@@ -2593,6 +2621,7 @@ export interface ScheduledTestResult {
 }
 
 export interface CreateScheduledTestPlanRequest {
+  pelican_config?: PelicanTestConfig
   account_id: number
   model_id: string
   cron_expression: string
@@ -2602,6 +2631,7 @@ export interface CreateScheduledTestPlanRequest {
 }
 
 export interface UpdateScheduledTestPlanRequest {
+  pelican_config?: PelicanTestConfig
   model_id?: string
   cron_expression?: string
   enabled?: boolean

@@ -40,4 +40,25 @@ describe('AccountProxyRegionSettings', () => {
     await wrapper.get('[data-testid="proxy-region-mode"]').setValue('manual')
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
+
+  it('shows the saved fallback, preserves unavailable countries, and emits edits or clearing', async () => {
+    const wrapper = mount(AccountProxyRegionSettings, { props: { modelValue: { mode: 'billing', country: '' }, credentials: { billing_currency: 'USD' }, fallbackCountry: 'NZ', proxies } })
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="proxy-region-fallback-country"]')
+    expect(select.element.value).toBe('NZ')
+    expect(wrapper.text()).toContain('admin.accounts.proxyRegion.sourceFallback')
+    expect(wrapper.text()).not.toContain('admin.accounts.proxyRegion.unknownBilling')
+    await select.setValue('JP')
+    await select.setValue('')
+    expect(wrapper.emitted('update:fallbackCountry')).toEqual([['JP'], ['']])
+  })
+
+  it('disables fallback editing and hides it for other modes or callers without support', async () => {
+    const wrapper = mount(AccountProxyRegionSettings, { props: { modelValue: { mode: 'billing', country: '' }, fallbackCountry: 'JP', proxies, disabled: true } })
+    await wrapper.get('[data-testid="proxy-region-fallback-country"]').setValue('PH')
+    expect(wrapper.emitted('update:fallbackCountry')).toBeUndefined()
+    await wrapper.setProps({ modelValue: { mode: 'manual', country: 'PH' } })
+    expect(wrapper.find('[data-testid="proxy-region-fallback-country"]').exists()).toBe(false)
+    await wrapper.setProps({ modelValue: { mode: 'billing', country: '' }, fallbackCountry: undefined })
+    expect(wrapper.find('[data-testid="proxy-region-fallback-country"]').exists()).toBe(false)
+  })
 })

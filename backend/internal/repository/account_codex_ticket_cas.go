@@ -200,7 +200,7 @@ func codexTicketCASConfig(extra map[string]any) map[string]any {
 		service.CodexTicketCredentialPolicyExtraKey,
 		service.CodexTicketProxyModeExtraKey, service.CodexTicketProxyIDExtraKey, service.CodexTicketProxyStrategyExtraKey,
 		service.RandomProxyEmptyPoolPolicyExtraKey, service.RandomProxyPoolScopeExtraKey,
-		service.RandomProxyPoolIDsExtraKey, service.RandomProxyGroupIDExtraKey, service.RandomProxyMaxReuseMinutesExtraKey, service.DailyCooldownExtraKey,
+		service.RandomProxyPoolIDsExtraKey, service.RandomProxyGroupIDExtraKey, service.RandomProxyMaxReuseMinutesExtraKey, service.RandomProxyRegionFallbackExtraKey, service.DailyCooldownExtraKey,
 		"enable_tls_fingerprint", "tls_fingerprint_builtin", "tls_fingerprint_profile_id",
 		"codex_fingerprint_mode", service.AntiDegradeMarkerExtraKey, service.AntiDegradationExtraKey}
 	config := make(map[string]any, len(keys))

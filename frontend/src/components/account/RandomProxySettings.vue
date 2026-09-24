@@ -9,6 +9,14 @@
       <p class="input-hint">{{ t('admin.accounts.randomProxyBalanceHint') }}</p>
       <p class="input-hint">{{ t('admin.accounts.randomProxyMaxReuseHint') }}</p>
       <label class="block">
+        <span class="input-label">{{ t('admin.accounts.randomProxyRegionFallback') }}</span>
+        <select v-model="regionFallback" class="input" data-testid="random-proxy-region-fallback">
+          <option value="none">{{ t('admin.accounts.randomProxyRegionFallbackOptions.none') }}</option>
+          <option value="pool">{{ t('admin.accounts.randomProxyRegionFallbackOptions.pool') }}</option>
+        </select>
+      </label>
+      <p class="input-hint">{{ t('admin.accounts.randomProxyRegionFallbackHint') }}</p>
+      <label class="block">
         <span class="input-label">{{ t('admin.accounts.randomProxyPoolScope') }}</span>
         <select v-model="scope" class="input" data-testid="random-proxy-scope">
           <option value="all">{{ t('admin.accounts.randomProxyPoolAll') }}</option>
@@ -82,7 +90,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Proxy, ProxyGroup } from '@/types'
-import { type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope } from '@/utils/randomProxy'
+import { type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope, type RandomProxyRegionFallback } from '@/utils/randomProxy'
 import { proxyOptionLabel } from '@/utils/proxyLabel'
 import { normalizeProxyRegionCountry } from '@/utils/accountProxyRegion'
 
@@ -93,6 +101,7 @@ const ids = defineModel<number[]>('ids', { required: true })
 const groupId = defineModel<number | null>('groupId', { default: null })
 const groupError = defineModel<string | null>('groupError', { default: null })
 const policy = defineModel<RandomProxyEmptyPoolPolicy>('policy', { required: true })
+const regionFallback = defineModel<RandomProxyRegionFallback>('regionFallback', { default: 'pool' })
 // 保留旧表单绑定与存储值，健康代理不再按时间轮换。
 defineModel<number>('maxReuseMinutes', { default: 0 })
 const { t } = useI18n()
