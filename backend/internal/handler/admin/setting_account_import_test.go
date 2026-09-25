@@ -74,6 +74,13 @@ func TestAccountImportSettingsRoundTripAndValidation(t *testing.T) {
 	require.False(t, result.Data.CodexTicketEnabled)
 	require.Equal(t, "random", result.Data.ProxyMode)
 	require.Equal(t, "JP", result.Data.Extra["proxy_region_country"])
+	require.False(t, result.Data.ExcelBPSEnabled, "旧请求缺少 excel_bps_enabled 时按关闭保存")
+
+	rec = serveImportSettings(t, h, http.MethodPut, `{"enabled":true,"protection_enabled":true,"codex_ticket_enabled":true,"excel_bps_enabled":true,"proxy_mode":"preserve","proxy_id":null,"extra":{}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = serveImportSettings(t, h, http.MethodGet, "")
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	require.True(t, result.Data.ExcelBPSEnabled)
 
 	for _, invalid := range []string{
 		`{}`, `{"enabled":"true"}`,

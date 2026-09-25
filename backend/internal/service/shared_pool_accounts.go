@@ -67,6 +67,7 @@ type SharedPoolAccountInput struct {
 	ProxyURL           *string                  `json:"proxy_url"`
 	ProtectionEnabled  bool                     `json:"protection_enabled"`
 	CodexTicketEnabled *bool                    `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled    *bool                    `json:"excel_bps_enabled"`
 	ConfirmDisable     bool                     `json:"confirm_disable"`
 	Enabled            bool                     `json:"enabled"`
 	DispatchConsent    bool                     `json:"dispatch_consent"`

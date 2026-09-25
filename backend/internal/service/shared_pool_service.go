@@ -62,6 +62,13 @@ func (s *SharedPoolService) Create(ctx context.Context, userID int64, in SharedP
 	if in.CodexTicketEnabled != nil {
 		extra[OpenAICodexTicketEnabledExtraKey] = *in.CodexTicketEnabled
 	}
+	if in.ExcelBPSEnabled != nil && *in.ExcelBPSEnabled {
+		if !(&Account{Platform: in.Platform, Type: in.Type, Credentials: credentials, Extra: map[string]any{excelBPSExtraKey: true}}).IsExcelBPSEnabled() {
+			return nil, infraerrors.BadRequest("EXCEL_BPS_UNSUPPORTED_ACCOUNT", "Excel / BPS 协议仅支持 OpenAI OAuth 账号")
+		}
+		extra[excelBPSExtraKey] = true
+		delete(extra, OpenAICodexTicketEnabledExtraKey)
+	}
 	proxyID, err := s.applyProxy(ctx, userID, in.ProxyURL, extra)
 	if err != nil {
 		return nil, err
@@ -101,6 +108,9 @@ func (s *SharedPoolService) Update(ctx context.Context, userID, id int64, in Sha
 	}
 	if in.CodexTicketEnabled != nil {
 		return nil, infraerrors.BadRequest("SHARED_SWITCH_SEPARATE", "请在账号卡片上单独操作打票开关，刷新后重试")
+	}
+	if in.ExcelBPSEnabled != nil {
+		return nil, infraerrors.BadRequest("SHARED_EXCEL_BPS_CREATE_ONLY", "Excel / BPS 协议仅能在添加账号时设置")
 	}
 	if in.Platform != a.Platform || in.Type != a.Type {
 		return nil, infraerrors.BadRequest("SHARED_IDENTITY_IMMUTABLE", "平台和认证类型不能修改，请重新创建账号")

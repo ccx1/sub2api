@@ -167,6 +167,7 @@ func normalizeSharedImportEntry(value any, defaults sharedImportDefaults, index 
 	}
 	if entry.input.Platform == service.PlatformOpenAI && entry.input.Type == service.AccountTypeOAuth {
 		entry.input.CodexTicketEnabled = defaults.CodexTicketEnabled
+		entry.input.ExcelBPSEnabled = defaults.ExcelBPSEnabled
 	}
 	for i, warning := range entry.warnings {
 		entry.warnings[i] = fmt.Sprintf("第 %d 个账号：%s", index, warning)

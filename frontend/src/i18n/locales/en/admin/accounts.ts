@@ -152,6 +152,7 @@ export default {
       dataImportAndEdit: 'Import and Edit',
       dataImportProtection: 'Enable account protection',
       dataImportCodexTicket: 'Enable ticket harvesting (supported OpenAI OAuth accounts only)',
+      dataImportExcelBPS: 'Enable Excel / BPS protocol (OpenAI OAuth accounts only)',
       dataImportEditUnavailable: 'The accounts were imported, but their IDs were not fully returned. Refresh the account list to edit them. Do not import them again.',
       dataImporting: 'Importing...',
       dataImportSelectFile: 'Please select a data file',

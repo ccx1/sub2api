@@ -57,6 +57,7 @@ describe('AccountImportSettingsModal', () => {
     await enable(wrapper)
     await wrapper.get('[aria-labelledby="import-default-protection"]').trigger('click')
     await wrapper.get('[aria-labelledby="import-default-ticket"]').trigger('click')
+    await wrapper.get('[aria-labelledby="import-default-excel-bps"]').trigger('click')
     await wrapper.get('[data-testid="import-settings-proxy-mode"]').setValue('fixed')
     expect(wrapper.get('[data-testid="import-settings-save"]').attributes('disabled')).toBeDefined()
     wrapper.getComponent(ProxySelector).vm.$emit('update:modelValue', 7)
@@ -70,7 +71,7 @@ describe('AccountImportSettingsModal', () => {
     await submit(wrapper)
     await flushPromises()
     expect(saveSettings).toHaveBeenCalledWith({
-      enabled: true, protection_enabled: false, codex_ticket_enabled: false, proxy_mode: 'fixed', proxy_id: 7,
+      enabled: true, protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true, proxy_mode: 'fixed', proxy_id: 7,
       extra: { proxy_region_mode: 'manual', proxy_region_country: 'JP', codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 7, codex_ticket_proxy_strategy: 'affinity' }
     })
     wrapper.unmount()

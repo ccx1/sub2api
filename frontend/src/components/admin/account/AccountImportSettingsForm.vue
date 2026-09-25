@@ -9,8 +9,13 @@
         <span id="import-default-ticket" class="text-sm">{{ t('admin.accounts.dataImportCodexTicket') }}</span>
         <Toggle v-model="settings.codex_ticket_enabled" :disabled="disabled" aria-labelledby="import-default-ticket" />
       </div>
+      <div class="flex items-center justify-between gap-3">
+        <span id="import-default-excel-bps" class="text-sm">{{ t('admin.accounts.dataImportExcelBPS') }}</span>
+        <Toggle v-model="settings.excel_bps_enabled" :disabled="disabled" aria-labelledby="import-default-excel-bps" data-testid="import-settings-excel-bps" />
+      </div>
     </div>
     <p class="input-hint">{{ t('admin.accountImportSettings.protectionHint') }}</p>
+    <p class="input-hint">{{ t('admin.accountImportSettings.excelBPSHint') }}</p>
     <label class="block">
       <span class="input-label">{{ t('admin.accountImportSettings.proxyMode') }}</span>
       <select v-model="settings.proxy_mode" class="input w-full" data-testid="import-settings-proxy-mode" :disabled="disabled">

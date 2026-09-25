@@ -6,6 +6,7 @@ export default {
       disabledHint: '未启用时保留导入数据与系统原有默认行为，不会关闭账号保护或打票。',
       importHint: '新账号将使用已启用的导入默认配置，文件中的明确设置优先；未启用时保留导入数据与系统原有默认行为。',
       protectionHint: '账号保护使用全局保护策略；打票仅适用于支持打票的账号。',
+      excelBPSHint: 'Excel / BPS 仅对 ChatGPT OAuth 账号生效（不含 PAT、影子与 Agent 身份账号）；启用 BPS 的账号不打票。文件中明确填写 openai_excel_bps 时以文件为准。',
       proxyMode: '账号代理默认方式',
       proxyModes: { preserve: '保持原值 / 系统默认', direct: '直连', fixed: '固定代理', random: '随机代理池' },
       regionConfigured: '设置默认代理地区',

@@ -37,6 +37,7 @@ type sharedImportDefaults struct {
 	DispatchConsent    bool                             `json:"dispatch_consent"`
 	ProtectionEnabled  bool                             `json:"protection_enabled"`
 	CodexTicketEnabled *bool                            `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled    *bool                            `json:"excel_bps_enabled"`
 	DailyCooldown      *service.SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
 }
 

@@ -103,6 +103,7 @@ export default {
       dataImportAndEdit: '导入并编辑',
       dataImportProtection: '是否开启账号保护',
       dataImportCodexTicket: '是否打票（仅支持的 OpenAI OAuth 账号）',
+      dataImportExcelBPS: '是否启用 Excel / BPS 协议（仅 OpenAI OAuth 账号）',
       dataImportEditUnavailable: '账号已导入，但未返回完整账号 ID，无法自动打开编辑。请刷新账号列表后编辑，勿重复导入。',
       dataImporting: '导入中...',
       dataImportSelectFile: '请选择数据文件',

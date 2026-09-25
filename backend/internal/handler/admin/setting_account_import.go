@@ -26,6 +26,7 @@ func (h *SettingHandler) UpdateAccountImportSettings(c *gin.Context) {
 		Enabled            *bool          `json:"enabled" binding:"required"`
 		ProtectionEnabled  *bool          `json:"protection_enabled" binding:"required"`
 		CodexTicketEnabled *bool          `json:"codex_ticket_enabled" binding:"required"`
+		ExcelBPSEnabled    bool           `json:"excel_bps_enabled"`
 		ProxyMode          string         `json:"proxy_mode" binding:"required,oneof=preserve direct fixed random"`
 		ProxyID            *int64         `json:"proxy_id"`
 		Extra              map[string]any `json:"extra"`
@@ -40,7 +41,7 @@ func (h *SettingHandler) UpdateAccountImportSettings(c *gin.Context) {
 	}
 	settings, err := h.settingService.UpdateAccountImportSettings(c.Request.Context(), service.AccountImportSettings{
 		Enabled: *req.Enabled, ProtectionEnabled: *req.ProtectionEnabled,
-		CodexTicketEnabled: *req.CodexTicketEnabled, ProxyMode: req.ProxyMode,
+		CodexTicketEnabled: *req.CodexTicketEnabled, ExcelBPSEnabled: req.ExcelBPSEnabled, ProxyMode: req.ProxyMode,
 		ProxyID: req.ProxyID, Extra: req.Extra,
 	})
 	if err != nil {

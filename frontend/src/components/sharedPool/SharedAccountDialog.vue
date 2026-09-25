@@ -60,9 +60,13 @@
             <span><span class="block text-sm font-medium">{{ t('sharedPool.protection') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('sharedPool.protectionHint') }}</span></span>
           </label>
         </div>
-        <div v-if="!account && supportsCodexTicket" class="flex items-start justify-between gap-4">
+        <div v-if="!account && supportsCodexTicket && !excelBPSEnabled" class="flex items-start justify-between gap-4">
           <div><label for="shared-codex-ticket" class="input-label">{{ t('sharedPool.codexTicket') }}</label><p class="input-hint">{{ t(codexTicketRequired ? 'sharedPool.codexTicketRequiredHint' : 'sharedPool.codexTicketHint') }}</p></div>
           <Toggle id="shared-codex-ticket" :model-value="codexTicketRequired || codexTicketEnabled" :aria-label="t('sharedPool.codexTicket')" :disabled="saving || codexTicketRequired" @update:model-value="!codexTicketRequired && (codexTicketEnabled = $event)" />
+        </div>
+        <div v-if="!account && supportsCodexTicket" class="flex items-start justify-between gap-4">
+          <div><label for="shared-excel-bps" class="input-label">{{ t('sharedPool.excelBPS') }}</label><p class="input-hint">{{ t('sharedPool.excelBPSHint') }}</p></div>
+          <Toggle id="shared-excel-bps" v-model="excelBPSEnabled" :aria-label="t('sharedPool.excelBPS')" :disabled="saving" />
         </div>
         <SharedCredentialsForm v-if="!account" :platform="form.platform" :type="form.type" :proxy-url="form.proxy_url" :editing="false" :disabled="saving" @change="credentials = $event" @valid="credentialsValid = $event" @busy="authorizing = $event" />
         <p v-if="error" role="alert" class="break-words text-sm text-red-600 dark:text-red-400">{{ error }}</p>
@@ -112,6 +116,7 @@ const accountTypes = computed<SharedAccountInput['type'][]>(() => form.platform 
 const supportsCodexTicket = computed(() => form.platform === 'openai' && form.type === 'oauth')
 const canConsent = computed(() => hasSettlementPolicy(props.config))
 const codexTicketEnabled = ref(true)
+const excelBPSEnabled = ref(false)
 const dailyCooldown = ref(normalizeDailyCooldown(props.account?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
 function cooldownInput() {
@@ -136,7 +141,7 @@ function validateCooldown() {
 function openImport() {
   if (saving.value || authorizing.value) return
   error.value = ''
-  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, ...cooldownInput() })
+  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, excel_bps_enabled: excelBPSEnabled.value, ...cooldownInput() })
 }
 function submit() {
   if (saving.value || authorizing.value) return
@@ -160,7 +165,7 @@ async function save() {
       await sharedPoolAPI.update(props.account.id, input)
     } else {
       await sharedPoolAPI.create({ ...form, enabled: true, dispatch_consent: true, ...cooldownInput(), name: form.name.trim(), credentials: credentials.value, confirm_disable: false,
-        ...(supportsCodexTicket.value ? { codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value } : {}) })
+        ...(supportsCodexTicket.value ? { codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, excel_bps_enabled: excelBPSEnabled.value } : {}) })
     }
     emit('saved')
   } catch (e: unknown) { error.value = (e as Error).message || t('sharedPool.actionFailed') }

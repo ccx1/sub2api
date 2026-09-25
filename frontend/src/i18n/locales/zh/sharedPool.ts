@@ -15,6 +15,7 @@ export default {
   settlementPolicy: '默认供号结算倍率', settlementSettingsHint: '生效顺序：用户专属倍率、平台订阅档位倍率、此全局默认倍率。调整仅影响后续调用，不改变历史收益；0 为有效倍率。', defaultSettlementMultiplier: '默认共享倍率', settlementMultiplier: '共享结算倍率', settlementUnconfigured: '未配置', settlementPolicyHint: '供号收益 = 基础费用 × 账号当前共享结算倍率，再扣除平台与代理费。用户专属倍率优先，未单独设置时按平台和订阅档位匹配；具体生效倍率请查看账号卡片。', settlementRequired: '你的共享结算倍率暂不可用，请刷新后再授权调度。', invalidSettlementMultiplier: '结算倍率必须在 0 到 100 之间。',
   dispatchConsentHint: '授权后允许平台调度账号处理请求，供号收益按账号当前生效的共享结算倍率计算。', authorizeDispatch: '授权平台调度', legacyConsentHint: '此账号沿用旧版共享授权。升级授权后可参与平台调度，并按账号当前生效的共享结算倍率结算。', legacySettlement: '原授权结算规则', legacySharing: '原授权共享', catalogHint: '这里只展示你有权调用且含共享账号的分组。调用按分组计费，供号收益独立结算；贡献账号不会自动公开分组。', settlementAmount: '供号结算基数', baseAmount: '基础费用', spreadAmount: '消费与结算差额', allocationInvalid: '已选分组不可用于此账号，请移除或重新选择。',
   codexTicket: 'Codex 打票', codexTicketHint: '仅适用于 OpenAI OAuth 账号，平台打票总开关开启后生效。关闭后停止该账号后续票据采集与请求注入。',
+  excelBPS: 'Excel / BPS 协议', excelBPSHint: '仅适用于 OpenAI OAuth 账号，仅能在添加时设置。开启后请求经 Excel 接口转发（强制 HTTP/SSE，不支持 base64 图片），该账号不再打票。',
   codexTicketRequired: '强制开启', codexTicketRequiredHint: 'OpenAI Pro 20x 与 Pro 5x 账号自动开启打票，不能关闭。',
   subscriptionTierManual: '管理员设置',
   currentSubscriptionTier: '当前有效档位：', adminTierUnsupported: '此平台尚未提供可靠的订阅档位选项，暂不支持手动设置；共享倍率按当前结算规则计算。',

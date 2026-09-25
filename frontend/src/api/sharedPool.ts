@@ -49,6 +49,7 @@ export interface SharedAccountInput {
   proxy_url?: string; protection_enabled: boolean; enabled: boolean
   credentials?: Record<string, unknown>; confirm_disable?: boolean
   codex_ticket_enabled?: boolean
+  excel_bps_enabled?: boolean
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
 }
@@ -63,6 +64,7 @@ export interface SharedImportDefaults {
   name?: string; platform?: SharedPlatform; type?: 'oauth' | 'apikey'; concurrency: number
   proxy_url?: string; enabled: boolean; protection_enabled: boolean
   codex_ticket_enabled?: boolean
+  excel_bps_enabled?: boolean
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
 }

@@ -19,6 +19,7 @@ type AccountImportSettings struct {
 	Enabled            bool           `json:"enabled"`
 	ProtectionEnabled  bool           `json:"protection_enabled"`
 	CodexTicketEnabled bool           `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled    bool           `json:"excel_bps_enabled"`
 	ProxyMode          string         `json:"proxy_mode"`
 	ProxyID            *int64         `json:"proxy_id"`
 	Extra              map[string]any `json:"extra"`

@@ -4,13 +4,14 @@ export interface AccountImportSettings {
   enabled: boolean
   protection_enabled: boolean
   codex_ticket_enabled: boolean
+  excel_bps_enabled: boolean
   proxy_mode: 'preserve' | 'direct' | 'fixed' | 'random'
   proxy_id: number | null
   extra: Record<string, unknown>
 }
 
 export function defaultAccountImportSettings(): AccountImportSettings {
-  return { enabled: false, protection_enabled: true, codex_ticket_enabled: true, proxy_mode: 'preserve', proxy_id: null, extra: {} }
+  return { enabled: false, protection_enabled: true, codex_ticket_enabled: true, excel_bps_enabled: false, proxy_mode: 'preserve', proxy_id: null, extra: {} }
 }
 
 export async function getAccountImportSettings(): Promise<AccountImportSettings> {

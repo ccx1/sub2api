@@ -35,7 +35,7 @@ describe('shared account creation and edit boundaries', () => {
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, codex_ticket_enabled: true })
+    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, codex_ticket_enabled: true, excel_bps_enabled: false })
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('group_ids')
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('rate_multiplier')
   })
@@ -154,7 +154,7 @@ describe('shared account creation and edit boundaries', () => {
     await wrapper.get('#shared-concurrency').setValue(3)
     await wrapper.get('#shared-proxy').setValue('http://fixture.example:8080')
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
-    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true }])
+    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true, excel_bps_enabled: false }])
     expect(wrapper.find('select').exists()).toBe(false)
   })
 
@@ -221,16 +221,31 @@ describe('shared account creation and edit boundaries', () => {
     wrapper.unmount()
   })
 
+  it('sends Excel / BPS for creation and import and hides the ticket switch while enabled', async () => {
+    const wrapper = render()
+    expect(wrapper.get('#shared-excel-bps').attributes('aria-checked')).toBe('false')
+    await wrapper.get('#shared-excel-bps').trigger('click')
+    expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
+    wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: true }))
+    await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
+    expect(wrapper.emitted('import')?.[0]?.[0]).toEqual(expect.objectContaining({ excel_bps_enabled: true }))
+  })
+
   it('omits ticket configuration for API-key and other platform accounts', async () => {
     const wrapper = render()
     await wrapper.setProps({ config: { ...config, platforms: ['openai', 'gemini'] } })
     for (const selector of ['[data-account-type="apikey"]', '[data-platform="gemini"]']) {
       await wrapper.get(selector).trigger('click')
       expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
+      expect(wrapper.find('#shared-excel-bps').exists()).toBe(false)
       wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { api_key: 'fixture-key' })
       await wrapper.get('form').trigger('submit')
       await flushPromises()
       expect(create.mock.lastCall?.[0]).not.toHaveProperty('codex_ticket_enabled')
+      expect(create.mock.lastCall?.[0]).not.toHaveProperty('excel_bps_enabled')
     }
   })
 

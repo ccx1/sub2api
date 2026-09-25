@@ -48,9 +48,13 @@
           </div>
           <div class="space-y-4">
             <div><label class="flex items-center gap-2 text-sm font-medium"><input v-model="defaults.protection_enabled" type="checkbox" class="h-4 w-4 rounded" />{{ t('sharedPool.protection') }}</label><p class="input-hint">{{ t('sharedPool.protectionHint') }}</p></div>
-            <div class="flex items-start justify-between gap-4">
+            <div v-if="!defaults.excel_bps_enabled" class="flex items-start justify-between gap-4">
               <div><label for="shared-import-codex-ticket" class="input-label">{{ t('sharedPool.codexTicket') }}</label><p class="input-hint">{{ t('sharedPool.codexTicketHint') }}</p><p class="input-hint">{{ t('sharedPool.codexTicketRequiredHint') }}</p></div>
               <Toggle id="shared-import-codex-ticket" v-model="defaults.codex_ticket_enabled" :aria-label="t('sharedPool.codexTicket')" :disabled="importing" @update:model-value="result = null" />
+            </div>
+            <div class="flex items-start justify-between gap-4">
+              <div><label for="shared-import-excel-bps" class="input-label">{{ t('sharedPool.excelBPS') }}</label><p class="input-hint">{{ t('sharedPool.excelBPSHint') }}</p></div>
+              <Toggle id="shared-import-excel-bps" v-model="defaults.excel_bps_enabled" :aria-label="t('sharedPool.excelBPS')" :disabled="importing" @update:model-value="result = null" />
             </div>
           </div>
         </div>
@@ -89,7 +93,7 @@ const props = defineProps<{ show: boolean; config: SharedConfig; initialDefaults
 const emit = defineEmits<{ close: []; imported: [] }>()
 const { t } = useI18n()
 const app = useAppStore()
-const defaults = reactive<SharedImportDefaults & { codex_ticket_enabled: boolean }>({ name: '', concurrency: 1, proxy_url: '', protection_enabled: true, ...props.initialDefaults, enabled: true, codex_ticket_enabled: props.initialDefaults?.codex_ticket_enabled ?? true })
+const defaults = reactive<SharedImportDefaults & { codex_ticket_enabled: boolean; excel_bps_enabled: boolean }>({ name: '', concurrency: 1, proxy_url: '', protection_enabled: true, ...props.initialDefaults, enabled: true, codex_ticket_enabled: props.initialDefaults?.codex_ticket_enabled ?? true, excel_bps_enabled: props.initialDefaults?.excel_bps_enabled ?? false })
 const canConsent = computed(() => hasSettlementPolicy(props.config))
 const dailyCooldown = ref(normalizeDailyCooldown(props.initialDefaults?.daily_cooldown))
 const dailyCooldownChanged = ref(false)

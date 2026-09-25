@@ -59,7 +59,7 @@ describe('shared account import', () => {
     await flushPromises()
     expect(importAccounts).toHaveBeenCalledWith({
       sources: [{ name: 'export.json', content: '{"accounts":[]}' }, { name: 'auth.json', content: '{"tokens":{}}' }],
-      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true }
+      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true, excel_bps_enabled: false }
     }, expect.stringMatching(/^shared-import-/))
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
@@ -89,6 +89,19 @@ describe('shared account import', () => {
     expect(importAccounts.mock.calls[1][0].defaults.codex_ticket_enabled).toBe(false)
     expect(importAccounts.mock.calls[1][1]).not.toBe(importAccounts.mock.calls[0][1])
     wrapper.unmount()
+  })
+
+  it('sends Excel / BPS in import defaults, inherits it and hides the ticket switch', async () => {
+    const wrapper = render()
+    await wrapper.get('textarea').setValue('{}')
+    await wrapper.get('#shared-import-excel-bps').trigger('click')
+    expect(wrapper.find('#shared-import-codex-ticket').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(importAccounts.mock.calls[0][0].defaults.excel_bps_enabled).toBe(true)
+    wrapper.unmount()
+    const inherited = render({ enabled: true, concurrency: 1, protection_enabled: true, excel_bps_enabled: true })
+    expect(inherited.get('#shared-import-excel-bps').attributes('aria-checked')).toBe('true')
+    inherited.unmount()
   })
 
   it('blocks duplicate submits and closing while the request is pending', async () => {

@@ -6,6 +6,7 @@ export default {
       disabledHint: 'When disabled, imported values and existing system defaults are preserved. Account protection and tickets are not switched off.',
       importHint: 'New accounts use enabled import defaults; explicit imported values take priority. When disabled, imported values and existing system defaults are preserved.',
       protectionHint: 'Account protection follows the global protection policy. Tickets apply only to supported accounts.',
+      excelBPSHint: 'Excel / BPS applies only to ChatGPT OAuth accounts (not PAT, shadow or agent identity accounts). BPS accounts skip tickets. An explicit openai_excel_bps value in the file takes precedence.',
       proxyMode: 'Default account proxy',
       proxyModes: { preserve: 'Preserve / system default', direct: 'Direct connection', fixed: 'Fixed proxy', random: 'Random proxy pool' },
       regionConfigured: 'Set a default proxy region',

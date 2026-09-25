@@ -39,7 +39,9 @@ func (s *adminServiceImpl) applyAccountImportDefaults(ctx context.Context, input
 		return nil, err
 	}
 	copyAccountImportExtraFamily(prepared.Extra, settings.Extra, accountImportRegionKeys)
-	if isOpenAICodexTicketAccount(&Account{Platform: prepared.Platform, Type: prepared.Type}) {
+	applyAccountImportExcelBPSDefault(&prepared, settings)
+	// BPS 账号不走打票链路，打票默认值不适用。
+	if isOpenAICodexTicketAccount(&Account{Platform: prepared.Platform, Type: prepared.Type, Credentials: prepared.Credentials, Extra: prepared.Extra}) {
 		if prepared.CodexTicketEnabled == nil && !hasAccountImportExtra(prepared.Extra, []string{OpenAICodexTicketEnabledExtraKey}) {
 			prepared.CodexTicketEnabled = cloneAccountValuePointer(&settings.CodexTicketEnabled)
 		}
@@ -47,6 +49,18 @@ func (s *adminServiceImpl) applyAccountImportDefaults(ctx context.Context, input
 		copyAccountImportExtraFamily(prepared.Extra, settings.Extra, accountImportTicketCredentialKeys)
 	}
 	return &prepared, nil
+}
+
+// 只给满足 BPS 条件的 ChatGPT OAuth 账号补开关；导入数据显式填写（含 false）时保留原值。
+func applyAccountImportExcelBPSDefault(input *CreateAccountInput, settings *AccountImportSettings) {
+	if !settings.ExcelBPSEnabled || hasAccountImportExtra(input.Extra, []string{excelBPSExtraKey}) {
+		return
+	}
+	candidate := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials,
+		Extra: map[string]any{excelBPSExtraKey: true}}
+	if candidate.IsExcelBPSEnabled() {
+		input.Extra[excelBPSExtraKey] = true
+	}
 }
 
 func (s *adminServiceImpl) applyAccountImportProxyDefaults(ctx context.Context, input *CreateAccountInput, settings *AccountImportSettings) error {
