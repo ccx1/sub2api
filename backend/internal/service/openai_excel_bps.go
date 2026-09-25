@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,6 +46,22 @@ func newExcelBPSRequest(ctx context.Context, body []byte, token, accountID strin
 		"X-Openai-Internal-Basispoints-Client-Agent-Profile": {"excel"},
 	}
 	return req, nil
+}
+
+// doExcelBPSUpstream sends through the account's native egress chain (random
+// proxy observation, bounded fixed-proxy fallback, TLS profile, request timing)
+// without Codex ticket/header policies or OAuth plugins.
+func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL string, account *Account) (resp *http.Response, err error) {
+	if _, err = resolveMode1TLSProfile(account); err != nil {
+		return nil, err
+	}
+	req = req.WithContext(withOpenAIPluginBypass(req.Context()))
+	defer func() {
+		if observeRandomProxyHTTPResult(req, account, s.accountRepo, resp, err) {
+			err = &randomProxyReportedTransportError{err}
+		}
+	}()
+	return s.doUpstreamWithProxyFallback(req.Context(), req, account, proxyURL)
 }
 
 // BPS deliberately bypasses Codex ticket/cookie injection and OAuth plugins:
@@ -123,9 +140,17 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	SetActualOpenAIUpstreamEndpoint(c, "/basispoints/api/responses")
 	SetOpsUpstreamModel(c, model)
 	sent := time.Now()
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doExcelBPSUpstream(req, proxyURL, account)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 	if err != nil {
+		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		proxyID, proxyName := runtimeProxyErrorAttribution(account, err)
+		setOpsUpstreamError(c, 0, safeErr, "")
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+			ProxyID: proxyID, ProxyName: proxyName, UpstreamURL: basispoints.ResponsesURL,
+			Kind: "request_error", Message: safeErr,
+		})
 		return fail(502, "basispoints_transport_error", "Excel BPS connection failed; request was not replayed")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -216,6 +241,11 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			result.ClientDisconnect = true
 			return result, ctx.Err()
 		}
+		streamErr := err
+		if streamErr == nil {
+			streamErr = errors.New("stream ended before terminal event")
+		}
+		s.recordOpenAIProxyStreamDisconnect(account, streamErr, result.RequestID, resp)
 		MarkResponseCommitted(c)
 		if stream {
 			_, _ = c.Writer.WriteString("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"basispoints_stream_incomplete\",\"message\":\"Upstream stream ended before completion\"}}}\n\n")
@@ -225,6 +255,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		return result, fmt.Errorf("excel BPS stream incomplete")
 	}
+	s.clearOpenAIProxyStreamDisconnect(account, resp)
 	if terminal != "response.completed" {
 		MarkResponseCommitted(c)
 	}

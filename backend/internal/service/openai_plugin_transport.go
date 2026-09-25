@@ -65,6 +65,19 @@ func markOpenAIPluginHandled(ctx context.Context) {
 	}
 }
 
+// openAIPluginBypassKey 标记必须走原生传输的请求（如 Excel/BPS）：插件自带凭据
+// 与目标主机，不能接管这些请求；出口回退、TLS 指纹和计时仍按原生链路执行。
+type openAIPluginBypassKey struct{}
+
+func withOpenAIPluginBypass(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openAIPluginBypassKey{}, true)
+}
+
+func openAIPluginBypassed(ctx context.Context) bool {
+	bypassed, _ := ctx.Value(openAIPluginBypassKey{}).(bool)
+	return bypassed
+}
+
 // codexTicketRequestBound 报告请求是否携带已注入的原生票据快照。
 func (s *OpenAIGatewayService) codexTicketRequestBound(req *http.Request, _ *Account) bool {
 	if req == nil {
