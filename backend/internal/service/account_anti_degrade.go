@@ -38,6 +38,7 @@ const (
 	// an explicit option so operators can reproduce the known-good baseline.
 	AntiDegradeModeLegacy         AntiDegradeMode = "legacy"
 	AntiDegradeModeTLSNode24      AntiDegradeMode = "tls_node24"
+	AntiDegradeModeTLSCodexCLI    AntiDegradeMode = "tls_codex_cli"
 	AntiDegradeModeLowConcurrency AntiDegradeMode = "low_concurrency"
 	// DefaultAntiDegradeMode applies only when selecting a new policy. Existing
 	// persisted policies must keep their original interpretation.

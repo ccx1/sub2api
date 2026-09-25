@@ -59,10 +59,10 @@ func advanceCodexModelQualityCircuit(record *CodexModelQualityRecord, job *codex
 		record.ConsecutiveLowQuality, record.QualityPausedUntil, record.LastLowQualityTicket = 0, nil, ""
 		return
 	}
-	if status.Reason != "capability_failed" || !CodexModelQualityFailure(status) {
+	if !codexQualityAnswerFailure(status.Reason) || !CodexModelQualityFailure(status) {
 		return
 	}
-	identity := codexModelQualityHash([]string{job.ticket.Model, job.ticket.CapturedAt.UTC().Format(time.RFC3339Nano), job.ticket.credentialIdentity()})
+	identity := codexModelQualityHash([]string{job.ticket.Model, job.ticket.lineageCapturedAt().UTC().Format(time.RFC3339Nano), openAICodexTicketAccountBinding(job.account), job.ticket.SessionID, job.ticket.Egress})
 	if record.LastLowQualityTicket == identity {
 		return
 	}

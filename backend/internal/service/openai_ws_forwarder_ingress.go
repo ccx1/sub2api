@@ -151,7 +151,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
-		ctx = withCodexRequestStrategyConnectionScope(ctx, string(ingressMode))
+		ctx = withCodexRequestStrategyConnectionScope(ctx, codexRequestStrategyScopeForIngressMode(string(ingressMode)))
 		switch ingressMode {
 		case OpenAIWSIngressModePassthrough:
 			if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
@@ -924,7 +924,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 	strategyScope := codexRequestStrategyConnectionScope(ctx)
 	if strategyScope == "" {
-		strategyScope = string(ingressMode)
+		strategyScope = codexRequestStrategyScopeForIngressMode(string(ingressMode))
 	}
 	s.applyCodexRouteManagementPolicy(ctx, strategyScope, &baseAcquireReq)
 	defer func() {

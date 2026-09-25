@@ -27,6 +27,7 @@ var antiDegradeStrategyProfiles = []AntiDegradeStrategyProfile{
 	{ID: AntiDegradeMode1, Name: "兼容架构 v3", Description: "稳定设备身份、独立会话、标准传输和并发上限。", Category: "常用", IdentityMode: "device", TLSProfile: "standard", MaxConcurrency: 16, Risk: "中", ApplySupported: true, RequiresOpenAI: true},
 	{ID: AntiDegradeMode2, Name: "完全收敛", Description: "设备、会话和线程全部收敛，使用 Node.js 22 传输；OpenAI OAuth 账号保护的内置默认策略。", Category: "常用", IdentityMode: "full", TLSProfile: "nodejs22", MaxConcurrency: 8, Risk: "高", ApplySupported: true, RequiresOpenAI: true},
 	{ID: AntiDegradeModeTLSNode24, Name: "Node.js 24 对照", Description: "保持设备身份，单独对照 Node.js 24 TLS。", Category: "诊断", IdentityMode: "device", TLSProfile: "nodejs24", MaxConcurrency: 8, Risk: "中", ApplySupported: true, RequiresOpenAI: true, DiagnosticOnly: true},
+	{ID: AntiDegradeModeTLSCodexCLI, Name: "Codex CLI 对照", Description: "保持设备身份，单独对照 Codex macOS CLI 0.155.1 的 TLS 1.2 握手模板。", Category: "诊断", IdentityMode: "device", TLSProfile: "codex_cli", MaxConcurrency: 8, Risk: "中", ApplySupported: true, RequiresOpenAI: true, DiagnosticOnly: true},
 	{ID: AntiDegradeModeLowConcurrency, Name: "低并发稳定", Description: "会话兼容配合低并发，用于排查限流和连接复用。", Category: "诊断", IdentityMode: "session", TLSProfile: "standard", MaxConcurrency: 4, Risk: "低", ApplySupported: true, RequiresOpenAI: true, DiagnosticOnly: true},
 }
 

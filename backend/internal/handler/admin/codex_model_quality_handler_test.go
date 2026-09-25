@@ -81,7 +81,7 @@ func TestCodexModelQualityPolicyHandlerRejectsInvalidJSON(t *testing.T) {
 	for _, body := range []string{
 		"", "null", "[]", `{"unknown":true}`, `{"enabled":true} {}`, `{} null`,
 		`{"enabled":"true"}`, `{"timeout_seconds":4}`, `{"reasoning_effort":"xhigh"}`,
-		`{"enabled":true`, `{"enabled":true}` + strings.Repeat(" ", 4096),
+		`{"enabled":true`, `{"enabled":true}` + strings.Repeat(" ", codexModelQualityBodyLimit),
 	} {
 		before := maps.Clone(repo.values)
 		recorder := qualityPolicyRequest(h, http.MethodPut, body)

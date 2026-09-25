@@ -9,7 +9,7 @@ interface ProtectionAccount {
 
 const managedModes = new Set([
   'legacy', 'mode1', 'mode2', 'minimal_compat', 'session_standard',
-  'tls_node24', 'low_concurrency'
+  'tls_node24', 'tls_codex_cli', 'low_concurrency'
 ])
 
 export function isAccountIdentityManaged(account?: ProtectionAccount | null): boolean {

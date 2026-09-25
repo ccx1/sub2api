@@ -32,7 +32,7 @@ export default {
   compatibleAccounts: '兼容账号（以预览结果为准）',
   unchanged: '沿用账号配置',
   identityModes: { off: '不收敛', device: '仅设备', session: '设备+会话', full: '完全收敛' },
-  tlsModes: { standard: '标准传输', account: '沿用账号配置', nodejs22: 'Node.js 22', nodejs24: 'Node.js 24' },
+  tlsModes: { standard: '标准传输', account: '沿用账号配置', nodejs22: 'Node.js 22', nodejs24: 'Node.js 24', codex_cli: 'Codex CLI（TLS 1.2）' },
   applyTitle: '为指定账号应用策略',
   applyHint: '输入账号 ID 查询当前配置，预览变更后确认应用。可从账号编辑窗口直接进入此处。',
   accountId: '账号 ID',

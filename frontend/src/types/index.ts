@@ -1311,6 +1311,7 @@ export interface Account {
     expiring_count?: number
     next_expires_at?: string
     route_affinity_status?: 'off' | 'unknown' | 'available' | 'unavailable'
+    route_expires_at?: string
     route_affinity_connections?: number
     quality_status?: 'pending' | 'running' | 'passed' | 'suspect' | 'inconclusive' | 'quarantined' | 'skipped' | 'stale'
     quality_reason?: string

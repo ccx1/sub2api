@@ -38,6 +38,33 @@ func cloneCodexTicketInventory(ticket *openAICodexTicket) *openAICodexTicket {
 	return copy
 }
 
+// lineageCapturedAt 返回凭据谱系的稳定采集时间：软复验刷新 CapturedAt 时，
+// OriginCapturedAt 仍指向首次采集时间。旧数据没有该字段时回退到 CapturedAt。
+func (t *openAICodexTicket) lineageCapturedAt() time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	if !t.OriginCapturedAt.IsZero() {
+		return t.OriginCapturedAt
+	}
+	return t.CapturedAt
+}
+
+// sameCodexTicketLineage 判断两张票是否属于同一条凭据谱系。用于质量检测与路由
+// 状态：它们只关心“同一把票是否仍在服务”，而不应被每约 20s 一次的 Cookie 软复验
+// （会改变 credentialIdentity 与 CapturedAt）重置。
+func sameCodexTicketLineage(a, b *openAICodexTicket) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.AccountID != b.AccountID || a.Model != b.Model || a.SessionID != b.SessionID ||
+		a.Egress != b.Egress || a.CredentialMode != b.CredentialMode {
+		return false
+	}
+	origin := a.lineageCapturedAt()
+	return !origin.IsZero() && origin.Equal(b.lineageCapturedAt())
+}
+
 func sameCodexTicket(a, b *openAICodexTicket) bool {
 	return a != nil && b != nil && a.credentialIdentity() == b.credentialIdentity() && a.CapturedAt.Equal(b.CapturedAt)
 }

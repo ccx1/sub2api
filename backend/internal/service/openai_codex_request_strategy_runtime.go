@@ -108,6 +108,16 @@ func withCodexRequestStrategyConnectionScope(ctx context.Context, scope string) 
 	return context.WithValue(ctx, codexRequestStrategyScopeKey{}, strings.TrimSpace(scope))
 }
 
+// codexRequestStrategyScopeForIngressMode 把 WS 入站模式映射为请求策略的生效范围。
+// 只有 passthrough 模式属于透传连接；ctx_pool/shared/dedicated/http_bridge 都由网关
+// 管理上游连接，归入专用连接范围，避免策略范围与 WS 模式名比较而永远不生效。
+func codexRequestStrategyScopeForIngressMode(mode string) string {
+	if strings.TrimSpace(mode) == OpenAIWSIngressModePassthrough {
+		return CodexRequestStrategyScopePassthrough
+	}
+	return CodexRequestStrategyScopeDedicated
+}
+
 func codexRequestStrategyConnectionScope(ctx context.Context) string {
 	if ctx == nil {
 		return ""

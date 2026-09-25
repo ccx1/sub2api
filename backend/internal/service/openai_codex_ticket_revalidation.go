@@ -191,6 +191,8 @@ func codexTicketRevalidationSnapshot(old *openAICodexTicket, jar http.CookieJar,
 		}
 	}
 	copy.RevalidateAt = earlierCodexTicketExpiry(copy.RevalidateAt, copy.ExpiresAt)
+	// 复验刷新采集时间，但凭据谱系保持不变，质量检测与路由状态才不会每轮被重置。
+	copy.OriginCapturedAt = old.lineageCapturedAt()
 	copy.CapturedAt, copy.RevalidatedAt = now, now
 	copy.Verified, copy.VerificationSkipped = true, false
 	if copy.usesCookies() && !copy.cookieUsable(now, cfg) || !copy.ExpiresAt.After(now) {

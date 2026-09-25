@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -30,10 +31,76 @@ func (s *OpenAIGatewayService) EnrichCodexRouteAffinityStatus(ctx context.Contex
 			continue
 		}
 		status.RouteAffinityConnections = counts[status.Model]
+		// __oailb 能解析出 exp 时展示路由租约到期时间；解析不了则不展示。
+		route, routeExpires := codexTicketRouteAffinityFromInventory(account, status.Model)
+		if !routeExpires.IsZero() {
+			status.RouteExpiresAt = &routeExpires
+		}
 		if status.RouteAffinityConnections > 0 {
 			status.RouteAffinityStatus = "available"
+			continue
+		}
+		// 本进程暂无同路由连接时，回退到票据已捕获的路由标记（__oailb/__cflb）。
+		// 有路由标记即视为“已探测/路由已知”，避免长期停留在“待探测”；没有标记则
+		// 说明当前 Cookie 模式未保留路由字段，据此提示而不是一直显示未知。
+		switch route {
+		case "route_known":
+			status.RouteAffinityStatus = "available"
+		case "no_route_cookie":
+			status.RouteAffinityStatus = "unavailable"
 		}
 	}
+}
+
+// codexTicketRouteAffinityFromInventory 从账号库存票据推导路由标记状态：
+// route_known 表示票据携带有效的 __oailb/__cflb 路由指纹；no_route_cookie 表示
+// 是 Cookie 票但不含路由字段（例如被 strip_routing 去掉）；空字符串表示无从判断。
+// 第二个返回值是路由已知时最晚一张票可解析出的 __oailb exp，解析不了为零值。
+func codexTicketRouteAffinityFromInventory(account *Account, model string) (string, time.Time) {
+	if account == nil || account.Extra == nil {
+		return "", time.Time{}
+	}
+	inventory := parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
+	now := time.Now()
+	result := ""
+	var routeExpires time.Time
+	for _, slot := range codexTicketSlots(inventory) {
+		if slot == nil || slot.Revoked || !slot.usesCookies() {
+			continue
+		}
+		if !slot.hardExpiresAt().IsZero() && !slot.hardExpiresAt().After(now) {
+			continue
+		}
+		if codexTicketRouteFingerprint(slot) != "" {
+			result = "route_known"
+			if expires := codexTicketRouteExpiresAt(slot); expires.After(now) && expires.After(routeExpires) {
+				routeExpires = expires
+			}
+		}
+	}
+	if result != "" {
+		return result, routeExpires
+	}
+	if inventory != nil && inventory.usesCookies() {
+		return "no_route_cookie", time.Time{}
+	}
+	return "", time.Time{}
+}
+
+// codexTicketRouteFingerprint 用票据实际会发送的 Cookie 计算路由指纹。
+func codexTicketRouteFingerprint(ticket *openAICodexTicket) string {
+	if ticket == nil {
+		return ""
+	}
+	headers := make(http.Header)
+	u, _ := url.Parse(chatgptCodexURL)
+	req := &http.Request{Header: headers}
+	for _, cookie := range ticket.cookiesForURL(u) {
+		if cookie != nil && openAIWSRouteCookie(cookie.Name) {
+			req.AddCookie(cookie)
+		}
+	}
+	return openAIWSRequestRouteFingerprint(req.Header)
 }
 
 func openAIModelRouteCooling(account *Account, model string) bool {

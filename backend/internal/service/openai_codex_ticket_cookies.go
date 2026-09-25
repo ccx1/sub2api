@@ -88,6 +88,13 @@ func normalizeCodexTicketCookie(cookie http.Cookie, u *url.URL, now time.Time) (
 		seconds := min(int64(cookie.MaxAge), int64((1<<63-1)/time.Second))
 		cookie.Expires, cookie.MaxAge = now.Add(time.Duration(seconds)*time.Second), 0
 	}
+	// __oailb 自带的 exp 是上游声明的路由租约：已过期直接按过期处理；持久 Cookie
+	// 取两者较早者。会话 Cookie 保持会话语义，其兜底期限在快照时再受 exp 约束。
+	if routeExpires := codexOAILBCookieExpiry(&cookie); !routeExpires.IsZero() && cookie.MaxAge >= 0 {
+		if !routeExpires.After(now) || !cookie.Expires.IsZero() {
+			cookie.Expires = earlierCodexTicketExpiry(cookie.Expires, routeExpires)
+		}
+	}
 	cookie.Raw, cookie.RawExpires, cookie.Unparsed = "", "", nil
 	return cookie, true
 }
@@ -291,7 +298,7 @@ func snapshotCodexTicketCookieLifetime(jar http.CookieJar, ttl time.Duration) ([
 		// is no server supplied hard expiry, so the configured Cookie TTL is the
 		// compatibility fallback until a later response supplies one.
 		if deadline.IsZero() {
-			deadline = entry.at.Add(ttl)
+			deadline = earlierCodexTicketExpiry(entry.at.Add(ttl), codexOAILBCookieExpiry(&cookie))
 		}
 		if !deadline.After(now) || !codexTicketCookiePathMatches(cookie.Path, u.Path) {
 			continue
