@@ -486,6 +486,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/request-captures',
+    name: 'AdminRequestCaptures',
+    component: () => import('@/views/admin/RequestCaptureView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, requiresRequestCapture: true, titleKey: 'admin.requestCapture.title' }
+  },
+  {
     path: '/admin/ops',
     name: 'AdminOps',
     component: () => import('@/views/admin/ops/OpsDashboard.vue'),
@@ -597,6 +603,7 @@ const routes: RouteRecordRaw[] = [
     }
   },
   { path: '/admin/smart-ops', redirect: '/admin/account-quality', meta: { requiresAuth: true, requiresAdmin: true } },
+  { path: '/admin/token-guard', name: 'AdminTokenGuard', component: () => import('@/views/admin/ops/TokenGuardView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Credential Guard', titleKey: 'tokenGuard.title', descriptionKey: 'tokenGuard.description' } },
   { path: '/admin/account-ops', name: 'AdminAccountOps', component: () => import('@/views/admin/AccountOpsView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Account operations', titleKey: 'accountOps.title', descriptionKey: 'accountOps.description' } },
   {
     path: '/admin/account-quality',
@@ -986,6 +993,11 @@ router.beforeEach(async (to, _from, next) => {
     // User is authenticated but not admin, redirect to user dashboard
     next('/dashboard')
     return
+  }
+
+  if (requiresAdmin && authStore.isAdmin && to.meta.requiresRequestCapture) {
+    await adminSettingsStore.fetch(true)
+    if (!adminSettingsStore.requestCaptureEnabled) { next('/admin/settings'); return }
   }
 
   if (requiresAdmin && authStore.isAdmin) {

@@ -156,6 +156,8 @@ docs/*
 !docs/copilot-sdk-codex.md
 !docs/cyber-session-blocking.md
 !docs/pelican-scheduled-tests.md
+!docs/request-capture.md
+!docs/account-token-guard.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

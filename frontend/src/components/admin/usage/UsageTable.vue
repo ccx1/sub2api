@@ -252,7 +252,7 @@
                 data-testid="latency-tps"
                 class="font-medium tabular-nums"
                 :class="LATENCY_TEXT_CLASSES[tpsSeverity(usageOutputTps(row) ?? 0)]"
-                :title="row.first_token_ms != null ? t('usage.latencyTpsHint') : t('usage.latencyTpsHintNoFirstToken')"
+                :title="t('usage.latencyTpsHint')"
               >{{ formatUsageOutputTps(row) }}</span>
               <span v-else data-testid="latency-tps" class="text-gray-400 dark:text-gray-500">-</span>
             </div>

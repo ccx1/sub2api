@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
 import UserUsageView from '@/views/user/UsageView.vue'
@@ -196,6 +196,8 @@ const adminMappedLog = {
   user: { email: 'liu.jialin@code-dance.com' },
   account: { name: 'codex-wang' },
   upstream_reasoning_effort: 'xhigh',
+  inbound_endpoint: '/v1/responses',
+  upstream_endpoint: '/basispoints/api/responses',
 }
 
 const sharedPageStubs = {
@@ -215,6 +217,31 @@ const sharedPageStubs = {
 
 function reasoningCellText(wrapper: ReturnType<typeof mount>): string {
   return wrapper.get('[data-testid="reasoning-effort-cell"]').text()
+}
+
+function reasoningColumnToggle() {
+  const button = new DOMWrapper(document.body)
+    .findAll('[role="menuitemcheckbox"]')
+    .find((option) => option.text() === 'Reasoning Effort')
+  if (!button) throw new Error('Reasoning effort toggle is missing from the teleported menu')
+  return button
+}
+
+function mountAdminUsage() {
+  return mount(AdminUsageView, {
+    global: {
+      stubs: {
+        ...sharedPageStubs,
+        UsageFilters: adminFiltersStub,
+        UsageExportProgress: true,
+        UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true,
+        UserTokenRanking: true,
+        OpsErrorLogTable: true,
+        OpsErrorDetailModal: true,
+      },
+    },
+  })
 }
 
 describe('usage reasoning effort page display', () => {
@@ -259,33 +286,35 @@ describe('usage reasoning effort page display', () => {
     expect(wrapper.text()).not.toContain('XHigh')
   })
 
-  it('admin usage page shows requested and mapped effort after the column is enabled', async () => {
-    const wrapper = mount(AdminUsageView, {
-      global: {
-        stubs: {
-          ...sharedPageStubs,
-          UsageFilters: adminFiltersStub,
-          UsageExportProgress: true,
-          UsageCleanupDialog: true,
-          UserBalanceHistoryModal: true,
-          UserTokenRanking: true,
-          OpsErrorLogTable: true,
-          OpsErrorDetailModal: true,
-        },
-      },
-    })
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="reasoning-effort-cell"]').exists()).toBe(false)
-
-    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
-    await wrapper.get('[data-testid="usage-column-toggle-reasoning_effort"]').trigger('click')
+  it('admin usage page shows BPS requested and forwarded effort by default', async () => {
+    const wrapper = mountAdminUsage()
     await flushPromises()
 
     const cell = reasoningCellText(wrapper)
     expect(cell).toContain('Max')
     expect(cell).toContain('XHigh')
     expect(cell).toContain('↳')
+    expect(wrapper.text()).toContain('/basispoints/api/responses')
+  })
+
+  it('retains a saved hidden reasoning column and allows re-enabling the BPS mapping', async () => {
+    const wrapper = mountAdminUsage()
+    await flushPromises()
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    await reasoningColumnToggle().trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="reasoning-effort-cell"]').exists()).toBe(false)
+    wrapper.unmount()
+
+    const reopened = mountAdminUsage()
+    await flushPromises()
+    expect(reopened.find('[data-testid="reasoning-effort-cell"]').exists()).toBe(false)
+    await reopened.get('[data-testid="usage-column-settings"]').trigger('click')
+    await reasoningColumnToggle().trigger('click')
+    await flushPromises()
+    expect(reasoningCellText(reopened)).toContain('Max')
+    expect(reasoningCellText(reopened)).toContain('XHigh')
+    reopened.unmount()
   })
 
   it('admin usage page shows a single value when reasoning effort was not mapped', async () => {
@@ -295,24 +324,7 @@ describe('usage reasoning effort page display', () => {
       pages: 1,
     })
 
-    const wrapper = mount(AdminUsageView, {
-      global: {
-        stubs: {
-          ...sharedPageStubs,
-          UsageFilters: adminFiltersStub,
-          UsageExportProgress: true,
-          UsageCleanupDialog: true,
-          UserBalanceHistoryModal: true,
-          UserTokenRanking: true,
-          OpsErrorLogTable: true,
-          OpsErrorDetailModal: true,
-        },
-      },
-    })
-    await flushPromises()
-
-    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
-    await wrapper.get('[data-testid="usage-column-toggle-reasoning_effort"]').trigger('click')
+    const wrapper = mountAdminUsage()
     await flushPromises()
 
     const cell = reasoningCellText(wrapper)

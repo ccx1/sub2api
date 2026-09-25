@@ -2312,13 +2312,22 @@ func (a *Account) IsExcelBPSEnabled() bool {
 	return enabled
 }
 
-// IsExcelBPSCacheCreationAsInputEnabled controls local cache-creation billing only.
+// IsExcelBPSCacheCreationAsInputEnabled controls local billing and downstream usage.
 // The setting has no effect unless this account uses the Excel/BPS protocol.
 func (a *Account) IsExcelBPSCacheCreationAsInputEnabled() bool {
 	if !a.IsExcelBPSEnabled() {
 		return false
 	}
 	enabled, _ := a.Extra["openai_excel_bps_cache_creation_as_input"].(bool)
+	return enabled
+}
+
+// IsExcelBPSAutoDisableOn403Enabled opts into disabling BPS after a generic 403.
+func (a *Account) IsExcelBPSAutoDisableOn403Enabled() bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	enabled, _ := a.Extra["openai_excel_bps_auto_disable_on_403"].(bool)
 	return enabled
 }
 
