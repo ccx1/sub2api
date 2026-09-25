@@ -24,7 +24,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getCodexModelQualityPolicy, saveCodexModelQualityPolicy, qualityNumericFields, type CodexModelQualityPolicy } from '@/api/admin/codexModelQuality'
+import { getCodexModelQualityPolicy, saveCodexModelQualityPolicy, qualityCanaryLimits, qualityNumericFields, type CodexModelQualityPolicy } from '@/api/admin/codexModelQuality'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import CodexModelQualityFields from './CodexModelQualityFields.vue'
 import CodexModelQualityResults from './CodexModelQualityResults.vue'
@@ -51,8 +51,24 @@ const validationError = computed(() => {
     const priority = form.value?.model_priorities?.[model]
     return priority !== undefined && (!Number.isInteger(priority) || priority < 0 || priority > 100)
   })
-  return invalidPriority ? t('codexModelQuality.invalidPriority', { model: invalidPriority }) : ''
+  if (invalidPriority) return t('codexModelQuality.invalidPriority', { model: invalidPriority })
+  return canaryValidationError(form.value)
 })
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length
+}
+
+function canaryValidationError(policy: CodexModelQualityPolicy): string {
+  const prompt = (policy.canary_prompt ?? '').trim()
+  const expected = policy.canary_expected ?? []
+  if (byteLength(prompt) > qualityCanaryLimits.promptBytes) return t('codexModelQuality.invalidCanaryPrompt', { max: qualityCanaryLimits.promptBytes })
+  if (expected.length > qualityCanaryLimits.expectedCount || expected.some(item => byteLength(item) > qualityCanaryLimits.expectedBytes)) {
+    return t('codexModelQuality.invalidCanaryExpected', { count: qualityCanaryLimits.expectedCount, max: qualityCanaryLimits.expectedBytes })
+  }
+  if (policy.canary_enabled && (!prompt || !expected.length)) return t('codexModelQuality.canaryRequired')
+  return ''
+}
 
 async function load() {
   loading.value = true

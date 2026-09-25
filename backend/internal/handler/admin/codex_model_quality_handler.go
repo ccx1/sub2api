@@ -34,12 +34,16 @@ func (h *SettingHandler) UpdateCodexModelQualityPolicy(c *gin.Context) {
 		return
 	}
 	middleware.SetAuditAction(c, "codex.model_quality.settings.update")
-	middleware.SetAuditExtra(c, map[string]any{"enabled": p.Enabled, "timeout_seconds": p.TimeoutSeconds, "max_ttl_percent": p.MaxTTLPercent})
+	middleware.SetAuditExtra(c, map[string]any{"enabled": p.Enabled, "timeout_seconds": p.TimeoutSeconds, "max_ttl_percent": p.MaxTTLPercent, "canary_enabled": p.CanaryEnabled})
 	response.Success(c, updated)
 }
 
+// codexModelQualityBodyLimit leaves room for the optional canary question and
+// expected answers alongside model priorities.
+const codexModelQualityBodyLimit = 16 << 10
+
 func decodeCodexModelQuality(c *gin.Context, value any) bool {
-	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, codexModelQualityBodyLimit))
 	if err != nil || !bytes.HasPrefix(bytes.TrimSpace(body), []byte("{")) {
 		response.BadRequest(c, "Expected one JSON object")
 		return false

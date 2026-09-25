@@ -75,7 +75,8 @@ func (h *CodexTicketHistory) retainCurrentQualityReceipts(account *Account, now 
 }
 
 func codexTicketConfirmedQualityFailure(reason string) bool {
-	return reason == "model_quality_capability_failed" || reason == "model_quality_model_mismatch"
+	return reason == "model_quality_capability_failed" || reason == "model_quality_canary_failed" ||
+		reason == "model_quality_model_mismatch"
 }
 
 func codexTicketHistoryInvalidations(account *Account) ([]CodexTicketInvalidation, error) {

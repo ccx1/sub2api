@@ -146,14 +146,15 @@ func codexModelQualityDisplayStatus(record *CodexModelQualityRecord, account *Ac
 		status.Status, status.Reason = "stale", "stale"
 		return status
 	}
-	changed := status.TicketCapturedAt == nil || !ticket.CapturedAt.Equal(*status.TicketCapturedAt)
+	lineage := ticket.lineageCapturedAt()
+	changed := status.TicketCapturedAt == nil || !lineage.Equal(*status.TicketCapturedAt)
 	status.BaselineReused = false
 	if changed {
-		next := ticket.CapturedAt.Add(time.Duration(policy.ReplacementCheckDelaySeconds) * time.Second)
+		next := lineage.Add(time.Duration(policy.ReplacementCheckDelaySeconds) * time.Second)
 		if status.Status != "passed" && status.NextCheckAt != nil && status.NextCheckAt.After(next) {
 			next = *status.NextCheckAt
 		}
-		captured, expires := ticket.CapturedAt, ticket.effectiveExpiresAt(cfg)
+		captured, expires := lineage, ticket.effectiveExpiresAt(cfg)
 		status.Status, status.Reason, status.NextCheckAt = "pending", "not_checked", &next
 		status.TicketCapturedAt, status.TicketExpiresAt = &captured, &expires
 		status.CapabilityScore, status.FingerprintCandidate, status.FingerprintProbability, status.FingerprintSimilarity = nil, "", nil, nil
@@ -163,6 +164,47 @@ func codexModelQualityDisplayStatus(record *CodexModelQualityRecord, account *Ac
 		status.Status, status.Reason = "inconclusive", "timeout"
 	}
 	return status
+}
+
+// codexModelQualityHorizon 返回质量检测可用于计算预算的服务寿命上限。
+//
+// Cookie 票的会话 Cookie 通常只有约 20s 的软有效期，但后台复验会在其到期前持续
+// 续期（RefreshStrategy 非 replace 时）。若直接用这 ~20s 窗口计算预算，会永远得到
+// 0（insufficient_ttl），检测实际上从不执行。这里对会被续期的 Cookie 票，按可续期
+// 寿命（配置 TTL，且不超过 STATE 与持久 Cookie 的真实硬期限）计算，而不是那一小段
+// 会话窗口；对不续期或非 Cookie 票仍沿用真实硬期限。
+func codexModelQualityHorizon(ticket *openAICodexTicket, cfg config.OpenAICodexTicketConfig, now time.Time) time.Time {
+	hard := ticket.effectiveExpiresAt(cfg)
+	if ticket == nil || !ticket.usesCookies() || cfg.RefreshStrategy == config.CodexTicketRefreshReplace {
+		return hard
+	}
+	renew := now.Add(time.Duration(cfg.TTLSeconds) * time.Second)
+	renew = earlierCodexTicketExpiry(renew, ticket.StateExpiresAt)
+	// 只受持久（非会话）Cookie 的真实到期约束；会话 Cookie 靠复验续期，不设上限。
+	sessions := make(map[string]bool, len(ticket.CookieSessionKeys))
+	for _, key := range ticket.CookieSessionKeys {
+		sessions[key] = true
+	}
+	for _, cookie := range ticket.Cookies {
+		if cookie == nil || cookie.Expires.IsZero() || sessions[codexTicketCookieKey(*cookie)] {
+			continue
+		}
+		renew = earlierCodexTicketExpiry(renew, cookie.Expires)
+	}
+	if renew.After(hard) {
+		return renew
+	}
+	return hard
+}
+
+// codexModelQualityRouteDeadline 让检测不跨过被测票据的路由租约（__oailb exp）：
+// 租约到期后冻结的 __oailb 不再发送，请求会落到其它路由，结论不再对应这张票。
+// 会话型 __oailb 不参与 horizon 计算，因此单独约束；解析不出 exp 时保持原期限。
+func codexModelQualityRouteDeadline(ticket *openAICodexTicket, until time.Time) time.Time {
+	if expires := codexTicketRouteExpiresAt(ticket); !expires.IsZero() && expires.Add(-time.Second).Before(until) {
+		return expires.Add(-time.Second)
+	}
+	return until
 }
 
 func codexModelQualityBudget(now, expires time.Time, policy CodexModelQualityPolicy) time.Duration {
@@ -186,7 +228,7 @@ func (s *OpenAIGatewayService) codexModelQualityCurrent(ctx context.Context, job
 		return false
 	}
 	nowJob, _ := s.prepareCodexModelQuality(ctx, account, job.ticket.Model, job.policy)
-	return nowJob != nil && nowJob.scope == job.scope && sameCodexTicket(nowJob.ticket, job.ticket)
+	return nowJob != nil && nowJob.scope == job.scope && sameCodexTicketLineage(nowJob.ticket, job.ticket)
 }
 
 func (s *OpenAIGatewayService) codexModelQualityCurrentAccount(ctx context.Context, job *codexModelQualityJob) *Account {
@@ -224,7 +266,7 @@ func (s *OpenAIGatewayService) codexModelQualityControlsCurrent(ctx context.Cont
 
 func qualityStatusForJob(job *codexModelQualityJob) CodexModelQualityStatus {
 	expires := job.ticket.effectiveExpiresAt(job.config)
-	captured := job.ticket.CapturedAt
+	captured := job.ticket.lineageCapturedAt()
 	return CodexModelQualityStatus{AccountID: job.account.ID, Model: job.ticket.Model, Status: "running",
 		Reason: "checking", ModelIdentity: "unknown", Source: job.source, TicketCapturedAt: &captured, TicketExpiresAt: &expires}
 }

@@ -26,6 +26,12 @@ type CodexModelQualityPolicy struct {
 	// ModelPriorities controls automatic quality-check order. Larger values
 	// run first; models absent from the map keep the configured model order.
 	ModelPriorities map[string]int `json:"model_priorities,omitempty"`
+	// Canary is an optional administrator-defined question. The answer must
+	// contain one of CanaryExpected (case/whitespace-insensitive); it runs in
+	// addition to the capability and fingerprint checks.
+	CanaryEnabled  bool     `json:"canary_enabled"`
+	CanaryPrompt   string   `json:"canary_prompt,omitempty"`
+	CanaryExpected []string `json:"canary_expected,omitempty"`
 }
 
 // UnmarshalJSON keeps requests and stored policies from before the per-account

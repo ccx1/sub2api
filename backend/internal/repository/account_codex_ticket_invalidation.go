@@ -38,7 +38,7 @@ func prepareCodexTicketInvalidation(key string, used, expected codexTicketRevoca
 		return nil, errors.New("codex ticket invalidation does not match the sent ticket")
 	}
 	switch event.Reason {
-	case "response_model_mismatch", "response_ticket_rejected", "cookie_changed", "model_quality_capability_failed", "model_quality_model_mismatch", "model_quality_quarantine_persist_failed":
+	case "response_model_mismatch", "response_ticket_rejected", "cookie_changed", "model_quality_capability_failed", "model_quality_canary_failed", "model_quality_model_mismatch", "model_quality_quarantine_persist_failed":
 	default:
 		event.Reason = "unknown"
 	}

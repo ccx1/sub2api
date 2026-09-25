@@ -40,15 +40,44 @@
       <input v-model="policy.fingerprint_enabled" type="checkbox" data-testid="quality-fingerprint" class="mt-1 h-4 w-4" />
       <span>{{ t('codexModelQuality.fingerprint') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.fingerprintHint') }}</span></span>
     </label>
+    <label class="flex items-start gap-3 text-sm text-gray-900 dark:text-white">
+      <input v-model="policy.canary_enabled" type="checkbox" data-testid="quality-canary" class="mt-1 h-4 w-4" />
+      <span>{{ t('codexModelQuality.canary') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.canaryHint') }}</span></span>
+    </label>
+    <div v-if="policy.canary_enabled" class="grid gap-4 sm:grid-cols-2" data-testid="quality-canary-fields">
+      <label class="min-w-0 space-y-1">
+        <span class="input-label">{{ t('codexModelQuality.canaryPrompt') }}</span>
+        <textarea v-model="policy.canary_prompt" rows="4" class="input w-full" data-testid="quality-canary-prompt" :placeholder="t('codexModelQuality.canaryPromptPlaceholder')"></textarea>
+      </label>
+      <label class="min-w-0 space-y-1">
+        <span class="input-label">{{ t('codexModelQuality.canaryExpected') }}</span>
+        <textarea :value="canaryExpectedText" @input="setCanaryExpected" rows="4" class="input w-full" data-testid="quality-canary-expected" :placeholder="t('codexModelQuality.canaryExpectedPlaceholder')"></textarea>
+        <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.canaryExpectedHint', { count: qualityCanaryLimits.expectedCount }) }}</span>
+      </label>
+    </div>
   </fieldset>
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { qualityNumericFields, type CodexModelQualityPolicy } from '@/api/admin/codexModelQuality'
+import { qualityCanaryLimits, qualityNumericFields, type CodexModelQualityPolicy } from '@/api/admin/codexModelQuality'
 defineProps<{ disabled: boolean; models: string[] }>()
 const policy = defineModel<CodexModelQualityPolicy>({ required: true })
 const { t } = useI18n()
+
+// 每行一个期望答案；输入框保留原文，策略里只写入非空行，后端再去重。
+const canaryExpectedText = ref('')
+const canaryExpectedLines = (text: string) => text.split('\n').map(item => item.trim()).filter(Boolean)
+watch(() => policy.value.canary_expected, expected => {
+  if ((expected ?? []).join('\n') !== canaryExpectedLines(canaryExpectedText.value).join('\n')) canaryExpectedText.value = (expected ?? []).join('\n')
+}, { immediate: true })
+
+function setCanaryExpected(event: Event) {
+  canaryExpectedText.value = (event.target as HTMLTextAreaElement).value
+  const expected = canaryExpectedLines(canaryExpectedText.value)
+  policy.value.canary_expected = expected.length ? expected : undefined
+}
 
 function priorityValue(model: string): number | '' {
   return policy.value.model_priorities?.[model] ?? ''

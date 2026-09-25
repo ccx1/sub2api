@@ -27,7 +27,7 @@ func (r *accountRepository) RecordCodexTicketAttempt(ctx context.Context, id int
 
 func (r *accountRepository) MarkCodexTicketAttemptFailed(ctx context.Context, id int64, attemptID, model string, capturedAt time.Time, reason string) error {
 	if id <= 0 || attemptID == "" || model == "" || capturedAt.IsZero() ||
-		(reason != "model_quality_capability_failed" && reason != "model_quality_model_mismatch") {
+		(reason != "model_quality_capability_failed" && reason != "model_quality_canary_failed" && reason != "model_quality_model_mismatch") {
 		return errors.New("invalid codex ticket attempt failure")
 	}
 	tx, err := r.client.Tx(ctx)

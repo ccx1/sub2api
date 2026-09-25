@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
@@ -470,12 +471,19 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		extensions = append(extensions, &utls.UtlsGREASEExtension{})
 	}
 
+	maxVersion := uint16(utls.VersionTLS12)
+	if slices.Contains(extOrder, 43) {
+		maxVersion = utls.VersionTLS13
+	}
 	return &utls.ClientHelloSpec{
 		CipherSuites:       cipherSuites,
 		CompressionMethods: []uint8{0}, // null compression only (standard)
 		Extensions:         extensions,
-		TLSVersMax:         utls.VersionTLS13,
-		TLSVersMin:         utls.VersionTLS10,
+		// Without supported_versions (43) only TLS 1.2 can be negotiated; a
+		// local 1.3 maximum would make utls reject the server's RFC 8446
+		// downgrade sentinel and fail the handshake.
+		TLSVersMax: maxVersion,
+		TLSVersMin: utls.VersionTLS10,
 	}
 }
 

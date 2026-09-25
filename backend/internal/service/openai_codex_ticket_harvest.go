@@ -200,6 +200,8 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 			ticket.IssuedAt, ticket.StateExpiresAt = time.Time{}, time.Time{}
 		}
 	}
+	// 新采集的票是谱系起点；之后的软复验会刷新 CapturedAt，但谱系时间保持不变。
+	ticket.OriginCapturedAt = ticket.CapturedAt
 	attempt.Reason = "publish_failed"
 	if s.storeOpenAICodexTicket(ctx, input.Account, ticket) {
 		attempt.Success, attempt.Reason = true, "verified"
@@ -211,7 +213,15 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 		if verified {
 			ReportRandomProxySuccess(ctx, input.Account, s.accountRepo)
 		}
-		logger.L().Info("openai_codex_ticket published", zap.Int64("account_id", account.ID), zap.String("model", model), zap.Bool("business_verified", verified))
+		fields := []zap.Field{zap.Int64("account_id", account.ID), zap.String("model", model), zap.Bool("business_verified", verified)}
+		// 只记录 __oailb 解码后的声明与到期时间，不记录原始 Cookie。
+		if claims := codexOAILBClaimsForLog(ticket); claims != nil {
+			fields = append(fields, zap.Any("oailb_claims", claims))
+		}
+		if routeExpires := codexTicketRouteExpiresAt(ticket); !routeExpires.IsZero() {
+			fields = append(fields, zap.Time("route_expires_at", routeExpires))
+		}
+		logger.L().Info("openai_codex_ticket published", fields...)
 	}
 }
 

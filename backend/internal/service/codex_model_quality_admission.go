@@ -30,7 +30,7 @@ func CodexModelQualityFailure(status CodexModelQualityStatus) bool {
 	// Numeric fingerprints are an auxiliary similarity signal, not an identity
 	// proof.  A fingerprint mismatch remains visible as a suspected anomaly,
 	// but cannot pause a model or revoke a ticket by itself.
-	confirmed := status.Reason == "capability_failed" || status.Reason == "model_mismatch" ||
+	confirmed := codexQualityAnswerFailure(status.Reason) || status.Reason == "model_mismatch" ||
 		status.Reason == "quarantine_persist_failed"
 	return confirmed && (status.Status == "suspect" || status.Status == "quarantined")
 }
@@ -101,8 +101,15 @@ func (s *OpenAIGatewayService) codexModelQualityPaused(ctx context.Context, acco
 	if ticket == nil {
 		return true
 	}
-	if record.Status.TicketCapturedAt != nil && !ticket.CapturedAt.Equal(*record.Status.TicketCapturedAt) {
+	if record.Status.TicketCapturedAt != nil && !ticket.lineageCapturedAt().Equal(*record.Status.TicketCapturedAt) {
 		return false
 	}
 	return record.Scope == codexModelQualityScope(currentAccount, ticket, cfg)
+}
+
+// codexQualityAnswerFailure reports failures proven by wrong answers (capability
+// recheck or administrator canary). These always revoke the ticket and count
+// toward the low-quality circuit.
+func codexQualityAnswerFailure(reason string) bool {
+	return reason == "capability_failed" || reason == "canary_failed"
 }

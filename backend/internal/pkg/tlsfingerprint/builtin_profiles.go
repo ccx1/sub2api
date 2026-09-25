@@ -24,6 +24,16 @@ func BuiltinProfile(name string) *Profile {
 			SupportedVersions: []uint16{0x0304, 0x0303}, KeyShareGroups: []uint16{29}, PSKModes: []uint16{1},
 			Extensions: []uint16{0, 11, 10, 35, 16, 22, 23, 13, 43, 45, 51},
 		}
+	case "codex_cli":
+		// Codex macOS CLI 0.155.1 capture from the codex-tls-transport plugin:
+		// TLS 1.2 only, no ALPN/supported_versions/key_share extensions.
+		p = Profile{
+			Name:         "Codex macOS CLI 0.155.1 compatibility",
+			CipherSuites: []uint16{255, 49196, 49195, 49188, 49187, 49162, 49161, 49160, 49200, 49199, 49192, 49191, 49172, 49171, 49170, 157, 156, 61, 60, 53, 47, 10},
+			Curves:       []uint16{23, 24, 25}, PointFormats: []uint16{0},
+			SignatureAlgorithms: []uint16{1025, 513, 1281, 1537, 1027, 515, 1283, 1539},
+			Extensions:          []uint16{0, 10, 11, 13, 5, 18, 23},
+		}
 	default:
 		return nil
 	}

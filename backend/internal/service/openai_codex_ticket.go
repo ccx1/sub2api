@@ -60,7 +60,11 @@ type openAICodexTicket struct {
 	CookieSessionKeys    []string       `json:"cookie_session_keys,omitempty"`
 	Length               int            `json:"length"`
 	CapturedAt           time.Time      `json:"captured_at"`
-	ExpiresAt            time.Time      `json:"expires_at"`
+	// OriginCapturedAt 记录同一条凭据谱系首次采集的时间。软复验会刷新 CapturedAt
+	// （Cookie 票每约 20s 一次），但谱系保持不变；质量检测与路由状态据此判定，
+	// 避免每轮复验都把已完成的检测重置为“未检测”。
+	OriginCapturedAt time.Time `json:"origin_captured_at,omitempty"`
+	ExpiresAt        time.Time `json:"expires_at"`
 	// IssuedAt and StateExpiresAt are derived from the STATE protocol metadata.
 	// RevalidateAt is the configured soft refresh deadline; it must not make a
 	// still-live STATE unusable.
@@ -166,6 +170,8 @@ type OpenAICodexTicketStatus struct {
 	QualityPaused            bool   `json:"quality_paused,omitempty"`
 	RouteAffinityStatus      string `json:"route_affinity_status,omitempty"`
 	RouteAffinityConnections int    `json:"route_affinity_connections,omitempty"`
+	// RouteExpiresAt 来自 __oailb 解码后的 exp，仅在能解析时返回。
+	RouteExpiresAt *time.Time `json:"route_expires_at,omitempty"`
 }
 
 func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) []OpenAICodexTicketStatus {

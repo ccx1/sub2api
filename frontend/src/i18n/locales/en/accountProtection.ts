@@ -32,7 +32,7 @@ export default {
   compatibleAccounts: 'Compatible accounts (confirmed by preview)',
   unchanged: 'Keep account settings',
   identityModes: { off: 'Disabled', device: 'Device only', session: 'Device + session', full: 'Full convergence' },
-  tlsModes: { standard: 'Standard transport', account: 'Keep account settings', nodejs22: 'Node.js 22', nodejs24: 'Node.js 24' },
+  tlsModes: { standard: 'Standard transport', account: 'Keep account settings', nodejs22: 'Node.js 22', nodejs24: 'Node.js 24', codex_cli: 'Codex CLI (TLS 1.2)' },
   applyTitle: 'Apply a strategy to an account',
   applyHint: 'Enter an account ID to inspect its current settings, preview the changes, and apply. The account editor links directly here.',
   accountId: 'Account ID',

@@ -46,6 +46,20 @@ func validateCodexModelQualityPolicy(p CodexModelQualityPolicy) error {
 	if len(p.ModelPriorities) > 128 {
 		return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", "model_priorities contains too many models")
 	}
+	if len(p.CanaryPrompt) > codexQualityCanaryPromptMaxBytes {
+		return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", fmt.Sprintf("canary_prompt must be at most %d bytes", codexQualityCanaryPromptMaxBytes))
+	}
+	if len(p.CanaryExpected) > codexQualityCanaryExpectedMax {
+		return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", fmt.Sprintf("canary_expected must contain at most %d answers", codexQualityCanaryExpectedMax))
+	}
+	for _, expected := range p.CanaryExpected {
+		if normalizeCodexQualityCanaryText(expected) == "" || len(expected) > codexQualityCanaryExpectedMaxBytes {
+			return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", fmt.Sprintf("canary_expected entries must be non-empty and at most %d bytes", codexQualityCanaryExpectedMaxBytes))
+		}
+	}
+	if p.CanaryEnabled && (strings.TrimSpace(p.CanaryPrompt) == "" || len(p.CanaryExpected) == 0) {
+		return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", "canary_prompt and canary_expected are required when canary is enabled")
+	}
 	for model, priority := range p.ModelPriorities {
 		if model == "" || model != strings.TrimSpace(model) || len(model) > 160 {
 			return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", "model_priorities contains an invalid model")
@@ -79,6 +93,7 @@ func (s *SettingService) GetCodexModelQualityPolicy(ctx context.Context) (CodexM
 }
 
 func (s *SettingService) UpdateCodexModelQualityPolicy(ctx context.Context, p CodexModelQualityPolicy) (CodexModelQualityPolicy, error) {
+	p = normalizeCodexModelQualityCanary(p)
 	if err := validateCodexModelQualityPolicy(p); err != nil {
 		return p, err
 	}
@@ -92,4 +107,29 @@ func (s *SettingService) UpdateCodexModelQualityPolicy(ctx context.Context, p Co
 		err = s.settingRepo.SetMultiple(ctx, map[string]string{SettingKeyCodexModelQuality: string(raw)})
 	}
 	return p, err
+}
+
+const (
+	codexQualityCanaryPromptMaxBytes   = 4000
+	codexQualityCanaryExpectedMax      = 5
+	codexQualityCanaryExpectedMaxBytes = 200
+)
+
+// normalizeCodexModelQualityCanary trims the canary question and removes blank
+// or duplicate expected answers (compared after answer normalization).
+func normalizeCodexModelQualityCanary(p CodexModelQualityPolicy) CodexModelQualityPolicy {
+	p.CanaryPrompt = strings.TrimSpace(p.CanaryPrompt)
+	var expected []string
+	seen := make(map[string]bool, len(p.CanaryExpected))
+	for _, value := range p.CanaryExpected {
+		value = strings.TrimSpace(value)
+		key := normalizeCodexQualityCanaryText(value)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		expected = append(expected, value)
+	}
+	p.CanaryExpected = expected
+	return p
 }

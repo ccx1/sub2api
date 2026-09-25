@@ -281,12 +281,12 @@ func codexModelQualityDue(previous *CodexModelQualityRecord, job *codexModelQual
 		return true
 	}
 	if previous != nil && previous.Status.Status == "passed" && previous.Status.TicketCapturedAt != nil &&
-		previous.Status.TicketCapturedAt.Equal(job.ticket.CapturedAt) {
+		previous.Status.TicketCapturedAt.Equal(job.ticket.lineageCapturedAt()) {
 		// A ticket that already passed quality is valid for its whole lifetime;
 		// do not spend another upstream request on periodic rechecks.
 		return false
 	}
-	if now.Before(job.ticket.CapturedAt.Add(time.Duration(job.policy.ReplacementCheckDelaySeconds) * time.Second)) {
+	if now.Before(job.ticket.lineageCapturedAt().Add(time.Duration(job.policy.ReplacementCheckDelaySeconds) * time.Second)) {
 		return false
 	}
 	if previous == nil {
@@ -295,7 +295,7 @@ func codexModelQualityDue(previous *CodexModelQualityRecord, job *codexModelQual
 	if previous.Status.Status != "passed" && previous.Status.NextCheckAt != nil && now.Before(*previous.Status.NextCheckAt) {
 		return false
 	}
-	if previous.Status.TicketCapturedAt != nil && !previous.Status.TicketCapturedAt.Equal(job.ticket.CapturedAt) {
+	if previous.Status.TicketCapturedAt != nil && !previous.Status.TicketCapturedAt.Equal(job.ticket.lineageCapturedAt()) {
 		return true
 	}
 	if previous.Scope != job.scope || previous.Policy != job.policyHash {

@@ -16,7 +16,12 @@ export interface CodexModelQualityPolicy {
   fingerprint_enabled: boolean
   reasoning_effort: 'low' | 'medium' | 'high'
   model_priorities?: Record<string, number>
+  canary_enabled?: boolean
+  canary_prompt?: string
+  canary_expected?: string[]
 }
+
+export const qualityCanaryLimits = { promptBytes: 4000, expectedCount: 5, expectedBytes: 200 }
 
 export interface ModelQualityStatus {
   account_id: number

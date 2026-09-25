@@ -57,14 +57,17 @@
       >
         <span>{{ routeAffinityLabel(ticket) }}</span>
         <span v-if="validCount(ticket.route_affinity_connections)" class="tabular-nums" data-testid="route-affinity-connections">{{ t('admin.accounts.openai.codexTicketPoolRouteAffinityConnections', { count: ticket.route_affinity_connections }) }}</span>
+        <span v-if="validExpiry(ticket.route_expires_at)" class="tabular-nums" :title="formatDateTime(ticket.route_expires_at)" data-testid="route-expires">{{ t('admin.accounts.openai.codexTicketPoolRouteExpires', { time: shortExpiry(ticket.route_expires_at!) }) }}</span>
       </div>
       <div
         v-if="ticket.quality_status"
         class="flex flex-wrap items-center gap-1 text-[10px]"
         data-testid="ticket-quality-status"
         :class="qualityStatusClass(ticket.quality_status)"
+        :title="qualityReasonText(ticket.quality_reason)"
       >
         <span>{{ qualityStatusLabel(ticket.quality_status) }}</span>
+        <span v-if="qualityReasonText(ticket.quality_reason)" class="text-gray-500 dark:text-gray-400" data-testid="ticket-quality-reason">· {{ qualityReasonText(ticket.quality_reason) }}</span>
         <span v-if="ticket.quality_paused">· {{ t('admin.accounts.openai.codexTicketQualityPaused') }}</span>
       </div>
     </div>
@@ -192,6 +195,15 @@ function qualityStatusClass(status: NonNullable<TicketStatus['quality_status']>)
   if (status === 'quarantined' || status === 'suspect') return 'font-medium text-rose-600 dark:text-rose-400'
   if (status === 'running') return 'text-cyan-600 dark:text-cyan-400'
   return 'text-gray-500 dark:text-gray-400'
+}
+
+function qualityReasonText(reason?: string) {
+  const key = (reason ?? '').trim()
+  if (!key) return undefined
+  const path = `admin.accounts.openai.codexTicketQualityReasons.${key}`
+  const label = t(path)
+  // vue-i18n returns the path itself when the key is missing; show the raw reason then.
+  return label === path ? key : label
 }
 
 function formatRemaining(seconds: number) {

@@ -19,8 +19,13 @@ func (s *OpenAIGatewayService) executeCodexModelQuality(parent context.Context, 
 	}()
 	started := time.Now()
 	status := qualityStatusForJob(job)
-	budget := codexModelQualityBudget(started, *status.TicketExpiresAt, job.policy)
-	until := started.Add(budget)
+	// Cookie 票的会话窗口只有约 20s，但后台复验会持续续期。预算按可续期寿命计算，
+	// 否则会永远得到 0（insufficient_ttl），检测从不执行。
+	budget := codexModelQualityBudget(started, codexModelQualityHorizon(job.ticket, job.config, started), job.policy)
+	until := codexModelQualityRouteDeadline(job.ticket, started.Add(budget))
+	if budget > 0 && until.Sub(started) < 2*time.Second {
+		budget = 0
+	}
 	if !job.leaseExpiresAt.IsZero() && job.leaseExpiresAt.Add(-time.Second).Before(until) {
 		until = job.leaseExpiresAt.Add(-time.Second)
 	}
@@ -68,7 +73,7 @@ func (s *OpenAIGatewayService) watchCodexModelQuality(ctx context.Context, cance
 
 func (s *OpenAIGatewayService) finishCodexModelQuality(job *codexModelQualityJob, store CodexModelQualityStore, status CodexModelQualityStatus, started time.Time) {
 	deadline := time.Now().Add(5 * time.Second)
-	if expires := job.ticket.effectiveExpiresAt(job.config); expires.Before(deadline) {
+	if expires := codexModelQualityHorizon(job.ticket, job.config, time.Now()); expires.Before(deadline) {
 		deadline = expires
 	}
 	if !job.leaseExpiresAt.IsZero() && job.leaseExpiresAt.Add(-time.Second).Before(deadline) {
@@ -86,7 +91,7 @@ func (s *OpenAIGatewayService) finishCodexModelQuality(job *codexModelQualityJob
 		status.Status, status.Reason = "stale", "stale"
 	}
 	delay := job.policy.RetryIntervalSeconds
-	if status.Status == "passed" || status.Reason == "capability_failed" || status.Reason == "model_mismatch" {
+	if status.Status == "passed" || codexQualityAnswerFailure(status.Reason) || status.Reason == "model_mismatch" {
 		delay = job.policy.ReplacementCheckDelaySeconds
 	}
 	next := now.Add(time.Duration(delay) * time.Second)
@@ -94,7 +99,7 @@ func (s *OpenAIGatewayService) finishCodexModelQuality(job *codexModelQualityJob
 	if status.Status == "passed" {
 		status.NextCheckAt = nil
 	}
-	quarantine := CodexModelQualityFailure(status) && (status.Reason == "capability_failed" || job.policy.QuarantineOnFailure) && !job.diagnostic
+	quarantine := CodexModelQualityFailure(status) && (codexQualityAnswerFailure(status.Reason) || job.policy.QuarantineOnFailure) && !job.diagnostic
 	if quarantine {
 		s.quarantineCodexModelQuality(ctx, job, store, status)
 	} else if !saveCodexModelQualityRecord(ctx, store, job, s.codexModelQualityRecord(ctx, store, job, status, now)) {
@@ -160,6 +165,24 @@ func (s *OpenAIGatewayService) quarantineCodexModelQuality(ctx context.Context, 
 	record.Status = status
 	_ = saveCodexModelQualityRecord(ctx, store, job, &record)
 	s.markCodexQualityTicketFailed(ctx, job, used.Invalidation.Reason)
+	// 质量不合格且开启了路由亲和时，对该模型路由施加冷却，促使下一次打票
+	// 重新探测路由；未开启路由亲和则跳过，保持三段能力相互独立。
+	s.cooldownCodexRouteOnQualityFailure(ctx, job)
+}
+
+// cooldownCodexRouteOnQualityFailure 在票据被隔离后按策略触发路由冷却。
+// 仅当请求策略开启且 RouteAffinityMode 非 off 时生效，避免在未使用路由亲和
+// 的部署上产生额外调度副作用。撤票已在隔离流程内完成，此处只补充“重新探测
+// 路由”的串行环节，并复用熔断阈值/冷却时间作为防死循环护栏。
+func (s *OpenAIGatewayService) cooldownCodexRouteOnQualityFailure(ctx context.Context, job *codexModelQualityJob) {
+	if s == nil || job == nil || job.diagnostic {
+		return
+	}
+	policy, enabled := s.codexRequestStrategyPolicyForScope(context.WithoutCancel(ctx), CodexRequestStrategyScopeDedicated)
+	if !enabled || policy.RouteAffinityMode == CodexRouteAffinityOff {
+		return
+	}
+	s.pauseOpenAIModelForRouteAffinity(ctx, job.account, job.ticket.Model, policy.RouteFailureCooldownSeconds)
 }
 
 func (s *OpenAIGatewayService) markCodexQualityTicketFailed(ctx context.Context, job *codexModelQualityJob, reason string) {
@@ -201,6 +224,11 @@ func (s *OpenAIGatewayService) evaluateCodexModelQuality(ctx context.Context, jo
 		return status
 	}
 	status.Status, status.Reason = "passed", "capability_passed"
+	if job.policy.CanaryEnabled {
+		if status = s.evaluateCodexQualityCanary(ctx, job, status); status.Status != "passed" {
+			return status
+		}
+	}
 	if !job.policy.FingerprintEnabled {
 		return status
 	}
