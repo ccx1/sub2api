@@ -18,7 +18,7 @@ type codexTicketAccountReloader interface {
 
 // 候选票必须完成模型检查；业务出口复验由管理端策略控制。
 func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, account *Account, model string) {
-	if s == nil || s.httpUpstream == nil || !s.openAICodexTicketProbeAllowed(ctx, account, "") {
+	if s == nil || s.httpUpstream == nil || !isOpenAICodexTicketAccount(account, model) || !s.openAICodexTicketProbeAllowed(ctx, account, "") {
 		return
 	}
 	if s.codexModelQualityCircuitPaused(ctx, account, model) {
@@ -40,7 +40,7 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Context, account *Account, model string) {
 	ctx = withCodexTicketHarvestProbe(ctx)
 	account = s.reloadOpenAICodexTicketProbeAccount(ctx, account)
-	if account == nil {
+	if account == nil || !isOpenAICodexTicketAccount(account, model) {
 		return
 	}
 	cfg := s.openAICodexTicketConfigForAccount(ctx, account)

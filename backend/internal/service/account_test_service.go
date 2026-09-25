@@ -795,18 +795,18 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
 
+	// Default to openai.DefaultTestModel for OpenAI testing.
+	testModelID := modelID
+	if testModelID == "" {
+		testModelID = openai.DefaultTestModel
+	}
+
 	// Excel/BPS accounts must use the same gateway path as user Responses
 	// requests. The legacy account-test probe hard-codes ChatGPT Codex and
 	// silently bypasses the account's protocol toggle, producing misleading
 	// quality-test results.
-	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil {
-		return s.testExcelBPSAccountConnection(c, account, modelID, prompt)
-	}
-
-	// Default to openai.DefaultTestModel for OpenAI testing
-	testModelID := modelID
-	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
+	if account.IsExcelBPSEnabledForModel(testModelID) && s.openaiGatewayService != nil {
+		return s.testExcelBPSAccountConnection(c, account, testModelID, prompt)
 	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
