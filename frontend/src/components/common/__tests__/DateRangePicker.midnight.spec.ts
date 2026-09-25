@@ -7,7 +7,7 @@ enableAutoUnmount(afterEach)
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 8, 30, 23, 59)) })
 afterEach(() => vi.useRealTimers())
 async function reopenNextDay() {
-  const w = mount(DateRangePicker, { props: { startDate: '2026-09-30', endDate: '2026-09-30' }, global: { stubs: { Icon: true } } })
+  const w = mount(DateRangePicker, { props: { startDate: '2026-09-30', endDate: '2026-09-30' }, global: { stubs: { Icon: true, teleport: true } } })
   await w.get('.date-picker-trigger').trigger('click')
   expect(w.findAll('input[type="date"]')[1].attributes('max')).toBe('2026-10-01')
   await w.get('.date-picker-trigger').trigger('click')

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 )
@@ -34,14 +35,14 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if err := s.validateOpenAICodexTicketSend(request, account); err != nil {
 		return nil, err
 	}
-	nativeTicketResponse := true
+	pluginHandled := false
+	request = request.WithContext(context.WithValue(request.Context(), openAIPluginHandledKey{}, &pluginHandled))
 	defer func() {
-		if nativeTicketResponse {
+		if !pluginHandled {
 			s.observeOpenAICodexTicketResponse(request, response)
 		}
 	}()
-	profile, err := resolveMode1TLSProfile(account)
-	if err != nil {
+	if _, err := resolveMode1TLSProfile(account); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -49,17 +50,34 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 			err = &randomProxyReportedTransportError{err}
 		}
 	}()
-	if s.pluginManager != nil {
-		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
-		if handled {
-			nativeTicketResponse = false
-			return response, err
-		}
+	// 每次出口尝试内部各自决定插件/原生传输与 TLS 指纹；票据观察与随机代理结果
+	// 统计包在最终响应外层，只执行一次。
+	return s.doUpstreamWithProxyFallback(request.Context(), request, account, proxyURL)
+}
+
+// openAIPluginHandledKey 让出口尝试回报本次响应是否由插件发送：插件自带凭据链路，
+// 不能按原生票据快照观察其响应。
+type openAIPluginHandledKey struct{}
+
+func markOpenAIPluginHandled(ctx context.Context) {
+	if handled, ok := ctx.Value(openAIPluginHandledKey{}).(*bool); ok && handled != nil {
+		*handled = true
 	}
-	if profile != nil && (s.cfg == nil || s.cfg.Gateway.TLSFingerprint.Enabled) {
-		return s.httpUpstream.DoWithTLS(request, proxyURL, account.ID, account.Mode1EffectiveConcurrency(), profile)
+}
+
+// codexTicketRequestBound 报告请求是否携带已注入的原生票据快照。
+func (s *OpenAIGatewayService) codexTicketRequestBound(req *http.Request, _ *Account) bool {
+	if req == nil {
+		return false
 	}
-	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Mode1EffectiveConcurrency())
+	receipt, _ := req.Context().Value(openAICodexTicketReceiptKey{}).(*openAICodexTicketReceipt)
+	return receipt != nil && receipt.ticket.matchesHeaders(req.Header)
+}
+
+// codexTicketPinsEgress：票据与签发时的出口绑定（accountCompatible 校验 Egress），
+// 运行时代理回退会换出口，因此携带票据快照的请求不参与回退。
+func (s *OpenAIGatewayService) codexTicketPinsEgress(req *http.Request, account *Account) bool {
+	return s.codexTicketRequestBound(req, account)
 }
 
 func (s *OpenAIGatewayService) applyOpenAIRequestTimezone(request *http.Request, account *Account) error {

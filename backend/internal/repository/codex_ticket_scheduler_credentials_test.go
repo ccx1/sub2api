@@ -106,7 +106,7 @@ func TestCodexSchedulerCookieCredentialsCompleteRealReservationAndPublish(t *tes
 			if mode == "cookie_state" {
 				upstream.state = "gAAAAA" + strings.Repeat("A", 286)
 			}
-			gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil,
+			gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, nil,
 				&config.Config{Gateway: config.GatewayConfig{OpenAICodexTicket: cfg}}, nil, nil, nil, nil, nil,
 				upstream, nil, nil, nil, nil, nil, nil, nil, nil)
 			t.Cleanup(gateway.StopOpenAICodexTicketHarvester)

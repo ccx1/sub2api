@@ -46,6 +46,12 @@ func (r *sharedAdmissionHandlerAccountRepo) GetByID(_ context.Context, id int64)
 	return &r.latest, nil
 }
 
+// GetOpenAITurnAdmission 实现发送前准入的权威重读；生产服务默认要求该读取器。
+func (r *sharedAdmissionHandlerAccountRepo) GetOpenAITurnAdmission(ctx context.Context, id int64) (*service.Account, *service.Account, error) {
+	latest, err := r.GetByID(ctx, id)
+	return latest, nil, err
+}
+
 func (r *sharedAdmissionHandlerAccountRepo) SharedPoolSettlementTerms(_ context.Context, ownerID int64) (*service.SharedPoolSettlementTerms, error) {
 	if ownerID != 71 {
 		return nil, service.ErrSharedPoolBillingInvalid
@@ -131,7 +137,7 @@ func newSharedAdmissionHandlerFixture(t *testing.T) sharedAdmissionHandlerFixtur
 	// 只跳过余额预检查；实际转发服务使用正常模式并生成真实 UsageBillingCommand。
 	eligibility := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil)
 	t.Cleanup(eligibility.Stop)
-	gateway := service.NewOpenAIGatewayService(repo, usage, billing, nil, nil, nil, nil, cfg, nil, nil,
+	gateway := service.NewOpenAIGatewayService(repo, nil, usage, billing, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, eligibility, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
 	t.Cleanup(gateway.StopOpenAICodexTicketHarvester)
 	slots := &concurrencyCacheMock{

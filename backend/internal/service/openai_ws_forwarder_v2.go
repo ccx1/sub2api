@@ -225,7 +225,48 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Headers:            wsHeaders,
 		CodexTicketReceipt: ticketReceipt,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
+			if _, err := s.admitOpenAITurnForGroup(factoryCtx, groupID, account, mappedModel); err != nil {
+				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+					factoryCtx,
+					groupID,
+					sessionHash,
+					previousResponseID,
+					account.ID,
+					err,
+				)
+				return nil, err
+			}
+			// 票据已在构建握手头时按快照注入（CodexTicketReceipt），这里只做发送前准入复核。
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
+		},
+		BindHandshake: func(headers http.Header) *openAIWSTurnBinding {
+			return s.bindOpenAIWSHandshake(account, mappedModel, headers)
+		},
+		CheckBinding: func(checkCtx context.Context, b *openAIWSTurnBinding) error {
+			latest, err := s.admitOpenAITurnForGroup(checkCtx, groupID, account, mappedModel)
+			if err != nil {
+				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+					checkCtx,
+					groupID,
+					sessionHash,
+					previousResponseID,
+					account.ID,
+					err,
+				)
+				return err
+			}
+			if err := s.checkOpenAIWSBinding(latest, mappedModel, b); err != nil {
+				s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+					checkCtx,
+					groupID,
+					sessionHash,
+					previousResponseID,
+					account.ID,
+					err,
+				)
+				return err
+			}
+			return nil
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
@@ -250,6 +291,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}()
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, acquireReq)
 	if err != nil {
+		if IsOpenAITurnAdmissionError(err) {
+			return nil, err
+		}
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
@@ -365,6 +409,27 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		lease.MarkBroken()
 		return nil, err
 	}
+	checkBeforeWrite := func() error {
+		latest, err := s.admitOpenAITurn(ctx, c, account, mappedModel)
+		if err == nil {
+			err = s.checkOpenAIWSBinding(latest, mappedModel, lease.conn.turnBinding)
+		}
+		if err != nil {
+			s.invalidateOpenAIWSTurnStateAfterAdmissionFailure(
+				ctx,
+				groupID,
+				sessionHash,
+				previousResponseID,
+				account.ID,
+				err,
+			)
+			lease.MarkBroken()
+		}
+		return err
+	}
+	if err := checkBeforeWrite(); err != nil {
+		return nil, err
+	}
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
@@ -379,6 +444,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
+	if err := checkBeforeWrite(); err != nil {
+		return nil, err
+	}
 	wirePayload, rewriteErr := s.rewriteOpenAIRequestTimezonePayload(ctx, payloadAsJSONBytes(payload))
 	if rewriteErr != nil {
 		return nil, wrapOpenAIWSFallback("rewrite_request_timezone", rewriteErr)

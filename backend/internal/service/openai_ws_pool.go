@@ -76,6 +76,8 @@ type openAIWSAcquireRequest struct {
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
 	HeadersFactory      func(context.Context, http.Header) (http.Header, error)
+	BindHandshake       func(http.Header) *openAIWSTurnBinding
+	CheckBinding        func(context.Context, *openAIWSTurnBinding) error
 	CodexTicketReceipt  *openAICodexTicketWSReceipt
 	CookieMode          string
 	CookiePolicyScope   string
@@ -299,6 +301,7 @@ type openAIWSConn struct {
 	ws openAIWSClientConn
 
 	handshakeHeaders       http.Header
+	turnBinding            *openAIWSTurnBinding
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	codexTicketReceipt     *openAICodexTicketWSReceipt
 	routingAffinity        string
@@ -1171,6 +1174,13 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 		p.metrics.acquireQueueWaitMs.Add(queueWait.total.Milliseconds())
 	}
 	if lease != nil && lease.conn != nil {
+		if req.CheckBinding != nil {
+			if checkErr := req.CheckBinding(ctx, lease.conn.turnBinding); checkErr != nil {
+				lease.MarkBroken()
+				lease.Release()
+				return nil, checkErr
+			}
+		}
 		now := time.Now()
 		lease.conn.leasedBefore.Store(true)
 		lease.idleBefore = lease.conn.idleDuration(now)
@@ -2322,6 +2332,9 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	pooledConn.codexTicketReceipt = req.CodexTicketReceipt
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(headers)
 	pooledConn.routeFingerprint = openAIWSHandshakeRouteFingerprint(headers, handshakeHeaders)
+	if req.BindHandshake != nil {
+		pooledConn.turnBinding = req.BindHandshake(headers)
+	}
 	if err := validateOpenAIWSRouteRequest(req, time.Now()); err != nil {
 		pooledConn.close()
 		return nil, err
@@ -2334,6 +2347,8 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode) == CodexRouteAffinityStrict {
 		pooledConn.routeRequest = cloneOpenAIWSAcquireRequestPtr(&req)
 		pooledConn.routeRequest.HeadersFactory = nil
+		pooledConn.routeRequest.BindHandshake = nil
+		pooledConn.routeRequest.CheckBinding = nil
 	}
 	return pooledConn, nil
 }
@@ -2492,6 +2507,12 @@ func (p *openAIWSConnPool) dialTimeout() time.Duration {
 		return time.Duration(p.cfg.Gateway.OpenAIWS.DialTimeoutSeconds) * time.Second
 	}
 	return 10 * time.Second
+}
+
+// openAIWSAcquireCompatibility 保留上游命名；代理身份、TLS 指纹与票据快照统一由
+// normalizeOpenAIWSTicketCompatibility 计算，避免两套兼容键漂移。
+func openAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
+	return normalizeOpenAIWSTicketCompatibility(req)
 }
 
 func cloneOpenAIWSAcquireRequest(req openAIWSAcquireRequest) openAIWSAcquireRequest {

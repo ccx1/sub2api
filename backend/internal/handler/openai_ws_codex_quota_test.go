@@ -59,7 +59,7 @@ func newOpenAIWSQuotaClient(t *testing.T, upstreamURL string) (*coderws.Conn, *o
 	t.Cleanup(billing.Stop)
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
 	gateway := service.NewOpenAIGatewayService(
-		repo, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
+		repo, nil, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, billing, nil, &service.DeferredService{},
 		nil, nil, nil, nil, nil, nil, nil,
 	)

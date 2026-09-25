@@ -15,6 +15,8 @@ async function chooseDraft() {
       'onUpdate:startDate': (startDate: string) => { void wrapper.setProps({ startDate }) },
       'onUpdate:endDate': (endDate: string) => { void wrapper.setProps({ endDate }) },
     },
+    // 下拉层 Teleport 到 body；测试内联渲染以便 wrapper 查询。
+    global: { stubs: { teleport: true } },
   })
   await wrapper.get('.date-picker-trigger').trigger('click')
   await wrapper.findAll('.date-picker-preset').find(node => node.text() === 'dates.last7Days')!.trigger('click')

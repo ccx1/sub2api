@@ -894,6 +894,7 @@ export default {
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
+        copilotSDKDesc: 'Preserve native Codex tools and cancel SDK turns on disconnect. Use a dedicated group with one sidecar account; Base URL and API Key belong to the sidecar.',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
@@ -1356,6 +1357,13 @@ export default {
       billingRateMultiplierHint: '0 = free, affects account billing only',
       groupBillingRateMultiplier: 'Group Billing Multiplier',
       groupBillingRateMultiplierHint: 'Applied to user/API key charges. Default 1; use 5 with a 0.2x group to restore 1x.',
+      groupModelLimits: {
+        title: 'Models per group',
+        hint: 'When this account belongs to several groups, you can limit which of its models a group may use. Limits can only narrow the models the account already supports. No limit by default.',
+        allModels: 'All models',
+        selectedModels: 'Only selected',
+        emptyHint: 'No models selected yet; this group stays unrestricted after saving.'
+      },
       expiresAt: 'Expires At',
       expiresAtHint: 'Leave empty for no expiration',
       expiresAtTimezoneHint: 'Input is interpreted in your browser time zone ({timezone}).',
@@ -1852,13 +1860,18 @@ export default {
       testModel: 'Test model',
       testPrompt: 'Prompt: "hi"',
       pelicanTest: {
+        question: 'Question',
+        candyQuestion: 'Candy logic test',
+        pelicanQuestion: 'Pelican riding a bicycle (HTML)',
+        candyHint: 'The original question has a reference answer of 21. Compare this response without treating it as a permanent account capability rating.',
+
         recordCount: '{count} records',
         recordId: 'Record',
         moreRecords: 'Load more records',
         recordLoadError: 'This record expired or could not be loaded. Open the card to retry.',
 
         historyLoadError: 'Some scheduled records could not be loaded. Available manual records are still shown.',
-        dashboardHint: 'All retained manual and scheduled outputs, one card per output. Refreshes every 15 seconds. Open a card to view the animation.',
+        dashboardHint: 'Retained scheduled and manual test outputs, refreshed every 15 seconds. Select a card to view the full result.',
         scheduledPreview: 'Scheduled preview',
         sourceManual: 'Manual',
         sourceScheduled: 'Scheduled',
@@ -1866,11 +1879,11 @@ export default {
         duration: 'Duration',
 
         schedule: 'Scheduled tests',
-        preview: 'View HTML / animation',
+        preview: 'View test result',
         scheduleHint: 'Runs on the server according to Cron even after closing this page. Keeps 100 outputs by default (1–200 configurable). Results older than 7 days are cleaned up even while paused.',
-        menu: 'Pelican Test',
-        title: 'Pelican Test',
-        subtitle: 'Generate HTML in parallel for human comparison',
+        menu: 'Intelligence test',
+        title: 'Intelligence test',
+        subtitle: 'Choose a question and compare parallel responses',
         noScoring: 'No automatic scoring',
         promptLabel: 'Test message',
         promptHint: 'The same prompt is sent unchanged to every parallel run.',
@@ -1895,8 +1908,8 @@ export default {
         waiting: 'Waiting for model output...',
         generating: 'Generating...',
         start: 'Start test',
-        download: 'Download HTML',
-        downloadAll: 'Download all HTML',
+        download: 'Download result',
+        downloadAll: 'Download all results',
         noResponseBody: 'The test endpoint returned no response stream',
         emptyResponse: 'The model returned an empty response',
         invalidHtml: 'The model did not return standalone HTML that can be displayed'

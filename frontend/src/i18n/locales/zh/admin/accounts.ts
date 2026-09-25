@@ -1012,6 +1012,7 @@ export default {
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自动透传（仅替换认证）',
+        copilotSDKDesc: '保留 Codex 原生工具结构，断连时取消 SDK 回合。请使用仅含一个 sidecar 账号的独立分组；Base URL 和 API Key 填适配服务地址及密钥。',
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
         flattenNamespaces: '摊平 Codex namespace 工具（兼容）',
@@ -1457,6 +1458,13 @@ export default {
       billingRateMultiplierHint: '0 表示不计费，仅影响账号计费',
       groupBillingRateMultiplier: '分组计费倍率',
       groupBillingRateMultiplierHint: '参与用户/API Key 扣费；默认 1。分组 0.2x 时设置 5x 可恢复 1x 原价',
+      groupModelLimits: {
+        title: '各分组可用模型',
+        hint: '账号属于多个分组时，可以限制它在某个分组里只服务部分模型；只能在账号本身支持的模型里收窄。默认不限制。',
+        allModels: '全部模型',
+        selectedModels: '仅限部分',
+        emptyHint: '还没有选择模型，保存后该分组仍按不限制处理。'
+      },
       expiresAt: '过期时间',
       expiresAtHint: '留空表示不过期',
       expiresAtTimezoneHint: '输入按浏览器本地时区（{timezone}）解释。',
@@ -1939,13 +1947,18 @@ export default {
       testModel: '测试模型',
       testPrompt: '提示词："hi"',
       pelicanTest: {
+        question: '题目',
+        candyQuestion: '糖果逻辑测试',
+        pelicanQuestion: '鹈鹕骑自行车（HTML）',
+        candyHint: '原题标准答案为 21；展示本次回答供比较，不据此判断账号永久降智。',
+
         recordCount: '共 {count} 条记录',
         recordId: '记录',
         moreRecords: '加载更多记录',
         recordLoadError: '这条记录已清理或暂时无法加载，点击卡片可重试。',
 
         historyLoadError: '部分自动记录加载失败，已保留可用的手动记录。',
-        dashboardHint: '展示所有保留的自动和手动测试，每次输出一张卡片，每 15 秒刷新。点击卡片可放大查看动画。',
+        dashboardHint: '展示保留的自动和手动测试，每次输出一张卡片，每 15 秒刷新。点击卡片查看完整结果。',
         scheduledPreview: '定时测试预览',
         sourceManual: '手动',
         sourceScheduled: '定时',
@@ -1953,11 +1966,11 @@ export default {
         duration: '耗时',
 
         schedule: '定时测试',
-        preview: '查看 HTML / 动画',
+        preview: '查看测试结果',
         scheduleHint: '关闭网页后仍按 Cron 执行。默认保留最近 100 份结果，可设置 1–200 份；超过 7 天自动清理，暂停后仍清理。',
-        menu: '鹈鹕测智',
-        title: '鹈鹕测智',
-        subtitle: '同题并行生成 HTML，人工比较结果',
+        menu: '智商测试',
+        title: '智商测试',
+        subtitle: '选择题目并行测试，比较模型回答',
         noScoring: '不自动评分',
         promptLabel: '测试消息',
         promptHint: '同一题目会原样发给每个并行任务。',
@@ -1982,8 +1995,8 @@ export default {
         waiting: '等待模型输出...',
         generating: '生成中...',
         start: '开始测试',
-        download: '下载 HTML',
-        downloadAll: '下载全部 HTML',
+        download: '下载结果',
+        downloadAll: '下载全部结果',
         noResponseBody: '测试接口没有返回响应流',
         emptyResponse: '模型返回为空',
         invalidHtml: '模型没有返回可展示的独立 HTML'

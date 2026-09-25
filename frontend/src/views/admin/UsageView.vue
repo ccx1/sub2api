@@ -115,6 +115,7 @@
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
+            enable-timing-details
             flat
             :data="usageLogs"
             :loading="loading"

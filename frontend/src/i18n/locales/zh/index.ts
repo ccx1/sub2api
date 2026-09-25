@@ -1,3 +1,5 @@
+import qualityOps from './qualityOps'
+import accountOps from './accountOps'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -13,7 +15,12 @@ import codexRequestStrategy from './codexRequestStrategy'
 import proxyGroups from './proxyGroups'
 import accountProxyGroups from './accountProxyGroups'
 
+import requestTiming from './requestTiming'
+
 export default {
+  qualityOps,
+  accountOps,
+  requestTiming,
   ...landing,
   ...common,
   ...dashboard,

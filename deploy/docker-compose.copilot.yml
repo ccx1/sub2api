@@ -1,0 +1,55 @@
+# =============================================================================
+# Copilot SDK sidecar (optional)
+# =============================================================================
+# Only needed when selling GitHub Copilot models through Sub2API.
+# Use together with the main compose file so it joins sub2api-network:
+#
+#   1. Build:  docker compose -f docker-compose.yml -f docker-compose.copilot.yml build copilot-sidecar
+#   2. Login (one time, interactive GitHub device code):
+#        docker compose -f docker-compose.yml -f docker-compose.copilot.yml \
+#          run --rm copilot-sidecar python /app/login.py --state-dir /data
+#   3. Start:  docker compose -f docker-compose.yml -f docker-compose.copilot.yml up -d copilot-sidecar
+#   4. Read the key for the Sub2API account:
+#        docker compose -f docker-compose.yml -f docker-compose.copilot.yml \
+#          run --rm copilot-sidecar cat /data/sidecar-key
+#
+# Sub2API account: OpenAI / API Key, Base URL http://copilot-sidecar:18765/v1,
+# API Key = sidecar-key, tick "Copilot SDK", dedicated group, WebSocket mode off.
+# With docker-compose.local.yml, replace docker-compose.yml in the commands above.
+#
+# Sub2API running as a host binary instead: use only this file
+# (docker compose -f docker-compose.copilot.yml ...), uncomment the ports line
+# below and set Base URL to http://127.0.0.1:18765/v1.
+# =============================================================================
+
+services:
+  copilot-sidecar:
+    build:
+      context: ./copilot-sdk
+    image: sub2api-copilot-sidecar:local
+    container_name: sub2api-copilot-sidecar
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - copilot_data:/data
+    # Outbound access to github.com / api.githubcopilot.com is required. If the host
+    # needs a proxy, uncomment and set it (also pass it as a build arg when building).
+    # environment:
+    #   - HTTPS_PROXY=http://proxy.example:7890
+    #   - NO_PROXY=localhost,127.0.0.1
+    networks:
+      - sub2api-network
+    # No public ports: only Sub2API should reach the sidecar.
+    # ports:
+    #   - "127.0.0.1:18765:18765"
+
+volumes:
+  copilot_data:
+    driver: local
+
+networks:
+  sub2api-network:
+    driver: bridge

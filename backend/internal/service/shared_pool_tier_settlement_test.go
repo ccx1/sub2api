@@ -23,7 +23,7 @@ func TestEffectiveSharedSettlementMultiplierForTierPriority(t *testing.T) {
 
 func TestNormalizeSharedSettlementMultipliersCanonicalizesAndValidates(t *testing.T) {
 	got, err := NormalizeSharedSettlementMultipliers(map[string]map[string]float64{
-		" OPENAI ": {"ChatGPT Pro": 1.5},
+		" OPENAI ":        {"ChatGPT Pro": 1.5},
 		PlatformAnthropic: {"claude-pro": 2},
 	})
 	require.NoError(t, err)
