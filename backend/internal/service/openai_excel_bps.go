@@ -229,11 +229,8 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
-		if resp.StatusCode == http.StatusTooManyRequests && s.rateLimitService != nil {
-			stateCtx, cancel := openAIAccountStateContext(ctx)
-			s.rateLimitService.handle429Cooldown(stateCtx, account, resp.Header, raw)
-			cancel()
-		}
+		// BPS throttles its own endpoint. A BPS 429 must not write Codex
+		// quota/cooldown state or trigger account failover.
 		// Preserve the original rejection for Ops without exposing it to clients.
 		// BPS errors can echo request fields, so redact before storing diagnostics.
 		upstreamMessage := fmt.Sprintf("Excel BPS returned HTTP %d", resp.StatusCode)
@@ -262,18 +259,49 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return fail(resp.StatusCode, code, "This model is not available on the account's Excel BPS endpoint")
 		}
 		message := "Excel BPS rejected this request; account scheduling was not changed"
+		errorCode := "basispoints_upstream_error"
 		if resp.StatusCode == http.StatusTooManyRequests {
-			message = "Excel BPS rate limit exceeded; request was not replayed"
+			errorCode = "basispoints_rate_limited"
+			message = "Excel BPS rate limit exceeded; Codex account scheduling was not changed"
 		}
 		if resp.StatusCode == http.StatusForbidden && s.disableExcelBPSOn403(ctx, account) {
 			message = "Excel BPS rejected this request; Excel BPS was automatically disabled for this account; request was not replayed"
 		}
-		return fail(resp.StatusCode, "basispoints_upstream_error", message)
+		return fail(resp.StatusCode, errorCode, message)
 	}
 	// BPS and Codex share quota. Refresh at the HTTP boundary even if the client
 	// disconnects or a later stream/protocol error prevents normal completion.
 	s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, resp.Header)
-	converted := bridge.Stream(resp.Body)
+	converted := bridge.StreamWithToolRepair(requestCtx, resp.Body, func(repairCtx context.Context, failed map[string]any, validation error) (map[string]any, error) {
+		correctedBody, err := basispoints.BuildToolRepairRequest(upstreamBody, failed, validation)
+		if err != nil {
+			return nil, err
+		}
+		repairReq, err := newExcelBPSRequest(repairCtx, correctedBody, token, accountID)
+		if err != nil {
+			return nil, err
+		}
+		repairResp, err := s.doExcelBPSUpstream(repairReq, proxyURL, account)
+		if err != nil {
+			if repairCtx.Err() != nil {
+				return nil, repairCtx.Err()
+			}
+			return nil, fmt.Errorf("excel BPS correction connection failed")
+		}
+		defer func() { _ = repairResp.Body.Close() }()
+		stop := context.AfterFunc(repairCtx, func() { _ = repairResp.Body.Close() })
+		defer stop()
+		if repairResp.StatusCode < 200 || repairResp.StatusCode >= 300 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(repairResp.Body, 512<<10))
+			if repairResp.StatusCode == http.StatusForbidden {
+				s.disableExcelBPSOn403(repairCtx, account)
+			}
+			return nil, fmt.Errorf("excel BPS correction returned HTTP %d", repairResp.StatusCode)
+		}
+		s.UpdateCodexUsageSnapshotFromHeaders(repairCtx, account.ID, repairResp.Header)
+		upstreamBody = correctedBody
+		return basispoints.ReadToolRepairResponse(repairResp.Body)
+	})
 	defer func() { _ = converted.Close() }()
 	// The bridge sees the body after group policy mapping. Keep the original
 	// client effort for usage display, and the BPS-normalized effort for billing.
