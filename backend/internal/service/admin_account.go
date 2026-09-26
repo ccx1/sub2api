@@ -293,6 +293,16 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	}
 	autoPauseOnExpired := source.AutoPauseOnExpired
 	groups, groupIDs := duplicateAccountGroups(source)
+	if _, scoped := ObserverGroupIDs(ctx); scoped {
+		groupIDs = ObserverVisibleGroups(ctx, groupIDs)
+		filtered := make([]AccountGroup, 0, len(groups))
+		for _, group := range groups {
+			if ObserverCanManageGroup(ctx, group.GroupID) {
+				filtered = append(filtered, group)
+			}
+		}
+		groups = filtered
+	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
@@ -511,6 +521,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateObserverGroupBindings(ctx, input.GroupIDs); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -568,6 +581,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		return nil, err
 	}
 	if err := s.validateCodexTicketProxyAccountUpdate(ctx, account, account.Extra); err != nil {
+		return nil, err
+	}
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
@@ -954,6 +970,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 
 	account.Extra = codexTicketProxyExplicitExtra(account.Extra, input.Extra)
 	writeCtx := WithCodexTicketProxyWrite(ctx, input.Extra)
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
+		return nil, err
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -1050,6 +1069,23 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			return err
 		}
 	}
+	_, moveChanged := updates[ExcelBPSAutoMoveOn403Key]
+	_, targetChanged := updates[ExcelBPS403TargetGroupIDKey]
+	if moveChanged || targetChanged {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		merged := *account
+		merged.Extra = maps.Clone(account.Extra)
+		if merged.Extra == nil {
+			merged.Extra = make(map[string]any, len(updates))
+		}
+		maps.Copy(merged.Extra, updates)
+		if err := s.validateExcelBPS403GroupSettings(ctx, &merged); err != nil {
+			return err
+		}
+	}
 	if err := ValidateRandomProxyReuseExtra(updates); err != nil {
 		return err
 	}
@@ -1125,6 +1161,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		input.AccountIDs = accountIDs
 	}
 
+	if _, scoped := ObserverGroupIDs(ctx); scoped {
+		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+		if err != nil {
+			return nil, err
+		}
+		allowed := map[int64]bool{}
+		for _, a := range accounts {
+			if a != nil && ObserverCanManageAccount(ctx, a) {
+				allowed[a.ID] = true
+			}
+		}
+		for _, id := range input.AccountIDs {
+			if !allowed[id] {
+				return nil, ErrObserverScope
+			}
+		}
+	}
+
 	result := &BulkUpdateAccountsResult{
 		SuccessIDs: make([]int64, 0, len(input.AccountIDs)),
 		FailedIDs:  make([]int64, 0, len(input.AccountIDs)),
@@ -1184,6 +1238,22 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		result.LongContextInheritedCount = inheritedCount
+	}
+	_, moveChanged := input.Extra[ExcelBPSAutoMoveOn403Key]
+	_, targetChanged := input.Extra[ExcelBPS403TargetGroupIDKey]
+	if moveChanged || targetChanged {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			merged := *account
+			merged.Extra = make(map[string]any, len(account.Extra)+len(input.Extra))
+			maps.Copy(merged.Extra, account.Extra)
+			maps.Copy(merged.Extra, input.Extra)
+			if err := s.validateExcelBPS403GroupSettings(ctx, &merged); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if input.ProbeEnabled != nil {
 		for _, accountID := range input.AccountIDs {
@@ -1577,7 +1647,7 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 			}
 		}
 	} else if len(parent.GroupIDs) > 0 {
-		groupIDs = append([]int64(nil), parent.GroupIDs...)
+		groupIDs = ObserverVisibleGroups(ctx, parent.GroupIDs)
 	} else if s.groupRepo != nil {
 		defaultGroupName := PlatformOpenAI + "-default"
 		if groups, gerr := s.groupRepo.ListActiveByPlatform(ctx, PlatformOpenAI); gerr == nil {
@@ -1767,6 +1837,9 @@ func (s *adminServiceImpl) validateGroupIDsExist(ctx context.Context, groupIDs [
 // ValidateAccountGroupBindings is the shared fail-closed policy boundary for
 // every account path that accepts explicit group bindings.
 func (s *adminServiceImpl) ValidateAccountGroupBindings(ctx context.Context, groupIDs []int64) error {
+	if err := ValidateObserverGroupBindings(ctx, groupIDs); err != nil {
+		return err
+	}
 	if len(groupIDs) == 0 || s.cfg == nil || s.cfg.RunMode != config.RunModeSimple {
 		return nil
 	}

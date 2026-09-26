@@ -7,6 +7,10 @@
     @close="handleClose"
   >
     <form id="import-data-form" class="space-y-4" @submit.prevent="handleImport()">
+      <div v-if="authStore.isObserver" class="space-y-2">
+        <GroupSelector v-model="groupIDs" :groups="groups" />
+        <p class="input-hint">{{ t('admin.users.observerImportHint') }}</p>
+      </div>
       <div class="text-sm text-gray-600 dark:text-dark-300">
         {{ t('admin.accounts.dataImportHint') }}
       </div>
@@ -61,7 +65,7 @@
         ></textarea>
       </div>
 
-      <div class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+      <div v-if="authStore.isAdmin" class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
         <p class="text-xs text-gray-600 dark:text-dark-300">{{ t('admin.accountImportSettings.importHint') }}</p>
         <button type="button" class="text-sm text-primary-600 underline dark:text-primary-400" :disabled="importing" data-testid="open-import-settings" @click="emit('settings')">
           {{ t('admin.accountImportSettings.title') }}
@@ -126,11 +130,14 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import GroupSelector from '@/components/common/GroupSelector.vue'
 import type {
   AdminDataImportError,
   AdminDataImportResult,
   AdminDataPayload,
-  CreateAccountRequest
+  CreateAccountRequest,
+  Group
 } from '@/types'
 
 interface Props {
@@ -150,6 +157,15 @@ const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const groupIDs = ref<number[]>([])
+const groups = ref<Group[]>([])
+watch(() => props.show, async (show) => {
+  if (show && authStore.isObserver) {
+    groups.value = await adminAPI.groups.getAllIncludingInactive().catch(() => [])
+    groupIDs.value = groupIDs.value.filter(id => groups.value.some(group => group.id === id))
+  }
+})
 
 const importing = ref(false)
 const editAfterImport = ref(false)
@@ -347,17 +363,21 @@ const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
 
 const importParsedPayload = async (payload: unknown): Promise<AdminDataImportResult> => {
   if (isAccountArrayPayload(payload)) {
-    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload, { use_import_defaults: true }))
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(withObserverGroups(payload), { use_import_defaults: true }))
   }
   if (hasAccountsArrayOnly(payload)) {
-    return toBatchImportResult(await adminAPI.accounts.batchCreate(payload.accounts, { use_import_defaults: true }))
+    return toBatchImportResult(await adminAPI.accounts.batchCreate(withObserverGroups(payload.accounts), { use_import_defaults: true }))
   }
   return adminAPI.accounts.importData({
     data: payload as AdminDataPayload,
+    ...(authStore.isObserver ? { group_ids: groupIDs.value } : {}),
     skip_default_group_bind: true,
     use_import_defaults: true
   })
 }
+
+const withObserverGroups = (accounts: CreateAccountRequest[]): CreateAccountRequest[] =>
+  authStore.isObserver ? accounts.map(account => ({ ...account, group_ids: [...groupIDs.value] })) : accounts
 
 const importTextPayload = async (): Promise<AdminDataImportResult | null> => {
   let parsed: unknown
@@ -392,6 +412,7 @@ const importSelectedFiles = async (): Promise<AdminDataImportResult | null> => {
 
   return adminAPI.accounts.importData({
     data: dataPayload,
+    ...(authStore.isObserver ? { group_ids: groupIDs.value } : {}),
     skip_default_group_bind: true,
     use_import_defaults: true
   })
@@ -402,6 +423,10 @@ const handleImport = async (editAfter = false) => {
   const directText = jsonText.value.trim()
   if (!directText && files.value.length === 0) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
+    return
+  }
+  if (authStore.isObserver && !groupIDs.value.length) {
+    appStore.showError(t('admin.users.observerImportHint'))
     return
   }
 

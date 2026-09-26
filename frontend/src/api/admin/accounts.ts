@@ -907,6 +907,7 @@ export async function exportData(options?: {
 export async function importData(payload: {
   data: AdminDataPayload
   use_import_defaults?: boolean
+  group_ids?: number[]
   skip_default_group_bind?: boolean
   protection_enabled?: boolean
   codex_ticket_enabled?: boolean
@@ -914,6 +915,7 @@ export async function importData(payload: {
   const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
     data: payload.data,
     use_import_defaults: payload.use_import_defaults,
+    group_ids: payload.group_ids,
     skip_default_group_bind: payload.skip_default_group_bind,
     protection_enabled: payload.protection_enabled,
     codex_ticket_enabled: payload.codex_ticket_enabled
@@ -1332,6 +1334,7 @@ export const accountsAPI = {
   syncFromCrs,
   exportData,
   importData,
+  getManagementCapabilities,
   importCodexSession,
   createOpenAICodexPAT,
   getAntigravityDefaultModelMapping,
@@ -1363,3 +1366,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function getManagementCapabilities(): Promise<{ web_search_enabled: boolean; account_quota_notify_enabled: boolean }> {
+  const { data } = await apiClient.get('/admin/accounts/management-capabilities')
+  return data
+}

@@ -98,6 +98,19 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if _, scoped := service.ObserverGroupIDs(ctx); scoped {
+		proxies, err := h.adminService.GetAllProxies(ctx)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		choices := make([]gin.H, 0, len(proxies))
+		for _, proxy := range proxies {
+			choices = append(choices, gin.H{"id": proxy.ID, "name": proxy.Name, "protocol": proxy.Protocol, "status": proxy.Status})
+		}
+		response.Success(c, choices)
+		return
+	}
 	withCount := c.Query("with_count") == "true"
 
 	if withCount {

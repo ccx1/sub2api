@@ -44,6 +44,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     proxies: { listGroups: vi.fn().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }]) },
     accounts: {
+      getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       create: createAccountMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
       syncUpstreamModels: syncUpstreamModelsMock,

@@ -70,7 +70,10 @@ func TestExcelBPSForwardContract(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(body))
 			c.Request.Header.Set("x-codex-turn-state", "must-not-leak")
-			result, err := svc.Forward(context.Background(), c, excelAccount(), body)
+			account := excelAccount()
+			account.Proxy = &Proxy{Protocol: "http", Host: "127.0.0.1", Port: 7890}
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.Equal(t, account.Proxy.URL(), upstream.lastProxyURL)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, "bps.openai.com", upstream.lastReq.URL.Host)
@@ -246,4 +249,36 @@ func TestExcelBPSThreadScopeSeparatesParallelChildren(t *testing.T) {
 	second, _ := resolveOpenAIWSExecutionScope(c, []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"thread_id\":\"child-B\"}"}}`), 1)
 	require.NotEmpty(t, first)
 	require.NotEqual(t, first, second)
+}
+
+func TestExcelBPSAnonymousIdentityIsRequestLocal(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","input":"identical prompt"}`)
+	newContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+		return c
+	}
+	first := newContext()
+	id, transient := resolveExcelBPSIdentity(first, body, 1, true)
+	require.True(t, transient)
+	require.NotEmpty(t, id)
+	again, transient := resolveExcelBPSIdentity(first, body, 1, true)
+	require.True(t, transient)
+	require.Equal(t, id, again, "internal retries reuse a request identity")
+	other, transient := resolveExcelBPSIdentity(newContext(), body, 1, true)
+	require.True(t, transient)
+	require.NotEqual(t, id, other, "identical anonymous prompts must not share a session")
+	empty, transient := resolveExcelBPSIdentity(newContext(), body, 1, false)
+	require.False(t, transient)
+	require.Empty(t, empty, "static proxies keep their old identity behavior")
+	first.Request.Header.Set("session_id", "declared-session")
+	explicit, transient := resolveExcelBPSIdentity(first, body, 1, true)
+	require.False(t, transient)
+	second := newContext()
+	second.Request.Header.Set("session_id", "declared-session")
+	same, transient := resolveExcelBPSIdentity(second, body, 1, true)
+	require.False(t, transient)
+	require.Equal(t, explicit, same)
+	otherKey, _ := resolveExcelBPSIdentity(second, body, 2, true)
+	require.NotEqual(t, explicit, otherKey)
 }

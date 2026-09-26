@@ -6,12 +6,14 @@ import ImportDataModal from '../ImportDataModal.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
-const { tMock, batchCreate, importData, showError, showSuccess } = vi.hoisted(() => ({
+const { tMock, batchCreate, importData, showError, showSuccess, authStore, getGroups } = vi.hoisted(() => ({
   tMock: vi.fn(),
   batchCreate: vi.fn(),
   importData: vi.fn(),
   showError: vi.fn(),
-  showSuccess: vi.fn()
+  showSuccess: vi.fn(),
+  authStore: { isAdmin: true, isObserver: false },
+  getGroups: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -19,9 +21,12 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       batchCreate,
       importData
-    }
+    },
+    groups: { getAllIncludingInactive: getGroups }
   }
 }))
+
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authStore }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -49,6 +54,13 @@ const BaseDialogStub = defineComponent({
   template: '<section v-if="show"><slot /><slot name="footer" /></section>'
 })
 
+const GroupSelectorStub = defineComponent({
+  name: 'GroupSelector',
+  props: ['modelValue', 'groups'],
+  emits: ['update:modelValue'],
+  template: '<div data-testid="observer-groups" />'
+})
+
 const messages = { en, zh }
 const successfulImport = {
   proxy_created: 0, proxy_reused: 0, proxy_failed: 0,
@@ -60,7 +72,7 @@ const dataPayload = { type: 'sub2api-data', version: 1, proxies: [], accounts: [
 function mountModal() {
   return mount(ImportDataModal, {
     props: { show: true },
-    global: { stubs: { BaseDialog: BaseDialogStub } }
+    global: { stubs: { BaseDialog: BaseDialogStub, GroupSelector: GroupSelectorStub } }
   })
 }
 
@@ -82,6 +94,56 @@ describe('admin account ImportDataModal', () => {
     importData.mockReset().mockResolvedValue(successfulImport)
     showError.mockReset()
     showSuccess.mockReset()
+    authStore.isAdmin = true
+    authStore.isObserver = false
+    getGroups.mockReset().mockResolvedValue([])
+  })
+
+  it('requires observer groups before starting either import path', async () => {
+    authStore.isAdmin = false
+    authStore.isObserver = true
+    const wrapper = mountModal()
+    await wrapper.get('textarea').setValue(JSON.stringify([accountPayload]))
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(showError).toHaveBeenCalledWith('admin.users.observerImportHint')
+    expect(batchCreate).not.toHaveBeenCalled()
+    expect(importData).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="open-import-settings"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['array', 'accounts', 'bundle'])('assigns selected observer groups to pasted %s imports', async format => {
+    authStore.isAdmin = false
+    authStore.isObserver = true
+    batchCreate.mockResolvedValue({ success: 1, failed: 0, results: [{ success: true, id: 71 }] })
+    const account = { ...accountPayload, group_ids: [999] }
+    const payload = format === 'array' ? [account] : format === 'accounts' ? { accounts: [account] } : { ...dataPayload, accounts: [account] }
+    const wrapper = mountModal()
+    wrapper.getComponent(GroupSelectorStub).vm.$emit('update:modelValue', [12, 34])
+    await wrapper.get('textarea').setValue(JSON.stringify(payload))
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    if (format === 'bundle') {
+      expect(importData).toHaveBeenCalledWith({ data: payload, group_ids: [12, 34], skip_default_group_bind: true, use_import_defaults: true })
+    } else {
+      expect(batchCreate).toHaveBeenCalledWith([{ ...account, group_ids: [12, 34] }], { use_import_defaults: true })
+    }
+    wrapper.unmount()
+  })
+
+  it('assigns selected observer groups to file imports', async () => {
+    authStore.isAdmin = false
+    authStore.isObserver = true
+    const wrapper = mountModal()
+    wrapper.getComponent(GroupSelectorStub).vm.$emit('update:modelValue', [12])
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [new File([JSON.stringify(dataPayload)], 'accounts.json', { type: 'application/json' })] })
+    await input.trigger('change')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(importData).toHaveBeenCalledOnce())
+    expect(importData).toHaveBeenCalledWith({ data: dataPayload, group_ids: [12], skip_default_group_bind: true, use_import_defaults: true })
+    wrapper.unmount()
   })
 
   it.each([
