@@ -196,6 +196,10 @@ Community projects that extend or integrate with Sub2API:
 | ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~Self-service payment system~~ | **Now Built-in** — Payment is now integrated into Sub2API, no separate deployment needed. See [Payment Configuration Guide](docs/PAYMENT.md) |
 | [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | Mobile admin console | Cross-platform app (iOS/Android/Web) for user management, account management, monitoring dashboard, and multi-backend switching; built with Expo + React Native |
 
+## 快速开始
+
+新人部署、官方版替换、Excel / BPS 配置、780 / 292 打票边界和“降智”运维步骤，请阅读[新人入门文档](docs/新人入门.md)。
+
 ## Tech Stack
 
 | Component | Technology |

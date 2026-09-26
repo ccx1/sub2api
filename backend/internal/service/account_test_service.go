@@ -153,6 +153,8 @@ type AccountTestService struct {
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
 	openaiGatewayService      *OpenAIGatewayService
+	bpsProbeMu                sync.Mutex
+	bpsProbeAccounts          map[int64]struct{}
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -805,6 +807,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// requests. The legacy account-test probe hard-codes ChatGPT Codex and
 	// silently bypasses the account's protocol toggle, producing misleading
 	// quality-test results.
+	if mode == AccountTestModeBPSTools {
+		return s.testExcelBPSToolRoundtrip(c, account, testModelID)
+	}
 	if account.IsExcelBPSEnabledForModel(testModelID) && s.openaiGatewayService != nil {
 		return s.testExcelBPSAccountConnection(c, account, testModelID, prompt)
 	}
