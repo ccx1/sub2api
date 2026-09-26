@@ -84,10 +84,14 @@ func sharedAccountView(a *Account, r SharedPoolAccountRecord, p, q int, admin bo
 		ProtectionEnabled: a.AntiDegradationEnabled(), DailyCooldown: sharedDailyCooldownView(a.Extra), GroupIDs: []int64{}, Groups: []SharedPoolGroupView{},
 		PlatformRateBPS: p, ProxyRateBPS: q, LastUsedAt: a.LastUsedAt, CreatedAt: a.CreatedAt}
 	v.DispatchConsent = SharedPoolDispatchConsented(a)
+	if excelBPSEligible(a.Platform, a.Type, a.Credentials) && !a.IsShadow() {
+		enabled := a.IsExcelBPSEnabled()
+		v.ExcelBPSEnabled = &enabled
+		v.ExcelBPSOptions = ExcelBPSOptionsFromAccount(a)
+	}
 	if isOpenAICodexTicketAccount(a) {
 		enabled := OpenAICodexTicketAccountEnabled(a)
 		v.CodexTicketEnabled = &enabled
-		v.CodexTicketRequired = SharedPoolCodexTicketRequired(a)
 	}
 	if admin {
 		v.Priority = a.Priority

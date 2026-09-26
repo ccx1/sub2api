@@ -21,7 +21,7 @@ const sharedCooldownImportContent = `[
 func TestSharedImportDailyCooldownDefaultsReachCreateAndView(t *testing.T) {
 	for _, cooldown := range []*service.SharedPoolDailyCooldown{nil, {}, {Enabled: true, Start: "23:00", End: "08:00"}} {
 		defaults := importTestDefaults()
-		defaults.Enabled, defaults.ProtectionEnabled, defaults.DailyCooldown = false, false, cooldown
+		defaults.Enabled, defaults.ProtectionEnabled, defaults.DailyCooldown = false, new(false), cooldown
 		entries, err := parseSharedImport(sharedImportRequest{Sources: []sharedImportSource{{Content: sharedCooldownImportContent}}, Defaults: defaults})
 		require.NoError(t, err)
 		if cooldown != nil {
@@ -51,7 +51,7 @@ func TestSharedImportDailyCooldownDefaultsReachCreateAndView(t *testing.T) {
 
 func TestSharedImportDailyCooldownInvalidDefaultsFailEachItemBeforeCreate(t *testing.T) {
 	defaults := importTestDefaults()
-	defaults.Enabled, defaults.ProtectionEnabled = false, false
+	defaults.Enabled, defaults.ProtectionEnabled = false, new(false)
 	defaults.DailyCooldown = &service.SharedPoolDailyCooldown{Enabled: true, Start: "23:00", End: "08:00", Timezone: "Mars/Unknown"}
 	proxy := "http://8.8.8.8:8080"
 	defaults.ProxyURL = &proxy

@@ -21,7 +21,7 @@ func TestSharedImportCodexTicketOnlyAppliesToCompatibleAccounts(t *testing.T) {
 	for _, raw := range []string{`{}`, `{"codex_ticket_enabled":false}`, `{"codex_ticket_enabled":true}`} {
 		t.Run(raw, func(t *testing.T) {
 			defaults := importTestDefaults()
-			defaults.Enabled, defaults.ProtectionEnabled = false, false
+			defaults.Enabled, defaults.ProtectionEnabled = false, new(false)
 			require.NoError(t, json.Unmarshal([]byte(raw), &defaults))
 			entries, err := parseSharedImport(sharedImportRequest{Sources: []sharedImportSource{{Content: content}}, Defaults: defaults})
 			require.NoError(t, err)

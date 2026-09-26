@@ -35,9 +35,10 @@ type sharedImportDefaults struct {
 	ProxyURL           *string                          `json:"proxy_url"`
 	Enabled            bool                             `json:"enabled"`
 	DispatchConsent    bool                             `json:"dispatch_consent"`
-	ProtectionEnabled  bool                             `json:"protection_enabled"`
+	ProtectionEnabled  *bool                            `json:"protection_enabled"`
 	CodexTicketEnabled *bool                            `json:"codex_ticket_enabled"`
 	ExcelBPSEnabled    *bool                            `json:"excel_bps_enabled"`
+	ExcelBPSOptions    *service.ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
 	DailyCooldown      *service.SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
 }
 
@@ -85,6 +86,13 @@ func (h *SharedPoolHandler) ImportAccounts(c *gin.Context) {
 		return
 	}
 	executeSharedImportIdempotent(c, userID, req, func(ctx context.Context) (any, error) {
+		defaults, err := h.accountImportDefaults(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for i := range entries {
+			applySharedAccountImportDefaults(&entries[i].input, defaults, req.Defaults)
+		}
 		return executeSharedImport(ctx, userID, entries, h.pool.Create)
 	})
 }

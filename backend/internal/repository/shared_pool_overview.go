@@ -126,7 +126,7 @@ func (s sharedOverviewState) snapshots(accounts []*service.Account) []service.Sh
 		result = append(result, service.SharedPoolOverviewAccount{AccountID: acc.ID, Platform: acc.Platform,
 			Tier: service.SharedPoolOverviewTierForAccount(acc), Available: s.available(acc), Concurrency: acc.Mode1EffectiveConcurrency(),
 			Valid:                acc.Status == service.StatusActive && (acc.ExpiresAt == nil || now.Before(*acc.ExpiresAt)),
-			TicketRequired:       acc.IsOpenAIOAuthLike() && !acc.IsShadow(),
+			TicketRequired:       service.OpenAICodexTicketAccountEnabled(acc),
 			UntrackedConcurrency: acc.Concurrency <= 0, Ticket: service.NewSharedPoolTicketAccountSnapshot(acc, now)})
 	}
 	return result

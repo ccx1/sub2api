@@ -121,9 +121,6 @@ func OpenAICodexTicketAccountEnabled(account *Account) bool {
 	if !isOpenAICodexTicketAccount(account) {
 		return false
 	}
-	if SharedPoolCodexTicketRequired(account) {
-		return true
-	}
 	if account.Extra == nil {
 		return true
 	}

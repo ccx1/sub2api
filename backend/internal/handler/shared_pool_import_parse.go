@@ -152,8 +152,11 @@ func sharedImportCodexShape(object map[string]any) bool {
 func normalizeSharedImportEntry(value any, defaults sharedImportDefaults, index int, source string) sharedImportEntry {
 	entry := sharedImportEntry{item: sharedImportItem{Index: index, Source: source}, input: service.SharedPoolAccountInput{
 		Platform: defaults.Platform, Type: defaults.Type, Concurrency: defaults.Concurrency,
-		ProxyURL: defaults.ProxyURL, Enabled: defaults.Enabled, DispatchConsent: defaults.DispatchConsent, ProtectionEnabled: defaults.ProtectionEnabled,
+		ProxyURL: defaults.ProxyURL, Enabled: defaults.Enabled, DispatchConsent: defaults.DispatchConsent,
 	}}
+	if defaults.ProtectionEnabled != nil {
+		entry.input.ProtectionEnabled = *defaults.ProtectionEnabled
+	}
 	if defaults.DailyCooldown != nil {
 		cooldown := *defaults.DailyCooldown
 		entry.input.DailyCooldown = &cooldown
@@ -168,6 +171,14 @@ func normalizeSharedImportEntry(value any, defaults sharedImportDefaults, index 
 	if entry.input.Platform == service.PlatformOpenAI && entry.input.Type == service.AccountTypeOAuth {
 		entry.input.CodexTicketEnabled = defaults.CodexTicketEnabled
 		entry.input.ExcelBPSEnabled = defaults.ExcelBPSEnabled
+		if defaults.ExcelBPSEnabled != nil && *defaults.ExcelBPSEnabled && defaults.ExcelBPSOptions != nil {
+			options := *defaults.ExcelBPSOptions
+			if options.Models != nil {
+				models := append([]string{}, *options.Models...)
+				options.Models = &models
+			}
+			entry.input.ExcelBPSOptions = &options
+		}
 	}
 	for i, warning := range entry.warnings {
 		entry.warnings[i] = fmt.Sprintf("第 %d 个账号：%s", index, warning)

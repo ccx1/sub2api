@@ -48,21 +48,24 @@ func newSharedTicketService(account *Account) (*SharedPoolService, *sharedTicket
 	return s, accounts
 }
 
-func TestSharedCodexTicketOwnedSwitchUsesRuntimeStateAndPreservesOtherExtra(t *testing.T) {
+func TestSharedCodexTicketOwnedSwitchRequiresAdministrator(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
-		SharedPoolOwnerKey: int64(7), SharedPoolEnabledKey: false,
+		SharedPoolOwnerKey: int64(7), SharedPoolEnabledKey: false, OpenAICodexTicketEnabledExtraKey: false,
 		"codex_turn_ticket:test": map[string]any{"state": "private-ticket"}, "codex_5h_used_percent": 12,
 	}}
 	s, repo := newSharedTicketService(account)
-	require.True(t, OpenAICodexTicketAccountEnabled(account))
+	require.False(t, OpenAICodexTicketAccountEnabled(account))
 	for _, enabled := range []bool{false, true, false} {
-		require.NoError(t, s.SetCodexTicketEnabled(context.Background(), 7, 1, enabled))
-		require.Equal(t, map[string]any{OpenAICodexTicketEnabledExtraKey: enabled}, repo.updates)
-		require.Equal(t, enabled, OpenAICodexTicketAccountEnabled(account))
+		err := s.SetCodexTicketEnabled(context.Background(), 7, 1, enabled)
+		require.Equal(t, 403, infraerrors.Code(err))
+		require.Equal(t, "SHARED_CODEX_TICKET_ADMIN_ONLY", infraerrors.Reason(err))
+		require.Empty(t, repo.updates)
+		require.Zero(t, repo.writes)
+		require.False(t, OpenAICodexTicketAccountEnabled(account))
 		view, err := s.Get(context.Background(), 7, 1)
 		require.NoError(t, err)
 		require.NotNil(t, view.CodexTicketEnabled)
-		require.Equal(t, enabled, *view.CodexTicketEnabled)
+		require.False(t, *view.CodexTicketEnabled)
 		encoded, err := json.Marshal(view)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "private-ticket")
@@ -73,7 +76,7 @@ func TestSharedCodexTicketOwnedSwitchUsesRuntimeStateAndPreservesOtherExtra(t *t
 	require.Equal(t, map[string]any{"state": "private-ticket"}, account.Extra["codex_turn_ticket:test"])
 }
 
-func TestSharedCodexTicketRejectsOtherOwnerAndUnsupportedAccounts(t *testing.T) {
+func TestSharedCodexTicketChecksOwnerBeforeRejectingAllAccountKinds(t *testing.T) {
 	parentID := int64(2)
 	for _, tc := range []struct {
 		name     string
@@ -82,9 +85,10 @@ func TestSharedCodexTicketRejectsOtherOwnerAndUnsupportedAccounts(t *testing.T) 
 		wantCode int
 	}{
 		{"other owner", 8, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, 404},
-		{"API key", 7, &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, 400},
-		{"other platform", 7, &Account{Platform: PlatformGemini, Type: AccountTypeOAuth}, 400},
-		{"shadow", 7, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID}, 400},
+		{"missing user", 0, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, 404},
+		{"API key", 7, &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, 403},
+		{"other platform", 7, &Account{Platform: PlatformGemini, Type: AccountTypeOAuth}, 403},
+		{"shadow", 7, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID}, 403},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.account.ID = 1
@@ -105,14 +109,16 @@ func TestSharedCodexTicketRejectsOtherOwnerAndUnsupportedAccounts(t *testing.T) 
 	}
 }
 
-func TestSharedCodexTicketSupportsExistingOAuthLikeAndReturnsWriteFailure(t *testing.T) {
+func TestSharedCodexTicketRejectsOAuthLikeWithoutReachingWriter(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
 	s, repo := newSharedTicketService(account)
-	require.NoError(t, s.SetCodexTicketEnabled(context.Background(), 7, 1, false))
-	require.False(t, OpenAICodexTicketAccountEnabled(account))
 	repo.err = errors.New("write failed")
-	require.ErrorIs(t, s.SetCodexTicketEnabled(context.Background(), 7, 1, true), repo.err)
-	require.False(t, OpenAICodexTicketAccountEnabled(account))
+	for _, enabled := range []bool{false, true} {
+		err := s.SetCodexTicketEnabled(context.Background(), 7, 1, enabled)
+		require.Equal(t, "SHARED_CODEX_TICKET_ADMIN_ONLY", infraerrors.Reason(err))
+		require.True(t, OpenAICodexTicketAccountEnabled(account))
+		require.Zero(t, repo.writes)
+	}
 }
 
 type sharedTicketCreateRepo struct {
@@ -158,7 +164,7 @@ func TestSharedCodexTicketCreateOptionalExplicitFalseAndUnsupported(t *testing.T
 	}
 }
 
-func TestSharedCodexTicketOrdinaryUpdatesAndReauthorizationUseSeparateSwitch(t *testing.T) {
+func TestSharedCodexTicketOrdinaryUpdatesAndReauthorizationPreserveAdministratorSwitch(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
 		OpenAICodexTicketEnabledExtraKey: false, ProxyModeExtraKey: "random",
 	}}
@@ -175,7 +181,8 @@ func TestSharedCodexTicketOrdinaryUpdatesAndReauthorizationUseSeparateSwitch(t *
 	for _, enabled := range []bool{false, true} {
 		in.CodexTicketEnabled = &enabled
 		_, err := s.Update(context.Background(), 7, 1, in)
-		require.Equal(t, "SHARED_SWITCH_SEPARATE", infraerrors.Reason(err))
+		require.Equal(t, 403, infraerrors.Code(err))
+		require.Equal(t, "SHARED_CODEX_TICKET_ADMIN_ONLY", infraerrors.Reason(err))
 	}
 	require.Equal(t, 2, s.repo.(*sharedPoolRepoStub).updateCalls)
 }

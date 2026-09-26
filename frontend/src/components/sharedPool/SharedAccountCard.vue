@@ -35,10 +35,9 @@
             <span class="text-xs text-gray-600 dark:text-dark-300">{{ t('sharedPool.protection') }}</span>
             <Toggle :model-value="account.protection_enabled" :aria-label="t('sharedPool.protection')" :disabled="actionBusy" class="disabled:cursor-not-allowed disabled:opacity-50" @update:model-value="!actionBusy && emit('protection', $event)" />
           </div>
-          <div v-if="account.platform === 'openai' && account.type === 'oauth' && (account.codex_ticket_required || typeof account.codex_ticket_enabled === 'boolean')" class="flex items-center gap-2" :title="t(account.codex_ticket_required ? 'sharedPool.codexTicketRequiredHint' : 'sharedPool.codexTicketHint')">
+          <div v-if="account.platform === 'openai' && account.type === 'oauth' && typeof account.codex_ticket_enabled === 'boolean'" class="flex items-center gap-2" :title="t('sharedPool.codexTicketHint')">
             <span class="text-xs text-gray-600 dark:text-dark-300">{{ t('sharedPool.codexTicket') }}</span>
-            <span v-if="account.codex_ticket_required" class="text-xs text-cyan-600 dark:text-cyan-400" data-test="ticket-required">{{ t('sharedPool.codexTicketRequired') }}</span>
-            <Toggle :model-value="Boolean(account.codex_ticket_required || account.codex_ticket_enabled)" :aria-label="t('sharedPool.codexTicket')" :disabled="actionBusy || account.codex_ticket_required" class="disabled:cursor-not-allowed disabled:opacity-50" @update:model-value="!actionBusy && !account.codex_ticket_required && emit('codexTicket', $event)" />
+            <span class="text-xs text-gray-500 dark:text-dark-400" data-test="ticket-state">{{ t(account.codex_ticket_enabled ? 'common.enabled' : 'common.disabled') }}</span>
           </div>
         </div>
         <div class="mt-3 flex flex-wrap items-center gap-2">
@@ -63,7 +62,7 @@ import SharedRevenueSplit from './SharedRevenueSplit.vue'
 import SharedAccountUsage from './SharedAccountUsage.vue'
 import { subscriptionTierOptions, validSettlementMultiplier } from './settlementPolicy'
 const props = defineProps<{ account: SharedAccount; busy?: boolean; admin?: boolean }>()
-const emit = defineEmits<{ authorize: []; protection: [enabled: boolean]; codexTicket: [enabled: boolean]; edit: []; test: []; remove: []; allocate: []; usageUpdated: [] }>()
+const emit = defineEmits<{ authorize: []; protection: [enabled: boolean]; edit: []; test: []; remove: []; allocate: []; usageUpdated: [] }>()
 const usageBusy = ref(false)
 const actionBusy = computed(() => props.busy || usageBusy.value)
 const dailyCooldown = computed(() => normalizeDailyCooldown(props.account.daily_cooldown))

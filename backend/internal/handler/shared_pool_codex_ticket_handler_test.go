@@ -9,7 +9,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 type sharedTicketViewRepo struct{ *sharedTestRepository }
@@ -67,7 +66,7 @@ func TestSharedCodexTicketHandlerRequiresExplicitBooleanAndIdentity(t *testing.T
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestSharedCodexTicketHandlerReturnsOnlySharedViewAndNoTicket(t *testing.T) {
+func TestSharedCodexTicketHandlerRejectsOwnerChangesWithoutExposingSecrets(t *testing.T) {
 	h, repo, upstream := newSharedTestHandler()
 	repo.account.Type = service.AccountTypeOAuth
 	repo.account.Extra["codex_turn_ticket:model"] = map[string]any{"state": "private-ticket"}
@@ -81,16 +80,15 @@ func TestSharedCodexTicketHandlerReturnsOnlySharedViewAndNoTicket(t *testing.T) 
 		}
 		c, w := sharedTestContext(7, body)
 		h.SetCodexTicketEnabled(c)
-		require.Equal(t, http.StatusOK, w.Code)
-		require.True(t, gjson.GetBytes(w.Body.Bytes(), "data.codex_ticket_enabled").Exists())
-		require.Equal(t, enabled, gjson.GetBytes(w.Body.Bytes(), "data.codex_ticket_enabled").Bool())
-		require.Equal(t, enabled, service.OpenAICodexTicketAccountEnabled(repo.account))
-		require.Equal(t, map[string]any{service.OpenAICodexTicketEnabledExtraKey: enabled}, repo.updates)
+		require.Equal(t, http.StatusForbidden, w.Code)
+		require.Contains(t, w.Body.String(), "SHARED_CODEX_TICKET_ADMIN_ONLY")
+		require.True(t, service.OpenAICodexTicketAccountEnabled(repo.account))
+		require.Empty(t, repo.updates)
 		for _, private := range []string{"private-ticket", "private-password", "test-secret", "codex_turn_ticket", "credentials", "codex_harvest_proxy_url"} {
 			require.NotContains(t, w.Body.String(), private)
 		}
 	}
-	require.Equal(t, 2, admin.writes)
+	require.Zero(t, admin.writes)
 	require.Zero(t, upstream.calls)
 }
 
@@ -106,7 +104,7 @@ func TestSharedCodexTicketHandlerRejectsUnsupportedAndShadow(t *testing.T) {
 		repo.account = account
 		c, w := sharedTestContext(7, `{"enabled":true}`)
 		h.SetCodexTicketEnabled(c)
-		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Equal(t, http.StatusForbidden, w.Code)
 		require.Empty(t, repo.updates)
 		require.Zero(t, upstream.calls)
 	}

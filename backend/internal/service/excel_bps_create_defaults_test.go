@@ -96,7 +96,7 @@ func TestAccountImportSettingsExcelBPSRoundTrip(t *testing.T) {
 
 func TestSharedPoolCreateExcelBPSSetsFlagAndRejectsIneligible(t *testing.T) {
 	enabled, disabled := true, false
-	for _, ticket := range []*bool{nil, &enabled} {
+	for _, ticket := range []*bool{nil, &enabled, &disabled} {
 		in := SharedPoolAccountInput{Name: "mine", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 3,
 			Credentials: map[string]any{"access_token": "test-token", "plan_type": "pro"}, ExcelBPSEnabled: &enabled, CodexTicketEnabled: ticket}
 		accounts := &sharedTicketAccounts{}
@@ -104,7 +104,12 @@ func TestSharedPoolCreateExcelBPSSetsFlagAndRejectsIneligible(t *testing.T) {
 		view, err := s.Create(context.Background(), 7, in)
 		require.NoError(t, err)
 		require.True(t, accounts.account.IsExcelBPSEnabled())
-		require.NotContains(t, accounts.account.Extra, OpenAICodexTicketEnabledExtraKey, "BPS 账号即使是 Pro 也不应强制打票")
+		if ticket == nil {
+			require.NotContains(t, accounts.account.Extra, OpenAICodexTicketEnabledExtraKey)
+		} else {
+			require.Equal(t, *ticket, accounts.account.Extra[OpenAICodexTicketEnabledExtraKey])
+		}
+		require.False(t, OpenAICodexTicketAccountEnabled(accounts.account), "全模型 BPS 只暂停票据运行，不删除配置")
 		require.Nil(t, view.CodexTicketEnabled)
 	}
 
@@ -127,14 +132,150 @@ func TestSharedPoolCreateExcelBPSSetsFlagAndRejectsIneligible(t *testing.T) {
 	}
 }
 
-func TestSharedPoolUpdateRejectsExcelBPSChange(t *testing.T) {
-	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{}}
-	s, repo := newSharedTicketService(account)
-	for _, value := range []bool{false, true} {
-		in := SharedPoolAccountInput{Name: "mine", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 2, ExcelBPSEnabled: &value}
-		_, err := s.Update(context.Background(), 7, 1, in)
-		require.Equal(t, "SHARED_EXCEL_BPS_CREATE_ONLY", infraerrors.Reason(err))
+type sharedBPSTicketTransitionRepo struct {
+	*sharedTicketCreateRepo
+}
+
+func (r *sharedBPSTicketTransitionRepo) UpdateSharedAccount(_ context.Context, _, _ int64, input SharedPoolAccountUpdate) error {
+	if input.ExcelBPSChanged {
+		replaceExcelBPSExtra(r.accounts.account.Extra, input.ExcelBPSExtra)
 	}
-	require.Zero(t, repo.writes)
+	return nil
+}
+
+func TestSharedPoolBPSChangesPreserveStoredTicketChoice(t *testing.T) {
+	for _, ticketEnabled := range []bool{false, true} {
+		for _, scoped := range []bool{false, true} {
+			accounts := &sharedTicketAccounts{}
+			repo := &sharedBPSTicketTransitionRepo{sharedTicketCreateRepo: &sharedTicketCreateRepo{accounts: accounts}}
+			svc := &SharedPoolService{repo: repo, accounts: accounts, earnings: sharedPoolTotalsStub{}}
+			input := SharedPoolAccountInput{Name: "mine", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 3,
+				Credentials:     map[string]any{"access_token": "test-token", "plan_type": "pro"},
+				ExcelBPSEnabled: new(true), CodexTicketEnabled: new(ticketEnabled)}
+			_, err := svc.Create(context.Background(), 7, input)
+			require.NoError(t, err)
+			require.Equal(t, ticketEnabled, accounts.account.Extra[OpenAICodexTicketEnabledExtraKey])
+			require.False(t, OpenAICodexTicketAccountEnabled(accounts.account))
+			input.Credentials, input.CodexTicketEnabled = nil, nil
+			input.ExcelBPSEnabled = new(scoped)
+			if scoped {
+				models := []string{"gpt-6-astra"}
+				input.ExcelBPSOptions = &ExcelBPSOptions{Models: &models}
+			}
+			view, err := svc.Update(context.Background(), 7, accounts.account.ID, input)
+			require.NoError(t, err)
+			require.Equal(t, ticketEnabled, accounts.account.Extra[OpenAICodexTicketEnabledExtraKey])
+			require.Equal(t, ticketEnabled, OpenAICodexTicketAccountEnabled(accounts.account))
+			require.Equal(t, new(ticketEnabled), view.CodexTicketEnabled)
+		}
+	}
+}
+
+func TestSharedPoolUpdateExcelBPSReplacesOptionFamily(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
+		SharedPoolOwnerKey: int64(7), excelBPSExtraKey: true, excelBPSModelsExtraKey: []any{"gpt-5"},
+		excelBPSAutoDisableOn403ExtraKey: true, "keep": "me",
+	}}
+	s, _ := newSharedTicketService(account)
+	repo := s.repo.(*sharedPoolRepoStub)
+	enabled, disabled := true, false
+	models := []string{" gpt-6-astra ", "gpt-6-astra"}
+	in := SharedPoolAccountInput{Name: "mine", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 2,
+		ExcelBPSEnabled: &enabled, ExcelBPSOptions: &ExcelBPSOptions{Models: &models, CacheCreationAsInput: true}}
+	_, err := s.Update(context.Background(), 7, 1, in)
+	require.NoError(t, err)
+	require.True(t, repo.lastUpdate.ExcelBPSChanged)
+	require.Equal(t, map[string]any{excelBPSExtraKey: true, excelBPSModelsExtraKey: []string{"gpt-6-astra"},
+		excelBPSCacheCreationAsInputExtraKey: true}, repo.lastUpdate.ExcelBPSExtra)
+	require.Equal(t, "me", account.Extra["keep"], "更新计算不能改写读取到的账号")
+
+	in.ExcelBPSEnabled, in.ExcelBPSOptions = &disabled, nil
+	_, err = s.Update(context.Background(), 7, 1, in)
+	require.NoError(t, err)
+	require.True(t, repo.lastUpdate.ExcelBPSChanged)
+	require.Empty(t, repo.lastUpdate.ExcelBPSExtra)
+
+	in.ExcelBPSEnabled = nil
+	_, err = s.Update(context.Background(), 7, 1, in)
+	require.NoError(t, err)
+	require.False(t, repo.lastUpdate.ExcelBPSChanged, "未传 BPS 字段时不能覆盖已有配置")
+
+	in.ExcelBPSEnabled, in.ExcelBPSOptions = &disabled, &ExcelBPSOptions{AutoDisableOn403: true}
+	_, err = s.Update(context.Background(), 7, 1, in)
+	require.Equal(t, "EXCEL_BPS_OPTIONS_REQUIRE_ENABLED", infraerrors.Reason(err))
+}
+
+func TestSharedPoolCreateExcelBPSOptionsKeepTicketForScopedModels(t *testing.T) {
+	enabled := true
+	models := []string{"gpt-6-astra"}
+	in := SharedPoolAccountInput{Name: "mine", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 3,
+		Credentials: map[string]any{"access_token": "test-token", "plan_type": "pro"}, ExcelBPSEnabled: &enabled,
+		ExcelBPSOptions: &ExcelBPSOptions{Models: &models, AutoDisableOn403: true}}
+	accounts := &sharedTicketAccounts{}
+	s := &SharedPoolService{repo: &sharedTicketCreateRepo{accounts: accounts}, accounts: accounts, earnings: sharedPoolTotalsStub{}}
+	view, err := s.Create(context.Background(), 7, in)
+	require.NoError(t, err)
+	extra := accounts.account.Extra
+	require.Equal(t, true, extra[excelBPSExtraKey])
+	require.Equal(t, []string{"gpt-6-astra"}, extra[excelBPSModelsExtraKey])
+	require.Equal(t, true, extra[excelBPSAutoDisableOn403ExtraKey])
+	require.NotContains(t, extra, excelBPSCacheCreationAsInputExtraKey)
+	require.True(t, isOpenAICodexTicketAccount(accounts.account), "仅部分模型走 BPS 时其他模型仍可打票")
+	require.NotNil(t, view.ExcelBPSOptions)
+	require.Equal(t, []string{"gpt-6-astra"}, *view.ExcelBPSOptions.Models)
+	require.True(t, view.ExcelBPSOptions.AutoDisableOn403)
+	require.NotNil(t, view.ExcelBPSEnabled)
+	require.True(t, *view.ExcelBPSEnabled)
+}
+
+func TestAccountImportDefaultsExcelBPSOptions(t *testing.T) {
+	settings := excelBPSImportSettings()
+	models := []string{"gpt-6-astra"}
+	settings.ExcelBPSOptions = ExcelBPSOptions{Models: &models, AutoDisableOn403: true, CacheCreationAsInput: true}
+	svc, _ := accountImportDefaultTestService(t, settings)
+	input := accountImportDefaultTestInput()
+	input.Type = AccountTypeOAuth
+	account, err := svc.CreateAccount(context.Background(), input)
+	require.NoError(t, err)
+	require.True(t, account.IsExcelBPSEnabled())
+	require.Equal(t, []string{"gpt-6-astra"}, account.Extra[excelBPSModelsExtraKey])
+	require.True(t, account.IsExcelBPSAutoDisableOn403Enabled())
+	require.True(t, account.IsExcelBPSCacheCreationAsInputEnabled())
+	require.True(t, isOpenAICodexTicketAccount(account), "限定模型时其他模型保留打票")
+
+	// 导入文件显式写了任何 BPS 字段时，整组以文件为准。
+	svc, _ = accountImportDefaultTestService(t, settings)
+	input = accountImportDefaultTestInput()
+	input.Type, input.Extra = AccountTypeOAuth, map[string]any{excelBPSAutoDisableOn403ExtraKey: false}
+	account, err = svc.CreateAccount(context.Background(), input)
+	require.NoError(t, err)
 	require.NotContains(t, account.Extra, excelBPSExtraKey)
+	require.NotContains(t, account.Extra, excelBPSModelsExtraKey)
+	require.NotContains(t, account.Extra, excelBPSCacheCreationAsInputExtraKey)
+}
+
+func TestAccountImportSettingsExcelBPSOptionsNormalize(t *testing.T) {
+	ctx := context.Background()
+	svc := &SettingService{settingRepo: &accountImportSettingsRepoStub{}}
+	settings, err := svc.GetAccountImportSettings(ctx)
+	require.NoError(t, err)
+	require.Nil(t, settings.ExcelBPSOptions.Models, "默认对所有模型启用")
+	models := []string{" gpt-6-astra ", "", "gpt-6-astra", "gpt-5"}
+	settings.ExcelBPSEnabled = true
+	settings.ExcelBPSOptions = ExcelBPSOptions{Models: &models, CacheCreationAsInput: true}
+	_, err = svc.UpdateAccountImportSettings(ctx, *settings)
+	require.NoError(t, err)
+	reread, err := svc.GetAccountImportSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-6-astra", "gpt-5"}, *reread.ExcelBPSOptions.Models)
+	require.True(t, reread.ExcelBPSOptions.CacheCreationAsInput)
+	require.False(t, reread.ExcelBPSOptions.AutoDisableOn403)
+
+	tooMany := make([]string, maxExcelBPSModels+1)
+	for i := range tooMany {
+		tooMany[i] = "model-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
+	}
+	settings.ExcelBPSOptions.Models = &tooMany
+	_, err = svc.UpdateAccountImportSettings(ctx, *settings)
+	require.Equal(t, "EXCEL_BPS_MODELS_INVALID", infraerrors.Reason(err))
 }

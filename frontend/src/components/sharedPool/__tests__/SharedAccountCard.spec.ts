@@ -92,40 +92,37 @@ describe('shared account card controls', () => {
     expect(wrapper.text()).toContain('Pro 20x')
     expect(wrapper.get('[data-test="account-settlement"]').text()).toContain('1.5x')
   })
-  it('emits switch requests and waits for the parent to update the account', async () => {
+  it('retains the protection switch while showing tickets as read-only state', async () => {
     const wrapper = render()
     const protection = wrapper.get('[role="switch"][aria-label="sharedPool.protection"]')
-    const ticket = wrapper.get('[role="switch"][aria-label="sharedPool.codexTicket"]')
+    expect(wrapper.find('[role="switch"][aria-label="sharedPool.codexTicket"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="ticket-state"]').text()).toBe('common.enabled')
     await protection.trigger('click')
-    await ticket.trigger('click')
     expect(wrapper.emitted('protection')).toEqual([[false]])
-    expect(wrapper.emitted('codexTicket')).toEqual([[false]])
-    expect(ticket.attributes('aria-checked')).toBe('true')
+    expect(wrapper.emitted('codexTicket')).toBeUndefined()
     expect(protection.attributes('aria-checked')).toBe('true')
     await wrapper.setProps({ account: { ...account, enabled: false, protection_enabled: false, codex_ticket_enabled: false } })
     expect(protection.attributes('aria-checked')).toBe('false')
-    expect(ticket.attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="ticket-state"]').text()).toBe('common.disabled')
   })
 
-  it('shows the ticket switch only for supported owner accounts with returned state', async () => {
+  it('shows read-only ticket state only for supported owner accounts with returned state', async () => {
     const wrapper = render()
     for (const patch of [{ type: 'apikey' as const }, { platform: 'gemini' as const }, { codex_ticket_enabled: undefined }]) {
       await wrapper.setProps({ account: { ...account, ...patch } })
-      expect(wrapper.find('[aria-label="sharedPool.codexTicket"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="ticket-state"]').exists()).toBe(false)
     }
     await wrapper.setProps({ account, admin: true })
-    expect(wrapper.find('[aria-label="sharedPool.codexTicket"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="ticket-state"]').exists()).toBe(false)
   })
 
-  it('keeps required Pro tickets on and blocks attempts to disable them', async () => {
+  it('does not expose a ticket toggle or force enabled state for legacy Pro responses', async () => {
     const wrapper = render()
     await wrapper.setProps({ account: { ...account, subscription_tier: 'pro', codex_ticket_required: true, codex_ticket_enabled: false } })
-    const ticket = wrapper.get('[role="switch"][aria-label="sharedPool.codexTicket"]')
-    expect(ticket.attributes('aria-checked')).toBe('true')
-    expect(ticket.attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-test="ticket-required"]').text()).toBe('sharedPool.codexTicketRequired')
-    await ticket.trigger('click')
-    wrapper.findAllComponents(Toggle).find(toggle => toggle.attributes('aria-label') === 'sharedPool.codexTicket')!.vm.$emit('update:modelValue', false)
+    expect(wrapper.find('[role="switch"][aria-label="sharedPool.codexTicket"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="ticket-state"]').text()).toBe('common.disabled')
+    expect(wrapper.find('[data-test="ticket-required"]').exists()).toBe(false)
+    expect(wrapper.findAllComponents(Toggle)).toHaveLength(1)
     expect(wrapper.emitted('codexTicket')).toBeUndefined()
   })
 

@@ -28,7 +28,7 @@ func TestSharedAdminStatePostgresTierEnablePriorityAndReset(t *testing.T) {
 	stored, err := f.client.Account.Get(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, "prolite", stored.Extra[service.SharedPoolSubscriptionTierKey])
-	require.Equal(t, true, stored.Extra[service.OpenAICodexTicketEnabledExtraKey])
+	require.Equal(t, false, stored.Extra[service.OpenAICodexTicketEnabledExtraKey], "修改共享档位不能开启打票")
 	require.Equal(t, true, stored.Extra[service.AntiDegradationExtraKey])
 	require.Equal(t, map[string]any{"enabled": false}, stored.Extra[service.DailyCooldownExtraKey])
 	require.Equal(t, "error", stored.Status)

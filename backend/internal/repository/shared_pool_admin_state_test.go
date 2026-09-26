@@ -29,14 +29,14 @@ func TestSharedAdminStateTierAndEnableCommitOrRollbackTogether(t *testing.T) {
 		name, tier, patch string
 		fail              bool
 	}{
-		{"set tier", "pro", `{"codex_ticket_enabled":true,"shared_pool_subscription_tier":"pro"}`, false},
+		{"set tier", "pro", `{"shared_pool_subscription_tier":"pro"}`, false},
 		{"clear override", "", `{"shared_pool_subscription_tier":null}`, false},
-		{"outbox failure", "pro", `{"codex_ticket_enabled":true,"shared_pool_subscription_tier":"pro"}`, true},
+		{"outbox failure", "pro", `{"shared_pool_subscription_tier":"pro"}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, mock := newSharedDailyCooldownRepository(t)
 			expectSharedAdminStateLock(mock, `{"shared_pool_dispatch_consent":true,"anti_degradation_enabled":true,"daily_cooldown":{"enabled":true}}`, true, true)
-			mock.ExpectQuery("SELECT platform,type,credentials,extra,parent_account_id FROM accounts").WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "credentials", "extra", "parent"}).AddRow("openai", "oauth", []byte(`{}`), []byte(`{}`), nil))
+			mock.ExpectQuery("SELECT platform,type FROM accounts").WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type"}).AddRow("openai", "oauth"))
 			mock.ExpectQuery("SELECT group_id FROM account_groups").WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"group_id"}).AddRow(4))
 			mock.ExpectExec("UPDATE shared_pool_accounts SET enabled=").WithArgs(int64(41), true, false, false).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec("(?s)UPDATE accounts a SET extra=.*COALESCE.*shared_pool_subscription_tier.*ELSE '' END").WithArgs(int64(41), tc.patch).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -67,7 +67,7 @@ func TestSharedAdminStateRejectsUnconsentedEnableAndInvalidTier(t *testing.T) {
 	}
 	repo, mock := newSharedDailyCooldownRepository(t)
 	expectSharedAdminStateLock(mock, `{"shared_pool_dispatch_consent":true}`, true, false)
-	mock.ExpectQuery("SELECT platform,type,credentials,extra,parent_account_id FROM accounts").WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "credentials", "extra", "parent"}).AddRow("openai", "oauth", []byte(`{}`), []byte(`{}`), nil))
+	mock.ExpectQuery("SELECT platform,type FROM accounts").WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type"}).AddRow("openai", "oauth"))
 	mock.ExpectRollback()
 	require.Error(t, repo.SetSharedAccountState(context.Background(), 41, service.SharedPoolAccountState{SubscriptionTier: new("invalid-tier")}))
 }
@@ -112,13 +112,12 @@ func TestSharedAdminStateLegacyEnableRemainsWithinSharedBindings(t *testing.T) {
 	}
 }
 
-func TestSharedProProfileTicketNormalizationRollsBackWithProfile(t *testing.T) {
+func TestSharedProProfileDoesNotWriteTicketSwitch(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		repo, mock := newSharedDailyCooldownRepository(t)
-		input := service.SharedPoolAccountUpdate{Name: "pro", Concurrency: 3, ForceCodexTicket: true}
+		input := service.SharedPoolAccountUpdate{Name: "pro", Concurrency: 3}
 		expectSharedDailyCooldownLock(mock).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(41))
 		expectSharedDailyCooldownProfile(mock, input)
-		mock.ExpectExec("UPDATE accounts SET extra=COALESCE.*jsonb_build_object").WithArgs(int64(41), service.OpenAICodexTicketEnabledExtraKey).WillReturnResult(sqlmock.NewResult(0, 1))
 		outbox := expectSharedDailyCooldownOutbox(mock)
 		if fail {
 			outbox.WillReturnError(errors.New("outbox failure"))

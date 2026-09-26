@@ -87,10 +87,20 @@ describe('shared account resource overview', () => {
     expect(wrapper.get('[data-test="participating-accounts"]').text()).toBe('7 / — / 10')
   })
 
-  it('uses actual ticket participation for status when the runtime permits requests without tickets', () => {
+  it('keeps enabled ticket participation separate from fail-open dispatch capacity', () => {
     const wrapper = render(overview({ tiers: [tier({ participating_accounts: 0, available_accounts: 9, schedulable_accounts: 7, available: true })] }))
     expect(wrapper.get('[data-test="participating-accounts"]').text()).toBe('0 / 9 / 10')
     expect(wrapper.get('[data-test="tier-status"]').text()).toBe('sharedPool.overviewUnavailable')
+  })
+
+  it('shows ticket-disabled accounts as available when the overview includes them in dispatch', () => {
+    const wrapper = render(overview({ tiers: [tier({
+      total_accounts: 1, available_accounts: 1, schedulable_accounts: 1, participating_accounts: 1,
+      participating_concurrency: 3, current_concurrency: 0, available: true
+    })] }))
+    expect(wrapper.get('[data-test="participating-accounts"]').text()).toBe('1 / 1 / 1')
+    expect(wrapper.get('[data-test="concurrency-usage"]').text()).toBe('0 / 3')
+    expect(wrapper.get('[data-test="tier-status"]').text()).toBe('sharedPool.overviewAvailable')
   })
 
   it('preserves zero, unlimited capacity, and occupancy above a recently reduced limit', async () => {

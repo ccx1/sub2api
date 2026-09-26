@@ -23,13 +23,14 @@ func (h *SettingHandler) GetAccountImportSettings(c *gin.Context) {
 
 func (h *SettingHandler) UpdateAccountImportSettings(c *gin.Context) {
 	var req struct {
-		Enabled            *bool          `json:"enabled" binding:"required"`
-		ProtectionEnabled  *bool          `json:"protection_enabled" binding:"required"`
-		CodexTicketEnabled *bool          `json:"codex_ticket_enabled" binding:"required"`
-		ExcelBPSEnabled    bool           `json:"excel_bps_enabled"`
-		ProxyMode          string         `json:"proxy_mode" binding:"required,oneof=preserve direct fixed random"`
-		ProxyID            *int64         `json:"proxy_id"`
-		Extra              map[string]any `json:"extra"`
+		Enabled            *bool                   `json:"enabled" binding:"required"`
+		ProtectionEnabled  *bool                   `json:"protection_enabled" binding:"required"`
+		CodexTicketEnabled *bool                   `json:"codex_ticket_enabled" binding:"required"`
+		ExcelBPSEnabled    bool                    `json:"excel_bps_enabled"`
+		ExcelBPSOptions    service.ExcelBPSOptions `json:"excel_bps_options"`
+		ProxyMode          string                  `json:"proxy_mode" binding:"required,oneof=preserve direct fixed random"`
+		ProxyID            *int64                  `json:"proxy_id"`
+		Extra              map[string]any          `json:"extra"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -41,7 +42,7 @@ func (h *SettingHandler) UpdateAccountImportSettings(c *gin.Context) {
 	}
 	settings, err := h.settingService.UpdateAccountImportSettings(c.Request.Context(), service.AccountImportSettings{
 		Enabled: *req.Enabled, ProtectionEnabled: *req.ProtectionEnabled,
-		CodexTicketEnabled: *req.CodexTicketEnabled, ExcelBPSEnabled: req.ExcelBPSEnabled, ProxyMode: req.ProxyMode,
+		CodexTicketEnabled: *req.CodexTicketEnabled, ExcelBPSEnabled: req.ExcelBPSEnabled, ExcelBPSOptions: req.ExcelBPSOptions, ProxyMode: req.ProxyMode,
 		ProxyID: req.ProxyID, Extra: req.Extra,
 	})
 	if err != nil {

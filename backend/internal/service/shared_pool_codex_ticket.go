@@ -13,30 +13,10 @@ func validateSharedCodexTicketAccount(account *Account) error {
 	return nil
 }
 
-func SharedPoolCodexTicketRequired(account *Account) bool {
-	if !isOpenAICodexTicketAccount(account) || sharedPoolBillingOwnerID(account.Extra[SharedPoolOwnerKey]) <= 0 {
-		return false
-	}
-	tier := sharedAccountSubscriptionTier(account)
-	return tier == "pro" || tier == "prolite"
-}
-
-func normalizeSharedCodexTicket(account *Account) {
-	if SharedPoolCodexTicketRequired(account) {
-		account.Extra[OpenAICodexTicketEnabledExtraKey] = true
-	}
-}
-
-func (s *SharedPoolService) SetCodexTicketEnabled(ctx context.Context, userID, id int64, enabled bool) error {
-	_, account, err := s.OwnedAccount(ctx, userID, id)
+func (s *SharedPoolService) SetCodexTicketEnabled(ctx context.Context, userID, id int64, _ bool) error {
+	_, _, err := s.OwnedAccount(ctx, userID, id)
 	if err != nil {
 		return err
 	}
-	if err = validateSharedCodexTicketAccount(account); err != nil {
-		return err
-	}
-	if !enabled && SharedPoolCodexTicketRequired(account) {
-		return infraerrors.BadRequest("SHARED_CODEX_TICKET_REQUIRED", "共享 Pro 账号必须开启打票，不能关闭")
-	}
-	return s.admin.UpdateAccountExtra(ctx, id, map[string]any{OpenAICodexTicketEnabledExtraKey: enabled})
+	return infraerrors.Forbidden("SHARED_CODEX_TICKET_ADMIN_ONLY", "打票功能由管理员统一控制")
 }

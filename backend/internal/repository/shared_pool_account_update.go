@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // 资料、私有代理与重授权凭证同成同败；不覆盖并行变化的共享开关和保护状态。
@@ -62,8 +63,18 @@ func (r *sharedPoolRepository) UpdateSharedAccount(ctx context.Context, ownerID,
 			return err
 		}
 	}
-	if in.ForceCodexTicket {
-		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)||jsonb_build_object($2::text,true) WHERE id=$1`, id, service.OpenAICodexTicketEnabledExtraKey); err != nil {
+	if in.ExcelBPSChanged {
+		bpsExtra := in.ExcelBPSExtra
+		if bpsExtra == nil {
+			bpsExtra = map[string]any{}
+		}
+		raw, e := json.Marshal(bpsExtra)
+		if e != nil {
+			return e
+		}
+		// 整族替换，避免关闭或改范围后残留旧模型列表与子选项。
+		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=(COALESCE(extra,'{}'::jsonb)-$2::text[])||$3::jsonb WHERE id=$1`,
+			id, pq.Array(service.ExcelBPSExtraKeys()), string(raw)); err != nil {
 			return err
 		}
 	}

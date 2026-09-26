@@ -36,6 +36,7 @@ import AccountImportSettingsForm from './AccountImportSettingsForm.vue'
 import { adminAPI } from '@/api/admin'
 import { defaultAccountImportSettings, getAccountImportSettings, saveAccountImportSettings } from '@/api/admin/accountImportSettings'
 import { useAppStore } from '@/stores/app'
+import { defaultExcelBPSOptions, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyGroupId, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyRegionFallback, normalizeRandomProxyReuseMinutes, randomProxyExtra } from '@/utils/randomProxy'
 import type { Proxy } from '@/types'
 
@@ -68,7 +69,7 @@ async function load() {
     loadError.value = settings.status === 'rejected' ? 'admin.accountImportSettings.loadFailed' : 'admin.accountImportSettings.proxiesLoadFailed'
     return
   }
-  form.value = { ...settings.value, extra: { ...settings.value.extra } }
+  form.value = { ...settings.value, excel_bps_options: normalizeExcelBPSOptions(settings.value.excel_bps_options), extra: { ...settings.value.extra } }
   proxies.value = directory.value
   loaded.value = true
 }
@@ -78,7 +79,8 @@ async function save() {
   saving.value = true
   saveError.value = ''
   try {
-    const payload = { ...form.value, extra: { ...form.value.extra } }
+    // 协议关闭时子选项回到默认值，避免保存无效的旧模型范围。
+    const payload = { ...form.value, excel_bps_options: form.value.excel_bps_enabled ? normalizeExcelBPSOptions(form.value.excel_bps_options) : defaultExcelBPSOptions(), extra: { ...form.value.extra } }
     if (payload.proxy_mode !== 'fixed') payload.proxy_id = null
     if (payload.extra.proxy_region_mode !== 'billing') delete payload.extra.proxy_region_fallback_country
     if (payload.proxy_mode !== 'random') {

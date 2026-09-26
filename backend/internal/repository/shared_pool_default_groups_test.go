@@ -38,7 +38,7 @@ func TestSharedDefaultGroupsSettingsSaveAllOrRollback(t *testing.T) {
 		mock.ExpectQuery("SELECT subscription_group_ids,subscription_settlement_multipliers FROM shared_pool_settings").
 			WillReturnRows(sqlmock.NewRows([]string{"subscriptions", "multipliers"}).AddRow([]byte(`{}`), []byte(`{}`)))
 		for _, id := range []int64{4, 5} {
-			mock.ExpectQuery("SELECT status='active' AND platform=").WithArgs(id, service.PlatformOpenAI).
+			mock.ExpectQuery("SELECT status='active' AND platform=").WithArgs(id, service.PlatformOpenAI, false).
 				WillReturnRows(sqlmock.NewRows([]string{"valid"}).AddRow(id != 5 || !invalidSecond))
 		}
 		if invalidSecond {

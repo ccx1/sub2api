@@ -70,11 +70,8 @@ it('loads usage through the owned account route without force or admin headers',
   expect(get).toHaveBeenLastCalledWith('/shared-pool/accounts/7/usage', { params: { source: 'passive' }, signal })
 })
 
-it('updates tickets through the owner route and preserves explicit false', async () => {
-  const account = { id: 7, codex_ticket_enabled: false }
-  post.mockResolvedValue({ data: account })
-  expect(await sharedPoolAPI.codexTicket(7, false)).toEqual(account)
-  expect(post).toHaveBeenLastCalledWith('/shared-pool/accounts/7/codex-ticket', { enabled: false })
+it('does not expose an owner ticket-setting API', () => {
+  expect(sharedPoolAPI).not.toHaveProperty('codexTicket')
 })
 
 it('forces usage only for an explicit query and uses owner quota routes with the reset timeout', async () => {

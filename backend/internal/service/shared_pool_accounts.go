@@ -68,6 +68,7 @@ type SharedPoolAccountInput struct {
 	ProtectionEnabled  bool                     `json:"protection_enabled"`
 	CodexTicketEnabled *bool                    `json:"codex_ticket_enabled"`
 	ExcelBPSEnabled    *bool                    `json:"excel_bps_enabled"`
+	ExcelBPSOptions    *ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
 	ConfirmDisable     bool                     `json:"confirm_disable"`
 	Enabled            bool                     `json:"enabled"`
 	DispatchConsent    bool                     `json:"dispatch_consent"`
@@ -76,14 +77,16 @@ type SharedPoolAccountInput struct {
 }
 
 type SharedPoolAccountUpdate struct {
-	Name             string
-	Concurrency      int
-	ProxyChanged     bool
-	ProxyID          *int64
-	Credentials      map[string]any
-	Fingerprint      string
-	DailyCooldown    *SharedPoolDailyCooldown
-	ForceCodexTicket bool
+	Name          string
+	Concurrency   int
+	ProxyChanged  bool
+	ProxyID       *int64
+	Credentials   map[string]any
+	Fingerprint   string
+	DailyCooldown *SharedPoolDailyCooldown
+	// ExcelBPSChanged 时先清除整族 BPS 键，再写入 ExcelBPSExtra；nil 表示关闭协议。
+	ExcelBPSChanged bool
+	ExcelBPSExtra   map[string]any
 }
 
 type SharedPoolGroupView struct {
@@ -104,37 +107,40 @@ type SharedPoolAccountState struct {
 }
 
 type SharedPoolAccountView struct {
-	ID                       int64                    `json:"id"`
-	OwnerUserID              int64                    `json:"owner_user_id,omitempty"`
-	OwnerEmail               string                   `json:"owner_email,omitempty"`
-	Name                     string                   `json:"name"`
-	Platform                 string                   `json:"platform"`
-	SubscriptionTier         string                   `json:"subscription_tier,omitempty"`
-	SubscriptionTierOverride string                   `json:"subscription_tier_override,omitempty"`
-	Type                     string                   `json:"type"`
-	Concurrency              int                      `json:"concurrency"`
-	Priority                 int                      `json:"priority"`
-	Enabled                  bool                     `json:"enabled"`
-	AdminDisabled            bool                     `json:"admin_disabled"`
-	DispatchConsent          bool                     `json:"dispatch_consent"`
-	SettlementMultiplier     *float64                 `json:"settlement_multiplier"`
-	Status                   string                   `json:"status"`
-	ErrorMessage             string                   `json:"error_message"`
-	ProxyMode                string                   `json:"proxy_mode"`
-	HasCustomProxy           bool                     `json:"has_custom_proxy"`
-	ProtectionEnabled        bool                     `json:"protection_enabled"`
-	CodexTicketEnabled       *bool                    `json:"codex_ticket_enabled,omitempty"`
-	CodexTicketRequired      bool                     `json:"codex_ticket_required"`
-	DailyCooldown            *SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
-	GroupIDs                 []int64                  `json:"group_ids"`
-	Groups                   []SharedPoolGroupView    `json:"groups"`
-	TodayEarnings            float64                  `json:"today_earnings"`
-	TotalEarnings            float64                  `json:"total_earnings"`
-	EstimatedEarnings        *float64                 `json:"estimated_earnings"`
-	PlatformRateBPS          int                      `json:"platform_rate_bps"`
-	ProxyRateBPS             int                      `json:"proxy_rate_bps"`
-	LastUsedAt               *time.Time               `json:"last_used_at"`
-	CreatedAt                time.Time                `json:"created_at"`
+	ID                       int64    `json:"id"`
+	OwnerUserID              int64    `json:"owner_user_id,omitempty"`
+	OwnerEmail               string   `json:"owner_email,omitempty"`
+	Name                     string   `json:"name"`
+	Platform                 string   `json:"platform"`
+	SubscriptionTier         string   `json:"subscription_tier,omitempty"`
+	SubscriptionTierOverride string   `json:"subscription_tier_override,omitempty"`
+	Type                     string   `json:"type"`
+	Concurrency              int      `json:"concurrency"`
+	Priority                 int      `json:"priority"`
+	Enabled                  bool     `json:"enabled"`
+	AdminDisabled            bool     `json:"admin_disabled"`
+	DispatchConsent          bool     `json:"dispatch_consent"`
+	SettlementMultiplier     *float64 `json:"settlement_multiplier"`
+	Status                   string   `json:"status"`
+	ErrorMessage             string   `json:"error_message"`
+	ProxyMode                string   `json:"proxy_mode"`
+	HasCustomProxy           bool     `json:"has_custom_proxy"`
+	ProtectionEnabled        bool     `json:"protection_enabled"`
+	CodexTicketEnabled       *bool    `json:"codex_ticket_enabled,omitempty"`
+	// 保留旧客户端响应字段；共享账号不再按订阅档位强制打票。
+	CodexTicketRequired bool                     `json:"codex_ticket_required"`
+	ExcelBPSEnabled     *bool                    `json:"excel_bps_enabled,omitempty"`
+	ExcelBPSOptions     *ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
+	DailyCooldown       *SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
+	GroupIDs            []int64                  `json:"group_ids"`
+	Groups              []SharedPoolGroupView    `json:"groups"`
+	TodayEarnings       float64                  `json:"today_earnings"`
+	TotalEarnings       float64                  `json:"total_earnings"`
+	EstimatedEarnings   *float64                 `json:"estimated_earnings"`
+	PlatformRateBPS     int                      `json:"platform_rate_bps"`
+	ProxyRateBPS        int                      `json:"proxy_rate_bps"`
+	LastUsedAt          *time.Time               `json:"last_used_at"`
+	CreatedAt           time.Time                `json:"created_at"`
 }
 
 type SharedPoolAccountPage struct {

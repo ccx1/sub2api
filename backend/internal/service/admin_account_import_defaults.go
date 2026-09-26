@@ -51,15 +51,13 @@ func (s *adminServiceImpl) applyAccountImportDefaults(ctx context.Context, input
 	return &prepared, nil
 }
 
-// 只给满足 BPS 条件的 ChatGPT OAuth 账号补开关；导入数据显式填写（含 false）时保留原值。
+// 只给满足 BPS 条件的 ChatGPT OAuth 账号补齐整族 BPS 配置；导入数据显式填写任一 BPS 字段（含 false）时保留原值。
 func applyAccountImportExcelBPSDefault(input *CreateAccountInput, settings *AccountImportSettings) {
-	if !settings.ExcelBPSEnabled || hasAccountImportExtra(input.Extra, []string{excelBPSExtraKey}) {
+	if !settings.ExcelBPSEnabled || hasAccountImportExtra(input.Extra, excelBPSExtraKeys) {
 		return
 	}
-	candidate := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials,
-		Extra: map[string]any{excelBPSExtraKey: true}}
-	if candidate.IsExcelBPSEnabled() {
-		input.Extra[excelBPSExtraKey] = true
+	if excelBPSEligible(input.Platform, input.Type, input.Credentials) {
+		replaceExcelBPSExtra(input.Extra, excelBPSExtra(settings.ExcelBPSOptions))
 	}
 }
 

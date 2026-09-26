@@ -100,11 +100,11 @@ func TestProtectionAccountResponseTicketEligibility(t *testing.T) {
 	}{
 		{"missing_defaults_on", func(*service.Account) {}, new(true)},
 		{"explicit_off", func(a *service.Account) { a.Extra[service.OpenAICodexTicketEnabledExtraKey] = false }, new(false)},
-		{"shared_pro_required", func(a *service.Account) {
+		{"shared_pro_preserves_explicit_off", func(a *service.Account) {
 			a.Extra[service.SharedPoolOwnerKey] = int64(7)
 			a.Extra[service.SharedPoolSubscriptionTierKey] = "pro"
 			a.Extra[service.OpenAICodexTicketEnabledExtraKey] = false
-		}, new(true)},
+		}, new(false)},
 		{"shadow", func(a *service.Account) { a.ParentAccountID = new(int64(9)) }, nil},
 		{"api_key", func(a *service.Account) { a.Type = service.AccountTypeAPIKey }, nil},
 		{"anthropic", func(a *service.Account) { a.Platform = service.PlatformAnthropic }, nil},

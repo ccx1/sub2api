@@ -16,13 +16,15 @@ import (
 const SettingKeyAccountImportSettings = "account_import_settings"
 
 type AccountImportSettings struct {
-	Enabled            bool           `json:"enabled"`
-	ProtectionEnabled  bool           `json:"protection_enabled"`
-	CodexTicketEnabled bool           `json:"codex_ticket_enabled"`
-	ExcelBPSEnabled    bool           `json:"excel_bps_enabled"`
-	ProxyMode          string         `json:"proxy_mode"`
-	ProxyID            *int64         `json:"proxy_id"`
-	Extra              map[string]any `json:"extra"`
+	Enabled            bool `json:"enabled"`
+	ProtectionEnabled  bool `json:"protection_enabled"`
+	CodexTicketEnabled bool `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled    bool `json:"excel_bps_enabled"`
+	// 旧配置缺少该字段时按“对所有模型启用、子选项关闭”读取，与原导入行为一致。
+	ExcelBPSOptions ExcelBPSOptions `json:"excel_bps_options"`
+	ProxyMode       string          `json:"proxy_mode"`
+	ProxyID         *int64          `json:"proxy_id"`
+	Extra           map[string]any  `json:"extra"`
 }
 
 func DefaultAccountImportSettings() AccountImportSettings {
@@ -118,6 +120,11 @@ func normalizeAccountImportSettings(settings *AccountImportSettings) error {
 	default:
 		return infraerrors.BadRequest("INVALID_ACCOUNT_IMPORT_PROXY_MODE", "导入默认代理模式必须是保留、直连、固定或随机")
 	}
+	options, err := normalizeExcelBPSOptions(settings.ExcelBPSOptions)
+	if err != nil {
+		return err
+	}
+	settings.ExcelBPSOptions = options
 	if settings.Extra == nil {
 		settings.Extra = map[string]any{}
 	}

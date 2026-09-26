@@ -81,6 +81,16 @@ func TestAccountImportSettingsRoundTripAndValidation(t *testing.T) {
 	rec = serveImportSettings(t, h, http.MethodGet, "")
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
 	require.True(t, result.Data.ExcelBPSEnabled)
+	require.Nil(t, result.Data.ExcelBPSOptions.Models, "旧请求缺少子选项时按所有模型启用")
+
+	rec = serveImportSettings(t, h, http.MethodPut, `{"enabled":true,"protection_enabled":true,"codex_ticket_enabled":true,"excel_bps_enabled":true,"excel_bps_options":{"models":[" gpt-6-astra ","gpt-6-astra"],"auto_disable_on_403":true,"cache_creation_as_input":true},"proxy_mode":"preserve","proxy_id":null,"extra":{}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = serveImportSettings(t, h, http.MethodGet, "")
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	require.NotNil(t, result.Data.ExcelBPSOptions.Models)
+	require.Equal(t, []string{"gpt-6-astra"}, *result.Data.ExcelBPSOptions.Models)
+	require.True(t, result.Data.ExcelBPSOptions.AutoDisableOn403)
+	require.True(t, result.Data.ExcelBPSOptions.CacheCreationAsInput)
 
 	for _, invalid := range []string{
 		`{}`, `{"enabled":"true"}`,

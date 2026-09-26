@@ -172,6 +172,29 @@ func TestSharedPoolOverviewSourceRetainsDisabledAndUnassignedAccounts(t *testing
 	require.Zero(t, pool.rdb.ZCard(ctx, proxyPoolLeaseKey("7")).Val(), "浏览概览不能占用随机代理租约")
 }
 
+func TestSharedPoolOverviewTicketRequirementHonorsAccountSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		value    any
+		required bool
+	}{
+		{"default enabled", nil, true},
+		{"explicit enabled", true, true},
+		{"explicit disabled", false, false},
+		{"legacy string retains default", "false", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+				Status: service.StatusActive, Credentials: map[string]any{"plan_type": "plus"},
+				Extra: map[string]any{service.OpenAICodexTicketEnabledExtraKey: tc.value}}
+			got := (sharedOverviewState{}).snapshots([]*service.Account{account})
+			require.Len(t, got, 1)
+			require.Equal(t, tc.required, got[0].TicketRequired)
+			require.Equal(t, tc.required, got[0].Ticket != nil)
+		})
+	}
+}
+
 func TestSharedPoolOverviewSnapshotsRespectActualSchedulingRules(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -218,6 +241,9 @@ func TestSharedPoolOverviewSnapshotsRespectActualSchedulingRules(t *testing.T) {
 		{"disabled account", func(a *service.Account, _ *service.Group, _ *sharedOverviewRegistration, _ *service.SharedPoolSettlementTerms) {
 			a.Status = service.StatusDisabled
 		}, false},
+		{"scheduling disabled", func(a *service.Account, _ *service.Group, _ *sharedOverviewRegistration, _ *service.SharedPoolSettlementTerms) {
+			a.Schedulable = false
+		}, false},
 		{"rate limited", func(a *service.Account, _ *service.Group, _ *sharedOverviewRegistration, _ *service.SharedPoolSettlementTerms) {
 			a.RateLimitResetAt = new(time.Now().Add(time.Hour))
 		}, false},
@@ -243,11 +269,15 @@ func TestSharedPoolOverviewSnapshotsRespectActualSchedulingRules(t *testing.T) {
 			tc.change(account, group, registration, terms)
 			state := sharedOverviewState{registrations: map[int64]*sharedOverviewRegistration{9: registration},
 				groups: map[int64]*service.Group{1: group}, terms: map[int64]*service.SharedPoolSettlementTerms{9: terms}, proxies: &sharedPoolProxyAvailability{}}
-			got := state.snapshots([]*service.Account{account})
-			require.Len(t, got, 1, "不可用账号也应保留总数")
-			require.Equal(t, tc.available, got[0].Available)
-			require.Equal(t, account.Status == service.StatusActive, got[0].Valid,
-				"有效账号独立于共享开关、用户状态和实时调度准入条件")
+			for _, ticketEnabled := range []bool{true, false} {
+				account.Extra[service.OpenAICodexTicketEnabledExtraKey] = ticketEnabled
+				got := state.snapshots([]*service.Account{account})
+				require.Len(t, got, 1, "不可用账号也应保留总数")
+				require.Equal(t, tc.available, got[0].Available, "ticket enabled=%v", ticketEnabled)
+				require.Equal(t, ticketEnabled, got[0].TicketRequired)
+				require.Equal(t, account.Status == service.StatusActive, got[0].Valid,
+					"有效账号独立于共享开关、用户状态和实时调度准入条件")
+			}
 		})
 	}
 }

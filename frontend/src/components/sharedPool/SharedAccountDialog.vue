@@ -60,13 +60,13 @@
             <span><span class="block text-sm font-medium">{{ t('sharedPool.protection') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('sharedPool.protectionHint') }}</span></span>
           </label>
         </div>
-        <div v-if="!account && supportsCodexTicket && !excelBPSEnabled" class="flex items-start justify-between gap-4">
-          <div><label for="shared-codex-ticket" class="input-label">{{ t('sharedPool.codexTicket') }}</label><p class="input-hint">{{ t(codexTicketRequired ? 'sharedPool.codexTicketRequiredHint' : 'sharedPool.codexTicketHint') }}</p></div>
-          <Toggle id="shared-codex-ticket" :model-value="codexTicketRequired || codexTicketEnabled" :aria-label="t('sharedPool.codexTicket')" :disabled="saving || codexTicketRequired" @update:model-value="!codexTicketRequired && (codexTicketEnabled = $event)" />
-        </div>
-        <div v-if="!account && supportsCodexTicket" class="flex items-start justify-between gap-4">
-          <div><label for="shared-excel-bps" class="input-label">{{ t('sharedPool.excelBPS') }}</label><p class="input-hint">{{ t('sharedPool.excelBPSHint') }}</p></div>
-          <Toggle id="shared-excel-bps" v-model="excelBPSEnabled" :aria-label="t('sharedPool.excelBPS')" :disabled="saving" />
+        <div v-if="supportsExcelBPS" class="space-y-3">
+          <div class="flex items-start justify-between gap-4">
+            <div><label for="shared-excel-bps" class="input-label">{{ t('sharedPool.excelBPS') }}</label><p class="input-hint">{{ t('sharedPool.excelBPSHint') }}</p></div>
+            <Toggle id="shared-excel-bps" v-model="excelBPSEnabled" :aria-label="t('sharedPool.excelBPS')" :disabled="saving" />
+          </div>
+          <ExcelBPSOptionsFields v-if="excelBPSEnabled" v-model="excelBPSOptions" :disabled="saving" test-id-prefix="shared-excel-bps"
+            class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" />
         </div>
         <SharedCredentialsForm v-if="!account" :platform="form.platform" :type="form.type" :proxy-url="form.proxy_url" :editing="false" :disabled="saving" @change="credentials = $event" @valid="credentialsValid = $event" @busy="authorizing = $event" />
         <p v-if="error" role="alert" class="break-words text-sm text-red-600 dark:text-red-400">{{ error }}</p>
@@ -93,8 +93,10 @@ import SharedCredentialsForm from './SharedCredentialsForm.vue'
 import SharedRevenueSplit from './SharedRevenueSplit.vue'
 import SharedSettlementNotice from './SharedSettlementNotice.vue'
 import { hasSettlementPolicy } from './settlementPolicy'
-import { normalizePlanType } from '@/utils/planType'
+import { resolveSharedAccountImportDefaults } from './sharedAccountImportDefaults'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
+import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import { defaultExcelBPSOptions, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { sharedPoolAPI, type SharedAccount, type SharedAccountInput, type SharedAccountUpdateInput, type SharedConfig, type SharedImportDefaults, type SharedPlatform } from '@/api/sharedPool'
 
@@ -107,16 +109,29 @@ const platformColors: Record<SharedPlatform, string> = {
   anthropic: 'text-orange-600 dark:text-orange-400', openai: 'text-green-600 dark:text-green-400',
   gemini: 'text-blue-600 dark:text-blue-400', antigravity: 'text-purple-600 dark:text-purple-400'
 }
+const importDefaults = resolveSharedAccountImportDefaults(props.account ? undefined : props.config.import_defaults)
 const form = reactive<SharedAccountInput>({
   name: props.account?.name || '', platform: props.account?.platform || props.config.platforms[0] || 'openai',
   type: props.account?.type || 'oauth', concurrency: props.account?.concurrency || 1, proxy_url: '',
-  enabled: props.account?.enabled ?? true, protection_enabled: props.account?.protection_enabled ?? true
+  enabled: props.account?.enabled ?? true, protection_enabled: props.account?.protection_enabled ?? importDefaults.protection_enabled
 })
 const accountTypes = computed<SharedAccountInput['type'][]>(() => form.platform === 'antigravity' ? ['oauth'] : ['oauth', 'apikey'])
-const supportsCodexTicket = computed(() => form.platform === 'openai' && form.type === 'oauth')
+const isOpenAIOAuth = computed(() => form.platform === 'openai' && form.type === 'oauth')
 const canConsent = computed(() => hasSettlementPolicy(props.config))
-const codexTicketEnabled = ref(true)
-const excelBPSEnabled = ref(false)
+// 编辑时仅对后端标记为支持 BPS 的账号显示；只在开关或子选项变化时提交，避免覆盖 403 自动关闭等并行变化。
+const supportsExcelBPS = computed(() => props.account ? props.account.excel_bps_enabled !== undefined : isOpenAIOAuth.value)
+const initialExcelBPSEnabled = props.account ? props.account.excel_bps_enabled === true : importDefaults.excel_bps_enabled
+const initialExcelBPSOptions = normalizeExcelBPSOptions(props.account
+  ? props.account.excel_bps_options ?? defaultExcelBPSOptions() : importDefaults.excel_bps_options)
+const excelBPSEnabled = ref(initialExcelBPSEnabled)
+const excelBPSOptions = ref(normalizeExcelBPSOptions(initialExcelBPSOptions))
+function excelBPSInput() {
+  return excelBPSEnabled.value
+    ? { excel_bps_enabled: true, excel_bps_options: normalizeExcelBPSOptions(excelBPSOptions.value) }
+    : { excel_bps_enabled: false }
+}
+const excelBPSChanged = computed(() => excelBPSEnabled.value !== initialExcelBPSEnabled
+  || (excelBPSEnabled.value && JSON.stringify(normalizeExcelBPSOptions(excelBPSOptions.value)) !== JSON.stringify(initialExcelBPSOptions)))
 const dailyCooldown = ref(normalizeDailyCooldown(props.account?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
 function cooldownInput() {
@@ -126,8 +141,6 @@ function cooldownInput() {
 watch(() => form.platform, () => { if (!accountTypes.value.includes(form.type)) form.type = 'oauth' })
 const changeProxy = ref(false)
 const credentials = ref<Record<string, unknown>>()
-const codexTicketRequired = computed(() => supportsCodexTicket.value && typeof credentials.value?.plan_type === 'string'
-  && ['pro', 'chatgptpro', 'prolite'].includes(normalizePlanType(credentials.value.plan_type)))
 const credentialsValid = ref(true)
 const authorizing = ref(false)
 const saving = ref(false)
@@ -141,7 +154,7 @@ function validateCooldown() {
 function openImport() {
   if (saving.value || authorizing.value) return
   error.value = ''
-  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, excel_bps_enabled: excelBPSEnabled.value, ...cooldownInput() })
+  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, ...excelBPSInput(), ...cooldownInput() })
 }
 function submit() {
   if (saving.value || authorizing.value) return
@@ -160,12 +173,13 @@ async function save() {
       const input: SharedAccountUpdateInput = {
         name: form.name.trim(), platform: props.account.platform, type: props.account.type,
         enabled: props.account.enabled, protection_enabled: props.account.protection_enabled,
-        concurrency: form.concurrency, ...(changeProxy.value ? { proxy_url: form.proxy_url } : {}), ...cooldownInput()
+        concurrency: form.concurrency, ...(changeProxy.value ? { proxy_url: form.proxy_url } : {}), ...cooldownInput(),
+        ...(supportsExcelBPS.value && excelBPSChanged.value ? excelBPSInput() : {})
       }
       await sharedPoolAPI.update(props.account.id, input)
     } else {
       await sharedPoolAPI.create({ ...form, enabled: true, dispatch_consent: true, ...cooldownInput(), name: form.name.trim(), credentials: credentials.value, confirm_disable: false,
-        ...(supportsCodexTicket.value ? { codex_ticket_enabled: codexTicketRequired.value || codexTicketEnabled.value, excel_bps_enabled: excelBPSEnabled.value } : {}) })
+        ...(isOpenAIOAuth.value ? excelBPSInput() : {}) })
     }
     emit('saved')
   } catch (e: unknown) { error.value = (e as Error).message || t('sharedPool.actionFailed') }

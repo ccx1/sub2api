@@ -32,6 +32,7 @@ type SharedPoolHandler struct {
 	ticketConfig   *config.Config
 	ticketSettings sharedCodexTicketSettings
 	actions        sharedAccountActions
+	importSettings sharedAccountImportSettings
 }
 
 func NewSharedPoolHandler(pool *service.SharedPoolService, earnings service.SharedPoolEarningsRepository, keys *service.APIKeyService,
@@ -50,6 +51,7 @@ func NewSharedPoolHandler(pool *service.SharedPoolService, earnings service.Shar
 	h.ticketConfig = cfg
 	if settings != nil {
 		h.ticketSettings = settings
+		h.importSettings = settings
 	}
 	return h
 }
@@ -101,6 +103,13 @@ func (h *SharedPoolHandler) Config(c *gin.Context) {
 		return
 	}
 	data, err := h.pool.UserConfig(c.Request.Context(), userID)
+	if err == nil {
+		var defaults *sharedAccountImportDefaults
+		defaults, err = h.accountImportDefaults(c.Request.Context())
+		if defaults != nil {
+			data["import_defaults"] = defaults
+		}
+	}
 	sharedReply(c, data, err)
 }
 
@@ -159,10 +168,18 @@ func (h *SharedPoolHandler) Create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	input := service.SharedPoolAccountInput{ProtectionEnabled: true, Concurrency: 3, Type: service.AccountTypeOAuth}
-	if !sharedBind(c, &input) {
+	req := sharedAccountCreateRequest{SharedPoolAccountInput: service.SharedPoolAccountInput{ProtectionEnabled: true, Concurrency: 3, Type: service.AccountTypeOAuth}}
+	if !sharedBind(c, &req) {
 		return
 	}
+	defaults, err := h.accountImportDefaults(c.Request.Context())
+	if err != nil {
+		sharedReply(c, nil, err)
+		return
+	}
+	input := req.SharedPoolAccountInput
+	applySharedAccountImportDefaults(&input, defaults, sharedImportDefaults{ProtectionEnabled: req.ProtectionEnabled,
+		ExcelBPSEnabled: input.ExcelBPSEnabled, ExcelBPSOptions: input.ExcelBPSOptions})
 	data, err := h.pool.Create(c.Request.Context(), userID, input)
 	sharedReply(c, data, err)
 }

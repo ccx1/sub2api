@@ -8,13 +8,13 @@ import SharedPoolCatalog from '@/components/sharedPool/SharedPoolCatalog.vue'
 import SharedDispatchConsentDialog from '@/components/sharedPool/SharedDispatchConsentDialog.vue'
 import SharedAutoTransferSettings from '@/components/sharedPool/SharedAutoTransferSettings.vue'
 
-const { config, overview, pools, summary, transfer, refreshUser, showError, showSuccess, showWarning, accounts, importAccounts, codexTicket, enable, autoTransferSettings } = vi.hoisted(() => ({
-  config: vi.fn(), overview: vi.fn(), pools: vi.fn(), summary: vi.fn(), transfer: vi.fn(), refreshUser: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(), showWarning: vi.fn(), accounts: vi.fn(), importAccounts: vi.fn(), codexTicket: vi.fn(), enable: vi.fn(),
+const { config, overview, pools, summary, transfer, refreshUser, showError, showSuccess, showWarning, accounts, importAccounts, codexTicket, protection, enable, autoTransferSettings } = vi.hoisted(() => ({
+  config: vi.fn(), overview: vi.fn(), pools: vi.fn(), summary: vi.fn(), transfer: vi.fn(), refreshUser: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(), showWarning: vi.fn(), accounts: vi.fn(), importAccounts: vi.fn(), codexTicket: vi.fn(), protection: vi.fn(), enable: vi.fn(),
   autoTransferSettings: vi.fn(async () => ({ enabled: false, threshold: 1, daily_time: '00:00', timezone: 'Asia/Shanghai' }))
 }))
 vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: {
   overview, pools, config,
-  accounts, importAccounts, summary, transfer, codexTicket, enable, autoTransferSettings
+  accounts, importAccounts, summary, transfer, codexTicket, protection, enable, autoTransferSettings
 } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ refreshUser }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError, showSuccess, showWarning }) }))
@@ -98,37 +98,59 @@ describe('shared earnings transfer', () => {
     wrapper.unmount()
   })
 
-  it('locks duplicate ticket updates and refreshes the actual saved state', async () => {
-    const account = { id: 7, codex_ticket_enabled: true }
+  it('locks duplicate protection updates and refreshes the actual saved state', async () => {
+    const account = { id: 7, protection_enabled: false, codex_ticket_enabled: true }
     accounts.mockResolvedValue({ items: [account], total: 1 })
     let resolve!: () => void
-    codexTicket.mockImplementationOnce(() => new Promise<void>(done => { resolve = done }))
+    protection.mockImplementationOnce(() => new Promise<void>(done => { resolve = done }))
     const wrapper = await render()
     const card = wrapper.getComponent(SharedAccountCard)
-    card.vm.$emit('codexTicket', false)
-    card.vm.$emit('codexTicket', false)
+    card.vm.$emit('protection', true)
+    card.vm.$emit('protection', true)
     await flushPromises()
-    expect(codexTicket).toHaveBeenCalledTimes(1)
-    expect(codexTicket).toHaveBeenCalledWith(7, false)
+    expect(protection).toHaveBeenCalledTimes(1)
+    expect(protection).toHaveBeenCalledWith(7, true)
+    expect(codexTicket).not.toHaveBeenCalled()
     expect(card.props('busy')).toBe(true)
     expect(card.props('account').codex_ticket_enabled).toBe(true)
-    accounts.mockResolvedValue({ items: [{ ...account, codex_ticket_enabled: false }], total: 1 })
+    accounts.mockResolvedValue({ items: [{ ...account, protection_enabled: true }], total: 1 })
     resolve(); await flushPromises()
     expect(card.props('busy')).toBe(false)
-    expect(card.props('account').codex_ticket_enabled).toBe(false)
+    expect(card.props('account').protection_enabled).toBe(true)
+    expect(card.props('account').codex_ticket_enabled).toBe(true)
     wrapper.unmount()
   })
 
-  it('keeps the previous ticket state and unlocks after a failed update', async () => {
-    accounts.mockResolvedValue({ items: [{ id: 7, codex_ticket_enabled: true }], total: 1 })
-    codexTicket.mockRejectedValueOnce(new Error('Update failed'))
+  it('keeps the previous protection state and unlocks after a failed update', async () => {
+    accounts.mockResolvedValue({ items: [{ id: 7, protection_enabled: false, codex_ticket_enabled: true }], total: 1 })
+    protection.mockRejectedValueOnce(new Error('Update failed'))
+    const wrapper = await render()
+    const card = wrapper.getComponent(SharedAccountCard)
+    card.vm.$emit('protection', true)
+    await flushPromises()
+    expect(card.props('account').codex_ticket_enabled).toBe(true)
+    expect(card.props('account').protection_enabled).toBe(false)
+    expect(card.props('busy')).toBe(false)
+    expect(showError).toHaveBeenCalledWith('Update failed')
+    wrapper.unmount()
+  })
+
+  it('ignores legacy ticket-toggle events and keeps protection disabling behind confirmation', async () => {
+    accounts.mockResolvedValue({ items: [{ id: 7, protection_enabled: true, codex_ticket_enabled: true }], total: 1 })
+    protection.mockResolvedValue({})
     const wrapper = await render()
     const card = wrapper.getComponent(SharedAccountCard)
     card.vm.$emit('codexTicket', false)
     await flushPromises()
+    expect(codexTicket).not.toHaveBeenCalled()
     expect(card.props('account').codex_ticket_enabled).toBe(true)
-    expect(card.props('busy')).toBe(false)
-    expect(showError).toHaveBeenCalledWith('Update failed')
+    card.vm.$emit('protection', false)
+    await flushPromises()
+    expect(protection).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="confirm"]').trigger('click')
+    await flushPromises()
+    expect(protection).toHaveBeenCalledWith(7, false)
+    expect(codexTicket).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -332,15 +354,15 @@ describe('shared pool live concurrency', () => {
   })
 
   it('discards a late poll after changing an account has refreshed the catalog', async () => {
-    accounts.mockResolvedValue({ items: [{ id: 7, codex_ticket_enabled: true }], total: 1 })
-    codexTicket.mockResolvedValue({ codex_ticket_enabled: false })
+    accounts.mockResolvedValue({ items: [{ id: 7, protection_enabled: false }], total: 1 })
+    protection.mockResolvedValue({ protection_enabled: true })
     wrapper = await render(false, 'pools')
     let resolve!: (value: typeof pool) => void
     overview.mockImplementationOnce(() => new Promise(done => { resolve = done }))
     await vi.advanceTimersByTimeAsync(10_000)
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.myAccounts')!.trigger('click')
     overview.mockResolvedValue({ ...pool, current_concurrency: 7 })
-    wrapper.getComponent(SharedAccountCard).vm.$emit('codexTicket', false)
+    wrapper.getComponent(SharedAccountCard).vm.$emit('protection', true)
     await flushPromises()
     resolve({ ...pool, current_concurrency: 4 })
     await flushPromises()

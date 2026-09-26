@@ -17,6 +17,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { getAll: getProxies, listG
 vi.mock('@/api/client', () => ({ apiClient: {} }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { name: 'ModelWhitelistSelector', props: ['modelValue'], emits: ['update:modelValue'], template: '<div />' } }))
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog', props: ['show'], template: '<section v-if="show"><slot /><slot name="footer" /></section>'
 })
@@ -71,9 +72,37 @@ describe('AccountImportSettingsModal', () => {
     await submit(wrapper)
     await flushPromises()
     expect(saveSettings).toHaveBeenCalledWith({
-      enabled: true, protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true, proxy_mode: 'fixed', proxy_id: 7,
+      enabled: true, protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true,
+      excel_bps_options: { models: null, auto_disable_on_403: false, cache_creation_as_input: false }, proxy_mode: 'fixed', proxy_id: 7,
       extra: { proxy_region_mode: 'manual', proxy_region_country: 'JP', codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 7, codex_ticket_proxy_strategy: 'affinity' }
     })
+    wrapper.unmount()
+  })
+
+  it('saves Excel / BPS sub-options only while the protocol is enabled', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await enable(wrapper)
+    expect(wrapper.find('[data-testid="import-settings-excel-bps-all-models"]').exists()).toBe(false)
+    await wrapper.get('[aria-labelledby="import-default-excel-bps"]').trigger('click')
+    expect((wrapper.get('[data-testid="import-settings-excel-bps-all-models"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="import-settings-excel-bps-all-models"]').setValue(false)
+    expect(wrapper.find('[data-testid="import-settings-excel-bps-model-selection"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="import-settings-excel-bps-auto-disable-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="import-settings-excel-bps-cache-creation-as-input"]').setValue(true)
+    await submit(wrapper)
+    await flushPromises()
+    expect(saveSettings.mock.lastCall?.[0]).toMatchObject({ excel_bps_enabled: true, excel_bps_options: {
+      models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true
+    } })
+
+    await wrapper.get('[aria-labelledby="import-default-excel-bps"]').trigger('click')
+    expect(wrapper.find('[data-testid="import-settings-excel-bps-all-models"]').exists()).toBe(false)
+    await submit(wrapper)
+    await flushPromises()
+    expect(saveSettings.mock.lastCall?.[0]).toMatchObject({ excel_bps_enabled: false, excel_bps_options: {
+      models: null, auto_disable_on_403: false, cache_creation_as_input: false
+    } })
     wrapper.unmount()
   })
 

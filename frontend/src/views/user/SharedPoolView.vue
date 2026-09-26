@@ -31,7 +31,7 @@
           <p v-if="config && !config.platforms.length" class="text-sm text-amber-600">{{ t('sharedPool.noPlatforms') }}</p>
           <div v-if="!accounts.length" class="py-12 text-center"><h2 class="font-semibold">{{ t('sharedPool.emptyAccounts') }}</h2><p class="mt-2 text-sm text-gray-500">{{ t('sharedPool.emptyAccountsHint') }}</p></div>
           <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <SharedAccountCard v-for="account in accounts" :key="account.id" :account="account" :busy="busyIds.has(account.id)" @authorize="authorizingDispatch = account" @protection="protection(account, $event)" @codex-ticket="codexTicket(account, $event)" @edit="openEdit(account)" @test="testing = account" @remove="removing = account" @usage-updated="refreshAfterUsage" />
+            <SharedAccountCard v-for="account in accounts" :key="account.id" :account="account" :busy="busyIds.has(account.id)" @authorize="authorizingDispatch = account" @protection="protection(account, $event)" @edit="openEdit(account)" @test="testing = account" @remove="removing = account" @usage-updated="refreshAfterUsage" />
           </div>
           <Pagination v-if="total > 12" :page="page" :page-size="12" :total="total" :show-page-size-selector="false" @update:page="changePage" />
         </template>
@@ -157,7 +157,6 @@ function authorizeDispatch() {
   authorizingDispatch.value = null
   if (account) void action(account, () => sharedPoolAPI.enable(account.id, true, true))
 }
-function codexTicket(account: SharedAccount, enabled: boolean) { void action(account, () => sharedPoolAPI.codexTicket(account.id, enabled)) }
 function protection(account: SharedAccount, enabled: boolean) {
   if (!enabled) disablingProtection.value = account
   else void action(account, () => sharedPoolAPI.protection(account.id, true))

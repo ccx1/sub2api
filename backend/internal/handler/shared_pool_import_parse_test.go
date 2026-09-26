@@ -16,7 +16,7 @@ import (
 )
 
 func importTestDefaults() sharedImportDefaults {
-	return sharedImportDefaults{Name: "表单名称", Platform: "gemini", Type: "oauth", Concurrency: 3, Enabled: true, DispatchConsent: true, ProtectionEnabled: true}
+	return sharedImportDefaults{Name: "表单名称", Platform: "gemini", Type: "oauth", Concurrency: 3, Enabled: true, DispatchConsent: true, ProtectionEnabled: new(true)}
 }
 
 func TestSharedImportCompatibleFormats(t *testing.T) {

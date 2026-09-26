@@ -135,7 +135,7 @@ func (m *SharedPoolOverviewMetrics) appendAccount(account SharedPoolOverviewAcco
 	if account.Valid {
 		m.AvailableAccounts++
 	}
-	if account.Valid && account.Available && (!account.TicketRequired || account.Ticket.hasReadyModelForParticipation(cfg, now)) {
+	if account.Valid && account.Available && (!cfg.Enabled || !account.TicketRequired || account.Ticket.hasReadyModelForParticipation(cfg, now)) {
 		m.ParticipatingAccounts++
 		if account.Concurrency <= 0 {
 			m.ParticipatingConcurrencyUnlimited = true

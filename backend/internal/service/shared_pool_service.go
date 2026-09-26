@@ -62,12 +62,12 @@ func (s *SharedPoolService) Create(ctx context.Context, userID int64, in SharedP
 	if in.CodexTicketEnabled != nil {
 		extra[OpenAICodexTicketEnabledExtraKey] = *in.CodexTicketEnabled
 	}
-	if in.ExcelBPSEnabled != nil && *in.ExcelBPSEnabled {
-		if !(&Account{Platform: in.Platform, Type: in.Type, Credentials: credentials, Extra: map[string]any{excelBPSExtraKey: true}}).IsExcelBPSEnabled() {
-			return nil, infraerrors.BadRequest("EXCEL_BPS_UNSUPPORTED_ACCOUNT", "Excel / BPS 协议仅支持 OpenAI OAuth 账号")
-		}
-		extra[excelBPSExtraKey] = true
-		delete(extra, OpenAICodexTicketEnabledExtraKey)
+	bpsExtra, err := sharedExcelBPSExtra(in, &Account{Platform: in.Platform, Type: in.Type, Credentials: credentials})
+	if err != nil {
+		return nil, err
+	}
+	if bpsExtra != nil {
+		replaceExcelBPSExtra(extra, bpsExtra)
 	}
 	proxyID, err := s.applyProxy(ctx, userID, in.ProxyURL, extra)
 	if err != nil {
@@ -78,7 +78,6 @@ func (s *SharedPoolService) Create(ctx context.Context, userID int64, in SharedP
 	if err != nil {
 		return nil, err
 	}
-	normalizeSharedCodexTicket(a)
 	if err := s.prepareSharedDispatch(ctx, cfg, a, in.DispatchConsent); err != nil {
 		return nil, err
 	}
@@ -107,10 +106,7 @@ func (s *SharedPoolService) Update(ctx context.Context, userID, id int64, in Sha
 		return nil, err
 	}
 	if in.CodexTicketEnabled != nil {
-		return nil, infraerrors.BadRequest("SHARED_SWITCH_SEPARATE", "请在账号卡片上单独操作打票开关，刷新后重试")
-	}
-	if in.ExcelBPSEnabled != nil {
-		return nil, infraerrors.BadRequest("SHARED_EXCEL_BPS_CREATE_ONLY", "Excel / BPS 协议仅能在添加账号时设置")
+		return nil, infraerrors.Forbidden("SHARED_CODEX_TICKET_ADMIN_ONLY", "打票功能由管理员统一控制")
 	}
 	if in.Platform != a.Platform || in.Type != a.Type {
 		return nil, infraerrors.BadRequest("SHARED_IDENTITY_IMMUTABLE", "平台和认证类型不能修改，请重新创建账号")
@@ -147,7 +143,12 @@ func (s *SharedPoolService) Update(ctx context.Context, userID, id int64, in Sha
 	if input.Credentials != nil {
 		updated.Credentials = input.Credentials
 	}
-	input.ForceCodexTicket = SharedPoolCodexTicketRequired(&updated)
+	if in.ExcelBPSEnabled != nil {
+		input.ExcelBPSChanged = true
+		if input.ExcelBPSExtra, err = sharedExcelBPSExtra(in, &updated); err != nil {
+			return nil, err
+		}
+	}
 	if err = s.repo.UpdateSharedAccount(ctx, userID, id, input); err != nil {
 		return nil, err
 	}
@@ -166,6 +167,30 @@ func (s *SharedPoolService) Update(ctx context.Context, userID, id int64, in Sha
 		}
 	}
 	return s.Get(ctx, userID, id)
+}
+
+// sharedExcelBPSExtra 校验并生成 BPS 整族配置；未开启时返回 nil。子选项只在开启时生效。
+func sharedExcelBPSExtra(in SharedPoolAccountInput, account *Account) (map[string]any, error) {
+	if in.ExcelBPSEnabled == nil || !*in.ExcelBPSEnabled {
+		if in.ExcelBPSOptions != nil {
+			return nil, infraerrors.BadRequest("EXCEL_BPS_OPTIONS_REQUIRE_ENABLED", "Excel / BPS 子选项需要先开启协议")
+		}
+		return nil, nil
+	}
+	candidate := *account
+	candidate.Extra = map[string]any{excelBPSExtraKey: true}
+	if !candidate.IsExcelBPSEnabled() {
+		return nil, infraerrors.BadRequest("EXCEL_BPS_UNSUPPORTED_ACCOUNT", "Excel / BPS 协议仅支持 OpenAI OAuth 账号")
+	}
+	options := ExcelBPSOptions{}
+	if in.ExcelBPSOptions != nil {
+		options = *in.ExcelBPSOptions
+	}
+	options, err := normalizeExcelBPSOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	return excelBPSExtra(options), nil
 }
 
 func (s *SharedPoolService) ensureSharedPrivacy(ctx context.Context, a *Account) {

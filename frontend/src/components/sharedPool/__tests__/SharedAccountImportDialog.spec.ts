@@ -8,6 +8,7 @@ const { importAccounts, showSuccess, showWarning } = vi.hoisted(() => ({ importA
 vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: { importAccounts } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess, showWarning }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { name: 'ModelWhitelistSelector', props: ['modelValue'], emits: ['update:modelValue'], template: '<div />' } }))
 const config = { platforms: ['openai'] as const, max_concurrency: 10, platform_rate_bps: 2000, proxy_rate_bps: 100, settlement_multiplier: 1 }
 const response = { total: 1, created: 1, failed: 0, items: [{ index: 1, source: 'text', name: 'My account', account_id: 10 }], warnings: [] }
 function render(initialDefaults?: SharedImportDefaults) {
@@ -59,7 +60,7 @@ describe('shared account import', () => {
     await flushPromises()
     expect(importAccounts).toHaveBeenCalledWith({
       sources: [{ name: 'export.json', content: '{"accounts":[]}' }, { name: 'auth.json', content: '{"tokens":{}}' }],
-      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true, excel_bps_enabled: false }
+      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, excel_bps_enabled: false }
     }, expect.stringMatching(/^shared-import-/))
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
@@ -79,15 +80,12 @@ describe('shared account import', () => {
     wrapper.unmount()
   })
 
-  it('sends an explicit false ticket setting and uses a new retry key after changing it', async () => {
-    importAccounts.mockRejectedValue(new Error('offline'))
-    const wrapper = render()
+  it.each([false, true])('omits inherited ticket choice %s and exposes no ticket control', async enabled => {
+    const wrapper = render({ enabled: true, concurrency: 1, protection_enabled: true, codex_ticket_enabled: enabled })
+    expect(wrapper.find('#shared-import-codex-ticket').exists()).toBe(false)
     await wrapper.get('textarea').setValue('{}')
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    await wrapper.get('#shared-import-codex-ticket').trigger('click')
-    await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(importAccounts.mock.calls[1][0].defaults.codex_ticket_enabled).toBe(false)
-    expect(importAccounts.mock.calls[1][1]).not.toBe(importAccounts.mock.calls[0][1])
+    expect(importAccounts.mock.lastCall?.[0].defaults).not.toHaveProperty('codex_ticket_enabled')
     wrapper.unmount()
   })
 
@@ -101,6 +99,29 @@ describe('shared account import', () => {
     wrapper.unmount()
     const inherited = render({ enabled: true, concurrency: 1, protection_enabled: true, excel_bps_enabled: true })
     expect(inherited.get('#shared-import-excel-bps').attributes('aria-checked')).toBe('true')
+    inherited.unmount()
+  })
+
+  it('sends Excel / BPS sub-options in import defaults and inherits them', async () => {
+    const wrapper = render()
+    await wrapper.get('textarea').setValue('{}')
+    expect(wrapper.find('[data-testid="shared-import-excel-bps-all-models"]').exists()).toBe(false)
+    await wrapper.get('#shared-import-excel-bps').trigger('click')
+    await wrapper.get('[data-testid="shared-import-excel-bps-all-models"]').setValue(false)
+    expect(wrapper.find('#shared-import-codex-ticket').exists()).toBe(false)
+    await wrapper.get('[data-testid="shared-import-excel-bps-auto-disable-on-403"]').setValue(true)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(importAccounts.mock.calls[0][0].defaults).toMatchObject({ excel_bps_enabled: true, excel_bps_options: {
+      models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false
+    } })
+    wrapper.unmount()
+
+    const options = { models: null, auto_disable_on_403: false, cache_creation_as_input: true }
+    const inherited = render({ enabled: true, concurrency: 1, protection_enabled: true, excel_bps_enabled: true, excel_bps_options: options })
+    expect((inherited.get('[data-testid="shared-import-excel-bps-cache-creation-as-input"]').element as HTMLInputElement).checked).toBe(true)
+    await inherited.get('textarea').setValue('{}')
+    await inherited.get('form').trigger('submit'); await flushPromises()
+    expect(importAccounts.mock.calls[1][0].defaults).toMatchObject({ excel_bps_enabled: true, excel_bps_options: options })
     inherited.unmount()
   })
 

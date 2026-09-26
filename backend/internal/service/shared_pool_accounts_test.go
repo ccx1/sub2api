@@ -18,6 +18,7 @@ type sharedPoolRepoStub struct {
 	stateCalls   int
 	state        SharedPoolAccountState
 	updateCalls  int
+	lastUpdate   SharedPoolAccountUpdate
 }
 
 func (r *sharedPoolRepoStub) GetSharedAccount(_ context.Context, ownerID, id int64) (*SharedPoolAccountRecord, error) {
@@ -81,8 +82,9 @@ type sharedPoolAccountRepoStub struct {
 	account *Account
 }
 
-func (r *sharedPoolRepoStub) UpdateSharedAccount(context.Context, int64, int64, SharedPoolAccountUpdate) error {
+func (r *sharedPoolRepoStub) UpdateSharedAccount(_ context.Context, _ int64, _ int64, in SharedPoolAccountUpdate) error {
 	r.updateCalls++
+	r.lastUpdate = in
 	return nil
 }
 

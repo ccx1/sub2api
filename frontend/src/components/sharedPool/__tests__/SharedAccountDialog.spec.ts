@@ -10,6 +10,7 @@ vi.mock('@/api/sharedPool', () => ({ sharedPoolAPI: { create, update } }))
 vi.mock('@/api/admin', () => ({ adminAPI: { grok: { getCapabilities: vi.fn() } } }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copied: false, copyToClipboard: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { name: 'ModelWhitelistSelector', props: ['modelValue'], emits: ['update:modelValue'], template: '<div />' } }))
 
 const config = { platforms: ['openai'] as const, max_concurrency: 10, platform_rate_bps: 2000, proxy_rate_bps: 100, settlement_multiplier: 1 }
 const account = { id: 7, name: 'Owner account', platform: 'openai', type: 'oauth', concurrency: 2, enabled: true, protection_enabled: true, proxy_mode: 'custom' } as SharedAccount
@@ -35,7 +36,7 @@ describe('shared account creation and edit boundaries', () => {
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, codex_ticket_enabled: true, excel_bps_enabled: false })
+    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, excel_bps_enabled: false })
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('group_ids')
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('rate_multiplier')
   })
@@ -154,7 +155,7 @@ describe('shared account creation and edit boundaries', () => {
     await wrapper.get('#shared-concurrency').setValue(3)
     await wrapper.get('#shared-proxy').setValue('http://fixture.example:8080')
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
-    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, codex_ticket_enabled: true, excel_bps_enabled: false }])
+    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, excel_bps_enabled: false }])
     expect(wrapper.find('select').exists()).toBe(false)
   })
 
@@ -185,28 +186,25 @@ describe('shared account creation and edit boundaries', () => {
     expect(wrapper.findComponent(SharedCredentialsForm).props('type')).toBe('oauth')
   })
 
-  it('preserves an explicit disabled ticket choice for creation and import', async () => {
+  it('omits user ticket configuration for creation and import', async () => {
     const wrapper = render()
-    await wrapper.get('#shared-codex-ticket').trigger('click')
+    expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ codex_ticket_enabled: false }))
+    expect(create.mock.lastCall?.[0]).not.toHaveProperty('codex_ticket_enabled')
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
-    expect(wrapper.emitted('import')?.[0]?.[0]).toEqual(expect.objectContaining({ codex_ticket_enabled: false }))
+    expect(wrapper.emitted('import')?.[0]?.[0]).not.toHaveProperty('codex_ticket_enabled')
   })
 
-  it.each(['pro', 'chatgpt_pro', 'prolite'])('forces tickets for recognized OpenAI OAuth %s credentials', async planType => {
+  it.each(['pro', 'chatgpt_pro', 'prolite'])('leaves tickets to server policy for OpenAI OAuth %s credentials', async planType => {
     const wrapper = render()
-    await wrapper.get('#shared-codex-ticket').trigger('click')
     wrapper.getComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token', plan_type: planType })
     await wrapper.vm.$nextTick()
-    const ticket = wrapper.get('#shared-codex-ticket')
-    expect(ticket.attributes('aria-checked')).toBe('true')
-    expect(ticket.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('sharedPool.codexTicketRequiredHint')
+    expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('sharedPool.codexTicketRequiredHint')
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ codex_ticket_enabled: true }))
+    expect(create.mock.lastCall?.[0]).not.toHaveProperty('codex_ticket_enabled')
     wrapper.unmount()
   })
 
@@ -214,10 +212,9 @@ describe('shared account creation and edit boundaries', () => {
     const wrapper = render()
     wrapper.getComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token', plan_type: 'self_serve_business_prolite' })
     await wrapper.vm.$nextTick()
-    expect(wrapper.get('#shared-codex-ticket').attributes('disabled')).toBeUndefined()
-    await wrapper.get('#shared-codex-ticket').trigger('click')
+    expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ codex_ticket_enabled: false }))
+    expect(create.mock.lastCall?.[0]).not.toHaveProperty('codex_ticket_enabled')
     wrapper.unmount()
   })
 
@@ -232,6 +229,55 @@ describe('shared account creation and edit boundaries', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: true }))
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
     expect(wrapper.emitted('import')?.[0]?.[0]).toEqual(expect.objectContaining({ excel_bps_enabled: true }))
+  })
+
+  it('sends Excel / BPS sub-options without exposing ticket controls for scoped models', async () => {
+    const wrapper = render()
+    await wrapper.get('#shared-excel-bps').trigger('click')
+    expect((wrapper.get('[data-testid="shared-excel-bps-all-models"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="shared-excel-bps-all-models"]').setValue(false)
+    expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
+    await wrapper.get('[data-testid="shared-excel-bps-auto-disable-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="shared-excel-bps-cache-creation-as-input"]').setValue(true)
+    wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const options = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true }
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: true, excel_bps_options: options }))
+    await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
+    expect(wrapper.emitted('import')?.[0]?.[0]).toEqual(expect.objectContaining({ excel_bps_enabled: true, excel_bps_options: options }))
+  })
+
+  it('edits Excel / BPS only when the saved configuration changes', async () => {
+    const saved = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false }
+    const wrapper = render(true, { excel_bps_enabled: true, excel_bps_options: saved })
+    expect(wrapper.get('#shared-excel-bps').attributes('aria-checked')).toBe('true')
+    expect((wrapper.get('[data-testid="shared-excel-bps-auto-disable-on-403"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('excel_bps_enabled')
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('excel_bps_options')
+
+    await wrapper.get('[data-testid="shared-excel-bps-cache-creation-as-input"]').setValue(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update.mock.lastCall?.[1]).toMatchObject({ excel_bps_enabled: true, excel_bps_options: { ...saved, cache_creation_as_input: true } })
+
+    await wrapper.get('#shared-excel-bps').trigger('click')
+    expect(wrapper.find('[data-testid="shared-excel-bps-all-models"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update.mock.lastCall?.[1]).toMatchObject({ excel_bps_enabled: false })
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('excel_bps_options')
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('codex_ticket_enabled')
+  })
+
+  it('hides Excel / BPS when editing accounts that do not support it', async () => {
+    const wrapper = render(true)
+    expect(wrapper.find('#shared-excel-bps').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('excel_bps_enabled')
   })
 
   it('omits ticket configuration for API-key and other platform accounts', async () => {

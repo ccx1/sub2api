@@ -16,6 +16,8 @@
     </div>
     <p class="input-hint">{{ t('admin.accountImportSettings.protectionHint') }}</p>
     <p class="input-hint">{{ t('admin.accountImportSettings.excelBPSHint') }}</p>
+    <ExcelBPSOptionsFields v-if="settings.excel_bps_enabled" v-model="excelBPSOptions" :disabled="disabled" test-id-prefix="import-settings-excel-bps"
+      class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" />
     <label class="block">
       <span class="input-label">{{ t('admin.accountImportSettings.proxyMode') }}</span>
       <select v-model="settings.proxy_mode" class="input w-full" data-testid="import-settings-proxy-mode" :disabled="disabled">
@@ -61,6 +63,8 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
 import AccountProxyRegionSettings from '@/components/account/AccountProxyRegionSettings.vue'
 import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
+import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import { normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { accountProxyRegionExtra, accountProxyRegionValidationError, BILLING_CURRENCY_COUNTRIES, filterProxiesByRegion, normalizeProxyRegionCountry, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import { codexTicketProxyExtra, codexTicketProxyValidationError, isAvailableCodexTicketProxy, readCodexTicketProxy } from '@/utils/codexTicketProxy'
 import { isValidRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyGroupId, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyRegionFallback, type RandomProxyRegionFallback } from '@/utils/randomProxy'
@@ -77,6 +81,10 @@ function clearExtra(prefix: string) {
   for (const key of Object.keys(extra)) if (key.startsWith(prefix)) delete extra[key]
   settings.value.extra = extra
 }
+const excelBPSOptions = computed({
+  get: () => normalizeExcelBPSOptions(settings.value.excel_bps_options),
+  set: value => { settings.value.excel_bps_options = value }
+})
 const randomEnabled = computed({
   get: () => settings.value.proxy_mode === 'random',
   set: value => { if (!props.disabled) settings.value.proxy_mode = value ? 'random' : 'preserve' }

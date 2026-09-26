@@ -1,6 +1,7 @@
 import { apiClient, buildApiUrl } from './client'
 import type { Account, AccountUsageInfo, ClaudeModel } from '@/types'
 import type { OpenAIQuotaUsage, OpenAIQuotaResetResult } from '@/api/admin/accounts'
+import type { ExcelBPSOptions } from '@/utils/excelBPSOptions'
 
 export type SharedPlatform = 'openai' | 'anthropic' | 'gemini' | 'antigravity'
 export interface SharedSettlementPolicy {
@@ -40,6 +41,9 @@ export interface SharedAccount {
   priority?: number
   codex_ticket_enabled?: boolean
   codex_ticket_required?: boolean
+  // 仅支持 BPS 的 OpenAI OAuth 账号返回；options 仅在开启时返回。
+  excel_bps_enabled?: boolean
+  excel_bps_options?: ExcelBPSOptions
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
   settlement_multiplier?: number | null
@@ -50,21 +54,28 @@ export interface SharedAccountInput {
   credentials?: Record<string, unknown>; confirm_disable?: boolean
   codex_ticket_enabled?: boolean
   excel_bps_enabled?: boolean
+  excel_bps_options?: ExcelBPSOptions
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
 }
 export interface SharedAccountAllocationInput {
   group_ids?: number[]; admin_disabled?: boolean; enabled?: boolean; subscription_tier?: string; priority?: number
 }
-export type SharedAccountUpdateInput = Pick<SharedAccountInput, 'name' | 'platform' | 'type' | 'concurrency' | 'proxy_url' | 'enabled' | 'protection_enabled' | 'daily_cooldown'>
+export type SharedAccountUpdateInput = Pick<SharedAccountInput, 'name' | 'platform' | 'type' | 'concurrency' | 'proxy_url' | 'enabled' | 'protection_enabled' | 'daily_cooldown' | 'excel_bps_enabled' | 'excel_bps_options'>
+export interface SharedAccountImportDefaults {
+  protection_enabled: boolean; codex_ticket_enabled: boolean; excel_bps_enabled: boolean
+  excel_bps_options: ExcelBPSOptions
+}
 export interface SharedConfig extends SharedSettlementPolicy {
   platforms: SharedPlatform[]; max_concurrency: number; platform_rate_bps: number; proxy_rate_bps: number
+  import_defaults?: SharedAccountImportDefaults
 }
 export interface SharedImportDefaults {
   name?: string; platform?: SharedPlatform; type?: 'oauth' | 'apikey'; concurrency: number
   proxy_url?: string; enabled: boolean; protection_enabled: boolean
   codex_ticket_enabled?: boolean
   excel_bps_enabled?: boolean
+  excel_bps_options?: ExcelBPSOptions
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
 }
@@ -148,7 +159,6 @@ export const sharedPoolAPI = {
   remove: async (id: number) => { await apiClient.delete(`${userPath}/accounts/${id}`) },
   enable: async (id: number, enabled: boolean, dispatchConsent?: boolean) => (await apiClient.post<SharedAccount>(`${userPath}/accounts/${id}/enabled`, { enabled, ...(dispatchConsent !== undefined ? { dispatch_consent: dispatchConsent } : {}) })).data,
   protection: async (id: number, enabled: boolean) => (await apiClient.post<SharedAccount>(`${userPath}/accounts/${id}/protection`, { enabled, confirm_disable: !enabled })).data,
-  codexTicket: async (id: number, enabled: boolean) => (await apiClient.post<SharedAccount>(`${userPath}/accounts/${id}/codex-ticket`, { enabled })).data,
   summary: async () => (await apiClient.get<SharedSummary>(`${userPath}/summary`)).data,
   autoTransferSettings: async () => (await apiClient.get<SharedAutoTransferSettings>(`${userPath}/auto-transfer`)).data,
   saveAutoTransferSettings: async ({ enabled, threshold, daily_time }: SharedAutoTransferInput) => (await apiClient.put<SharedAutoTransferSettings>(`${userPath}/auto-transfer`, { enabled, threshold, daily_time })).data,
