@@ -142,7 +142,7 @@ func (s *OpenAIGatewayService) doOpenAIProxyAttempt(req *http.Request, account *
 		resp, handled, err := s.pluginManager.RoundTripOpenAIOAuth(req.Context(), req, target.url, account)
 		if handled {
 			markOpenAIPluginHandled(req.Context())
-			return markOpenAIResponseEgress(resp, req, target.proxyID), err
+			return markOpenAIResponseEgress(resp, req, target.proxyID, target), err
 		}
 	}
 	profile, err := resolveMode1TLSProfile(account)
@@ -154,7 +154,7 @@ func (s *OpenAIGatewayService) doOpenAIProxyAttempt(req *http.Request, account *
 	} else {
 		resp, err = s.httpUpstream.Do(req, target.url, account.ID, account.Mode1EffectiveConcurrency())
 	}
-	return markOpenAIResponseEgress(resp, req, target.proxyID), err
+	return markOpenAIResponseEgress(resp, req, target.proxyID, target), err
 }
 
 // doUpstreamWithProxyFallback executes the upstream request through the account's

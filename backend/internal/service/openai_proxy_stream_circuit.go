@@ -237,20 +237,37 @@ func openAIProxyStreamCircuitProxyID(account *Account) (int64, bool) {
 }
 
 type openAIResponseEgressKey struct{}
+type openAIResponseEgressTargetKey struct{}
 
 // Attach local-only metadata to the response's request, never to HTTP headers
 // or the shared Account snapshot. A fallback response must not heal/blame the
 // bound primary proxy. A negative ID means the caller cannot identify egress.
-func markOpenAIResponseEgress(resp *http.Response, req *http.Request, proxyID int64) *http.Response {
-	if resp == nil || req == nil || proxyID < 0 {
+func markOpenAIResponseEgress(resp *http.Response, req *http.Request, proxyID int64, targets ...runtimeProxyEgress) *http.Response {
+	if resp == nil || req == nil || (proxyID < 0 && len(targets) == 0) {
 		return resp
 	}
 	responseRequest := resp.Request
 	if responseRequest == nil {
 		responseRequest = req
 	}
-	resp.Request = responseRequest.WithContext(context.WithValue(responseRequest.Context(), openAIResponseEgressKey{}, proxyID))
+	ctx := responseRequest.Context()
+	if proxyID >= 0 {
+		ctx = context.WithValue(ctx, openAIResponseEgressKey{}, proxyID)
+	}
+	if len(targets) > 0 {
+		// 仅请求内保存实际 URL，避免配置变更后用 proxyID 重查得到另一出口。
+		ctx = context.WithValue(ctx, openAIResponseEgressTargetKey{}, targets[0])
+	}
+	resp.Request = responseRequest.WithContext(ctx)
 	return resp
+}
+
+func openAIResponseEgressTarget(resp *http.Response) (runtimeProxyEgress, bool) {
+	if resp == nil || resp.Request == nil {
+		return runtimeProxyEgress{}, false
+	}
+	target, ok := resp.Request.Context().Value(openAIResponseEgressTargetKey{}).(runtimeProxyEgress)
+	return target, ok
 }
 
 func openAIResponseEgressProxyID(account *Account, responses ...*http.Response) (int64, bool) {

@@ -177,6 +177,9 @@ func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL st
 	}()
 	evidence := &excelBPSWriteEvidence{}
 	req = evidence.request(req)
+	if target, pinned := req.Context().Value(excelBPSPinnedEgressKey{}).(runtimeProxyEgress); pinned {
+		return s.doOpenAIProxyAttempt(req, account, target)
+	}
 	if pinned, _ := req.Context().Value(excelBPSPinnedEgressKey{}).(bool); pinned {
 		target := runtimeProxyEgress{url: proxyURL, proxyID: -1}
 		if proxyURL == "" {
@@ -282,7 +285,13 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if identity != "" {
 		replay, catalog = &excelBPSReplay, &excelBPSCatalog
 	}
-	upstreamBody, bridge, err := basispoints.PrepareWithCatalog(body, scope, replay, catalog)
+	var upstreamBody []byte
+	var bridge *basispoints.Bridge
+	if images != nil {
+		upstreamBody, bridge, err = images.PrepareWithCatalog(scope, replay, catalog)
+	} else {
+		upstreamBody, bridge, err = basispoints.PrepareWithCatalog(body, scope, replay, catalog)
+	}
 	if err != nil {
 		return fail(400, "basispoints_request_invalid", err.Error())
 	}
@@ -299,7 +308,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		attachmentProxy = account.Proxy.URL()
 	}
 	if images != nil && images.HasImages() {
-		// ?????????????????????????????
+		// 附件与推理必须复用已选出口，上传后不可切换代理。
 		ctx = context.WithValue(ctx, excelBPSPinnedEgressKey{}, true)
 	}
 	if images != nil && images.HasImages() {
@@ -344,7 +353,54 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if err != nil {
 		return fail(502, "basispoints_transport_error", "Excel BPS connection failed; request was not replayed after sending")
 	}
-	defer func() { _ = resp.Body.Close() }()
+	replayTarget, replayRouteKnown := openAIResponseEgressTarget(resp)
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	if resp.StatusCode == http.StatusBadRequest {
+		// 先释放响应持有的并发槽，再通过原出站封装固定实际出口重试。
+		const maxRejectionBytes = 512 << 10
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxRejectionBytes+1))
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(raw))
+		if retryBody, retry := prepareExcelBPSInvalidEncryptedRetry(upstreamBody, raw); retry && replayRouteKnown && readErr == nil && len(raw) <= maxRejectionBytes && ctx.Err() == nil {
+			// 仅加密恢复固定首次响应的实际出口，普通工具纠错保留原降级策略。
+			retryCtx := context.WithValue(requestCtx, excelBPSPinnedEgressKey{}, replayTarget)
+			retryReq, retryErr := newExcelBPSRequest(retryCtx, retryBody, token, accountID)
+			if retryErr != nil {
+				return fail(502, "basispoints_transport_error", "Excel BPS recovery request could not be prepared")
+			}
+			retryProxyID, retryProxyName := opsUpstreamProxyAttribution(account)
+			if replayTarget.proxyID == 0 {
+				retryProxyID, retryProxyName = nil, opsProxyNameDirect
+			} else if replayTarget.proxyID > 0 {
+				retryProxyID = &replayTarget.proxyID
+				retryProxyName = strings.TrimSpace(replayTarget.proxyName)
+				if retryProxyName == "" {
+					retryProxyName = opsProxyNameUnnamed
+				}
+			}
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+				ProxyID: retryProxyID, ProxyName: retryProxyName,
+				UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"),
+				UpstreamURL: basispoints.ResponsesURL, Kind: "invalid_encrypted_content_retry",
+				Message: "Excel BPS rejected encrypted reasoning; retrying once without opaque reasoning on the same route",
+			})
+			logger.LegacyPrintf("service.openai_excel_bps", "retrying invalid encrypted reasoning once: account_id=%d", account.ID)
+			c.Set("excel_bps_upstream_attempt", c.GetInt("excel_bps_upstream_attempt")+1)
+			// Do not re-enter proxy acquisition or transport retries after sending.
+			resp, err = s.doExcelBPSUpstream(retryReq, proxyURL, account)
+			SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
+			if err != nil {
+				recordExcelBPSTransportFailure(ctx, c, account, scope, proxyURL, err, "encrypted_recovery", c.GetInt("excel_bps_upstream_attempt"), false)
+				return fail(502, "basispoints_transport_error", "Excel BPS recovery connection failed; request was not replayed again")
+			}
+			upstreamBody = retryBody
+		}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 		// BPS throttles its own endpoint. A BPS 429 must not write Codex
@@ -382,6 +438,10 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		message := "Excel BPS rejected this request; account scheduling was not changed"
 		errorCode := "basispoints_upstream_error"
+		if resp.StatusCode == http.StatusBadRequest && isExcelBPSInvalidEncryptedContent(raw) {
+			errorCode = "invalid_encrypted_content"
+			message = "Excel BPS could not verify encrypted conversation state; resend the original plaintext history or start a new conversation"
+		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			errorCode = "basispoints_rate_limited"
 			message = "Excel BPS rate limit exceeded; Codex account scheduling was not changed"

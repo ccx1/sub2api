@@ -89,3 +89,19 @@ func TestExcelBPSManualTestPreservesNativeProxyAndSessionIdentity(t *testing.T) 
 		}
 	}
 }
+
+func TestExcelBPSBackgroundTestHandlesNilHeader(t *testing.T) {
+	const wire = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_background\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}}
+	svc := &AccountTestService{openaiGatewayService: openAIClientToolsTestService(upstream)}
+	account := excelAccount()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = &http.Request{}
+	require.NotPanics(t, func() {
+		err := svc.testExcelBPSAccountConnection(c, account, "gpt-6-astra", "Reply OK")
+		require.NoError(t, err)
+	})
+	require.Nil(t, c.Request.Header, "the inbound request must remain unchanged")
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, basispoints.ResponsesURL, upstream.lastReq.URL.String())
+}

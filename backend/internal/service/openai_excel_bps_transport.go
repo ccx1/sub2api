@@ -93,6 +93,9 @@ func (s *OpenAIGatewayService) doExcelBPSRequest(ctx context.Context, c *gin.Con
 		recordExcelBPSTransportFailure(ctx, c, account, scope, proxy, err, "transport", 1, false)
 		return nil, proxy, err
 	}
+	if target, ok := openAIResponseEgressTarget(resp); ok {
+		proxy = target.url
+	}
 	return resp, proxy, nil
 }
 
