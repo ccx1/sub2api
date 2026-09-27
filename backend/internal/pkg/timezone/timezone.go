@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	// 公共时区包独立运行时也可加载 IANA 数据，不依赖业务模块的间接导入。
+	_ "time/tzdata"
 )
 
 var (

@@ -897,6 +897,8 @@ export default {
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
         excelBPS: 'Excel / BPS protocol',
+        excelBPSIgnoreImages: 'Ignore image inputs when image support is disabled',
+        excelBPSIgnoreImagesDesc: 'Disabled by default. Applies only while Excel / BPS image support is off in system settings. Replaces images in current and historical messages and tool results with an explicit omission notice, preserving text and tool call pairing so old screenshots do not block the conversation or cause repeated image reads. The model cannot see omitted images. Enabling image support restores normal image handling.',
         excelBPSCacheCreationAsInput: 'Bill cache creation as regular input',
         excelBPSAutoDisableOn403: 'Automatically disable BPS on a 403 error',
         excelBPSAutoMoveOn403: 'Automatically change groups on a BPS 403 error',
@@ -913,7 +915,7 @@ export default {
         excelBPSModels: 'Select models for Excel / BPS',
         excelBPSAstraOnly: 'Astra only',
         excelBPSModelsHint: 'Matches model names after account mapping. Selected models use Excel / BPS; other models retain their Codex, WS and passthrough settings. An empty selection disables BPS routing.',
-        excelBPSNotice: 'Start a new Codex conversation after saving. Selected models use HTTP/SSE regardless of WS mode or passthrough. Supports Responses, client tools and HTTPS images; base64 images are unsupported. max / ultra use xhigh. Model access depends on the upstream.',
+        excelBPSNotice: 'Start a new Codex conversation after saving. Selected models use HTTP/SSE regardless of WS mode or passthrough. Supports Responses and client tools; image inputs follow the system image support settings. max / ultra use xhigh. Model access depends on the upstream.',
         copilotSDKDesc: 'Preserve native Codex tools and cancel SDK turns on disconnect. Use a dedicated group with one sidecar account; Base URL and API Key belong to the sidecar.',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',

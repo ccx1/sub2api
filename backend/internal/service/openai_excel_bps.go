@@ -177,6 +177,7 @@ func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL st
 	}()
 	evidence := &excelBPSWriteEvidence{}
 	req = evidence.request(req)
+	defer func() { resp, err = evidence.observeResult(req, resp, err) }()
 	if target, pinned := req.Context().Value(excelBPSPinnedEgressKey{}).(runtimeProxyEgress); pinned {
 		return s.doOpenAIProxyAttempt(req, account, target)
 	}
@@ -195,19 +196,27 @@ func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL st
 // BPS deliberately bypasses Codex ticket/cookie injection and OAuth plugins:
 // only the selected account's bearer and ChatGPT account ID belong on this host.
 func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, start time.Time) (*OpenAIForwardResult, error) {
-	fail := func(status int, code, message string) (*OpenAIForwardResult, error) {
+	fail := func(status int, code, message string, params ...string) (*OpenAIForwardResult, error) {
 		// A compact keepalive may already have committed SSE headers. Otherwise
 		// finish a single JSON response so the handler cannot append another error.
 		committed := StopOpenAICompactSSEKeepaliveCommitted(c)
 		MarkResponseCommitted(c)
+		param := ""
+		if len(params) > 0 {
+			param = params[0]
+		}
 		if committed {
-			writeOpenAICompactSSEFailureMessage(c, status, code, message)
+			writeOpenAICompactSSEFailureMessageParam(c, status, code, message, param)
 		} else {
 			errorType := "invalid_request_error"
 			if status >= 500 {
 				errorType = "server_error"
 			}
-			c.JSON(status, gin.H{"error": gin.H{"type": errorType, "code": code, "message": message}})
+			errorBody := gin.H{"type": errorType, "code": code, "message": message}
+			if param != "" {
+				errorBody["param"] = param
+			}
+			c.JSON(status, gin.H{"error": errorBody})
 		}
 		return nil, fmt.Errorf("excel BPS: %s", code)
 	}
@@ -256,14 +265,37 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if identity != "" {
 		replay, catalog = &excelBPSReplay, &excelBPSCatalog
 	}
+	var imageSettings ExcelBPSImageRelaySettings
+	imageSettingsLoaded := false
+	if account.IsExcelBPSIgnoreImagesEnabled() {
+		stripped, stripErr := basispoints.StripInputImages(body)
+		if stripErr != nil {
+			return fail(400, "basispoints_request_invalid", stripErr.Error())
+		}
+		// 只有真实图片需要读取全局开关；纯文本请求继续保持无图片配置依赖。
+		if !bytes.Equal(stripped, body) {
+			var settingsErr error
+			imageSettings, settingsErr = s.settingService.GetExcelBPSImageRelaySettings(ctx)
+			if settingsErr != nil {
+				return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
+			}
+			imageSettingsLoaded = true
+			if !imageSettings.Enabled {
+				body = stripped
+			}
+		}
+	}
 	upstreamBody, bridge, err := basispoints.PrepareWithCatalog(body, scope, replay, catalog)
 	var images *basispoints.NativeImages
 	var digestUsage OpenAIUsage
 	// 仅内联图片需要读取图片配置；纯文本和现成 HTTPS/file_id 不触碰图片存储。
 	if errors.Is(err, basispoints.ErrInlineImage) {
-		imageSettings, settingsErr := s.settingService.GetExcelBPSImageRelaySettings(ctx)
-		if settingsErr != nil {
-			return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
+		if !imageSettingsLoaded {
+			var settingsErr error
+			imageSettings, settingsErr = s.settingService.GetExcelBPSImageRelaySettings(ctx)
+			if settingsErr != nil {
+				return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
+			}
 		}
 		if imageSettings.Enabled {
 			// 图片超过窗口时，先把最早的图片理解为文字描述，只保留最近的图片。
@@ -305,6 +337,10 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 	}
 	if err != nil {
+		var contentErr *basispoints.ContentValidationError
+		if errors.As(err, &contentErr) {
+			return fail(400, "basispoints_request_invalid", err.Error(), contentErr.Path)
+		}
 		return fail(400, "basispoints_request_invalid", err.Error())
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -606,7 +642,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			streamErr = errors.New("stream ended before terminal event")
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, streamErr, result.RequestID, resp)
-		recordExcelBPSTransportFailure(ctx, c, account, scope, proxyURL, err, "stream", c.GetInt("excel_bps_upstream_attempt"), false)
+		recordExcelBPSTransportFailure(ctx, c, account, scope, proxyURL, err, "stream", c.GetInt("excel_bps_upstream_attempt"), false, resp)
 		MarkOpsStreamError(c, "basispoints_stream_incomplete", "Excel BPS stream ended before completion", http.StatusBadGateway)
 		MarkResponseCommitted(c)
 		if stream {

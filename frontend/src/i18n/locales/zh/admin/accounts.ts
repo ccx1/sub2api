@@ -1015,6 +1015,8 @@ export default {
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自动透传（仅替换认证）',
         excelBPS: 'Excel / BPS 协议',
+        excelBPSIgnoreImages: '图片支持关闭时忽略图片输入',
+        excelBPSIgnoreImagesDesc: '默认关闭。仅在系统设置中的 Excel / BPS 图片支持关闭时生效：将当前及历史消息、工具结果中的图片替换为明确的忽略提示，保留文本和工具调用关系，避免旧截图反复阻塞会话或触发重复读图。模型无法看到被忽略的图片；重新开启图片支持后恢复正常图片处理。',
         excelBPSCacheCreationAsInput: '创建缓存按普通输入计费',
         excelBPSAutoDisableOn403: '遇到 BPS 403 错误时自动关闭协议',
         excelBPSAutoMoveOn403: '遇到 BPS 403 错误时自动调整分组',
@@ -1031,7 +1033,7 @@ export default {
         excelBPSModels: '勾选使用 Excel / BPS 的模型',
         excelBPSAstraOnly: '仅选 Astra',
         excelBPSModelsHint: '按账号映射后的模型名称匹配。仅勾选模型走 Excel / BPS；未选模型保留原 Codex、WS 和自动透传设置。不勾选任何模型时不使用 BPS。',
-        excelBPSNotice: '保存后新开 Codex 会话。所选模型强制 HTTP/SSE，忽略 WS mode 与自动透传；仅支持 Responses、客户端工具和 HTTPS 图片链接，不支持 base64 图片。max / ultra 按 xhigh 发送，模型权限以上游为准。',
+        excelBPSNotice: '保存后新开 Codex 会话。所选模型使用 HTTP/SSE，忽略 WS mode 与自动透传；支持 Responses 和客户端工具，图片输入按系统中的图片支持设置处理。max / ultra 按 xhigh 发送，模型权限以上游为准。',
         copilotSDKDesc: '保留 Codex 原生工具结构，断连时取消 SDK 回合。请使用仅含一个 sidecar 账号的独立分组；Base URL 和 API Key 填适配服务地址及密钥。',
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',

@@ -325,6 +325,7 @@ describe('BulkEditAccountModal', () => {
       openai_excel_bps: true,
       openai_excel_bps_models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'],
       openai_excel_bps_cache_creation_as_input: false,
+      openai_excel_bps_ignore_images: false,
       openai_excel_bps_auto_disable_on_403: false,
       openai_excel_bps_auto_move_on_403: false,
       openai_excel_bps_403_target_group_id: null
@@ -370,6 +371,39 @@ describe('BulkEditAccountModal', () => {
       expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
         extra: defaultExtra
       })
+    })
+
+    it('requires explicit bulk selection for BPS image omission and clears it with BPS', async () => {
+      const wrapper = mountModal(oauthProps)
+      await enableBPS(wrapper)
+      const selector = '[data-testid="bulk-excel-bps-ignore-images"]'
+      expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
+      await wrapper.get(selector).setValue(true)
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+        extra: { ...defaultExtra, openai_excel_bps_ignore_images: true }
+      })
+      await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(false)
+      await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { status: 'active' })
+      await wrapper.get('#bulk-edit-status-enabled').setValue(false)
+      await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(true)
+      await wrapper.get('[data-testid="bulk-excel-bps-toggle"]').trigger('click')
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+        extra: { ...defaultExtra, openai_excel_bps: false, openai_excel_bps_models: null }
+      })
+    })
+
+    it('resets BPS image omission when the bulk modal is reopened', async () => {
+      const wrapper = mountModal(oauthProps)
+      await enableBPS(wrapper)
+      await wrapper.get('[data-testid="bulk-excel-bps-ignore-images"]').setValue(true)
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+      await enableBPS(wrapper)
+      expect(wrapper.get<HTMLInputElement>('[data-testid="bulk-excel-bps-ignore-images"]').element.checked).toBe(false)
     })
 
     it('submits normalized selected models, cache creation billing and 403 auto-disable', async () => {

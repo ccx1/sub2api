@@ -835,6 +835,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if err != nil {
 		return nil, err
 	}
+	observed := observeOpenAIQuotaRecovery(account, time.Now())
 	accessToken := ""
 	if !account.IsOpenAIAgentIdentity() {
 		accessToken = account.GetOpenAIAccessToken()
@@ -905,12 +906,20 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	return s.persistOpenAICodexProbeResponse(ctx, account, resp, observed)
+}
+
+func (s *AccountUsageService) persistOpenAICodexProbeResponse(ctx context.Context, account *Account, resp *http.Response, observed *openAIQuotaRecoveryObservation) (map[string]any, error) {
 	updates, err := extractOpenAICodexProbeUpdates(resp)
 	if err != nil {
 		return nil, err
 	}
 	if len(updates) > 0 {
-		if err := s.persistOpenAIUsageProbeSnapshot(ctx, account, updates); err != nil {
+		// 展示可兼容归一化，解限必须有成功响应及明确的双窗口零用量证据。
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 || !hasCompleteOpenAIQuotaRecoveryHeaders(resp.Header) {
+			observed = nil
+		}
+		if err := s.persistOpenAIUsageProbeSnapshot(ctx, account, updates, observed); err != nil {
 			return nil, err
 		}
 		return updates, nil
@@ -918,7 +927,18 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	return nil, nil
 }
 
-func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any) {
+func hasCompleteOpenAIQuotaRecoveryHeaders(headers http.Header) bool {
+	snapshot := ParseCodexRateLimitHeaders(headers)
+	if snapshot == nil || snapshot.PrimaryWindowMinutes == nil || snapshot.SecondaryWindowMinutes == nil ||
+		snapshot.PrimaryUsedPercent == nil || snapshot.SecondaryUsedPercent == nil ||
+		*snapshot.PrimaryUsedPercent != 0 || *snapshot.SecondaryUsedPercent != 0 {
+		return false
+	}
+	primary, secondary := *snapshot.PrimaryWindowMinutes, *snapshot.SecondaryWindowMinutes
+	return (primary == 300 && secondary == 10080) || (primary == 10080 && secondary == 300)
+}
+
+func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any, observed ...*openAIQuotaRecoveryObservation) {
 	if s == nil || s.accountRepo == nil || accountID <= 0 {
 		return
 	}
@@ -932,6 +952,9 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, u
 		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer updateCancel()
 		if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err == nil {
+			if len(observed) > 0 {
+				recoverOpenAIQuotaRateLimit(updateCtx, s.accountRepo, observed[0], updates)
+			}
 			notifyOpenAIAutoReset(accountID)
 		}
 	}

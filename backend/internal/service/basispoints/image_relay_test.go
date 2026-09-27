@@ -136,7 +136,7 @@ func TestImageRelayPreservesOriginalDetail(t *testing.T) {
 		last := mustTestValue[object](t, items[len(items)-1])
 		field, index := "content", 1
 		if toolResult {
-			field, index = "output", 0
+			index = 2 // 工具图片位于结果后的带关联标记消息。
 		}
 		image := mustTestValue[object](t, mustTestValue[[]any](t, last[field])[index])
 		require.Equal(t, "original", image["detail"])

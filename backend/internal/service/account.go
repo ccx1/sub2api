@@ -2352,6 +2352,17 @@ func (a *Account) IsExcelBPSEnabled() bool {
 	return enabled
 }
 
+const ExcelBPSIgnoreImagesKey = "openai_excel_bps_ignore_images"
+
+// IsExcelBPSIgnoreImagesEnabled 仅在账号显式开启时允许全局关闭图片后的文本降级。
+func (a *Account) IsExcelBPSIgnoreImagesEnabled() bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	enabled, _ := a.Extra[ExcelBPSIgnoreImagesKey].(bool)
+	return enabled
+}
+
 // IsExcelBPSCacheCreationAsInputEnabled controls local billing and downstream usage.
 // The setting has no effect unless this account uses the Excel/BPS protocol.
 func (a *Account) IsExcelBPSCacheCreationAsInputEnabled() bool {
