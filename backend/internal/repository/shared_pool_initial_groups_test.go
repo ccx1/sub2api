@@ -33,6 +33,7 @@ func TestSharedPoolCreateAcceptsConsentedProliteTierGroup(t *testing.T) {
 		AddRow(11, "openai", "active", "standard", true))
 	mock.ExpectQuery("SELECT subscription_group_ids FROM shared_pool_settings").WillReturnRows(
 		sqlmock.NewRows([]string{"subscription_group_ids"}).AddRow([]byte(`{"openai":{"prolite":[11]}}`)))
+	expectSharedCredentialAbsent(mock)
 	writeErr := errors.New("synthetic account write failure")
 	mock.ExpectQuery(`INSERT INTO "accounts"`).WillReturnError(writeErr)
 	mock.ExpectRollback()

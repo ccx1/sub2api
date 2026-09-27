@@ -62,6 +62,7 @@ func expectSharedImportRules(mock sqlmock.Sqlmock, rules *string) {
 }
 
 func expectSharedImportWrites(mock sqlmock.Sqlmock, failure string) error {
+	expectSharedCredentialAbsent(mock)
 	failureErr := errors.New("fixture " + failure + " failure")
 	account := mock.ExpectQuery(`INSERT INTO "accounts"`)
 	if failure == "account" {

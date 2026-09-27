@@ -67,6 +67,9 @@ func (r *sharedPoolRepository) CreateSharedAccount(ctx context.Context, a *servi
 	if err = validateSharedInitialGroups(ctx, tx.Client(), a); err != nil {
 		return err
 	}
+	if err = prepareSharedAccountReimport(ctx, tx.Client(), fingerprint); err != nil {
+		return err
+	}
 	if err = createAccountRecord(ctx, tx.Client(), a); err != nil {
 		return err
 	}
