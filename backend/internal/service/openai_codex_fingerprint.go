@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -55,6 +56,37 @@ func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http
 
 func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account, reqBody map[string]any) bool {
 	return applyCodexFingerprintClientMetadata(reqBody, stagedCodexFingerprintIDs(c, account))
+}
+
+// applyCodexFingerprintToWSPayload 为客户端直连 WebSocket 入口（ingress
+// ctx_pool / HTTP bridge / v2 passthrough）的单个 response.create 帧解析并
+// 应用收敛 ID。每帧即一个 turn，独立解析（turn_id / turn_started_at 按 turn
+// 生成，installation / session / thread 由种子确定，跨 turn 恒定）。
+// 调用方须在 applyCodexAccountIdentityClientMetadataRaw 之后调用，并把返回的
+// ids 经 stageCodexFingerprintIDs 暂存，使握手头 / bridge 出站头与帧体一致。
+func (s *OpenAIGatewayService) applyCodexFingerprintToWSPayload(ctx context.Context, c *gin.Context, account *Account, payload []byte) ([]byte, *codexFingerprintIDs, error) {
+	if account == nil || len(payload) == 0 {
+		return payload, nil, nil
+	}
+	if s != nil && s.harvestPinsCodexIdentity(ctx, account, extractOpenAICodexTicketModel(payload)) {
+		return payload, nil, nil
+	}
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	ids := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+	if ids == nil {
+		return payload, nil, nil
+	}
+	next, changed, err := applyCodexFingerprintClientMetadataRaw(payload, ids)
+	if err != nil {
+		return payload, nil, err
+	}
+	if changed {
+		payload = next
+	}
+	return payload, ids, nil
 }
 
 // codexFingerprintMode 控制 OAuth 账号出站请求的设备指纹收敛强度。

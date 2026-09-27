@@ -132,3 +132,19 @@ func TestExcelBPSBackgroundTestHandlesNilHeader(t *testing.T) {
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, basispoints.ResponsesURL, upstream.lastReq.URL.String())
 }
+
+func TestExcelBPSManualTestReportsRateLimit(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {"30"}},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"message":"PRIVATE_UPSTREAM"}}`))}}
+	svc := &AccountTestService{openaiGatewayService: openAIClientToolsTestService(upstream)}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/api/v1/admin/accounts/300/test", nil)
+
+	err := svc.testExcelBPSAccountConnection(c, excelAccount(), "gpt-6-astra", "Reply OK")
+
+	// A single-account test shows the rate limit instead of a failover signal.
+	require.EqualError(t, err, excelBPSRateLimitedClientMessage)
+	require.NotContains(t, rec.Body.String(), "PRIVATE_UPSTREAM")
+	require.Len(t, upstream.requests, 1)
+}

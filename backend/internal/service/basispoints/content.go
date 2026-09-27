@@ -15,7 +15,6 @@ func (e *ContentValidationError) Error() string {
 }
 
 func (e *ContentValidationError) Unwrap() error { return e.cause }
-
 func (b *Bridge) validateHistoryContent(value any, inputIndex int, field string) error {
 	content, _ := value.([]any)
 	for index, rawPart := range content {

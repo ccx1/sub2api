@@ -1586,6 +1586,8 @@ export interface WindowStats {
   cost: number // Account cost (account multiplier)
   standard_cost?: number
   user_cost?: number
+  lifetime_tokens?: number // All-time totals (no time filter)
+  lifetime_cost?: number
 }
 
 export interface UsageProgress {
@@ -1916,6 +1918,7 @@ export interface AdminDataImportResult {
 }
 
 export interface CodexSessionImportRequest {
+  skip_existing?: boolean
   protection_enabled?: boolean
   codex_ticket_enabled?: boolean
   use_import_defaults?: boolean

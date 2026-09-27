@@ -66,7 +66,10 @@ func excelBPSTransportDiagnosticTrace(ctx context.Context, err error, responses 
 	return transportdiag.FromContext(ctx)
 }
 
-func excelBPSDiagnosticCanceled(ctx context.Context, c *gin.Context, err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) ||
-		(c != nil && c.Request != nil && c.Request.Context().Err() != nil)
+func excelBPSDiagnosticCanceled(ctx context.Context, c *gin.Context, _ error) bool {
+	// 出站子 context 可以自行取消；只有入站请求终止才不记录出口故障。
+	if c != nil && c.Request != nil {
+		return c.Request.Context().Err() != nil
+	}
+	return ctx != nil && ctx.Err() != nil
 }

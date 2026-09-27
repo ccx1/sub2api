@@ -28,32 +28,59 @@ func (b *bpsDiagnosticBody) Read([]byte) (int, error) { return 0, b.readErr }
 func (b *bpsDiagnosticBody) Close() error             { b.closes.Add(1); return b.closeErr }
 
 func TestExcelBPSDiagnosticResponseReadAndClose(t *testing.T) {
-	for _, readErr := range []error{io.EOF, io.ErrUnexpectedEOF, context.Canceled} {
-		t.Run(readErr.Error(), func(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		readErr        error
+		cancelIncoming bool
+	}{
+		{name: "EOF", readErr: io.EOF},
+		{name: "unexpected EOF", readErr: io.ErrUnexpectedEOF},
+		{name: "child context canceled", readErr: context.Canceled},
+		{name: "incoming context canceled", readErr: context.Canceled, cancelIncoming: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			incomingCtx, cancelIncoming := context.WithCancel(context.Background())
+			defer cancelIncoming()
+			requestCtx, cancelRequest := context.WithCancel(incomingCtx)
+			defer cancelRequest()
 			evidence := &excelBPSWriteEvidence{}
-			req, _ := http.NewRequest(http.MethodPost, "https://example.invalid", nil)
+			req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, "https://example.invalid", nil)
+			require.NoError(t, err)
 			req = evidence.request(req)
 			closeErr := errors.New("close failed")
-			body := &bpsDiagnosticBody{readErr: readErr, closeErr: closeErr}
+			body := &bpsDiagnosticBody{readErr: tc.readErr, closeErr: closeErr}
 			resp, err := evidence.observeResult(req, &http.Response{Body: body}, nil)
 			require.NoError(t, err)
+			if tc.cancelIncoming {
+				cancelIncoming()
+			} else if tc.readErr == context.Canceled {
+				cancelRequest()
+			}
 			_, got := resp.Body.Read(make([]byte, 1))
-			require.ErrorIs(t, got, readErr)
-			if readErr == io.EOF {
+			require.ErrorIs(t, got, tc.readErr)
+			if tc.readErr == io.EOF {
 				require.Equal(t, io.EOF, got, "normal EOF must retain its identity")
+			} else if tc.readErr == context.Canceled {
+				require.ErrorIs(t, requestCtx.Err(), context.Canceled)
 			}
 			require.ErrorIs(t, resp.Body.Close(), closeErr)
 			require.Equal(t, int32(1), body.closes.Load())
 			c := bpsTransportContext()
-			recordExcelBPSTransportFailure(context.Background(), c, bpsTransportAccount(), "scope", "", got, "stream", 1, false, resp)
-			if readErr == context.Canceled {
+			c.Request = c.Request.WithContext(incomingCtx)
+			recordExcelBPSTransportFailure(requestCtx, c, bpsTransportAccount(), "scope", "", got, "stream", 1, false, resp)
+			if tc.cancelIncoming {
+				require.ErrorIs(t, incomingCtx.Err(), context.Canceled)
 				_, ok := c.Get(OpsUpstreamErrorsKey)
+				require.False(t, ok)
+				_, ok = c.Get(OpsUpstreamErrorMessageKey)
 				require.False(t, ok)
 				return
 			}
+			require.NoError(t, incomingCtx.Err(), "outbound cancellation must leave the incoming request active")
 			value, ok := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, ok)
 			events := value.([]*OpsUpstreamErrorEvent)
+			require.Len(t, events, 1)
 			var detail map[string]any
 			require.NoError(t, json.Unmarshal([]byte(events[0].Detail), &detail))
 			require.Equal(t, "response_body", detail["transport"].(map[string]any)["phase"])

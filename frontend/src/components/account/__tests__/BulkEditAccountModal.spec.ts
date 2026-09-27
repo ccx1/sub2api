@@ -326,6 +326,7 @@ describe('BulkEditAccountModal', () => {
       openai_excel_bps_models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'],
       openai_excel_bps_cache_creation_as_input: false,
       openai_excel_bps_ignore_images: false,
+      openai_excel_bps_ignore_encrypted_content: false,
       openai_excel_bps_auto_disable_on_403: false,
       openai_excel_bps_auto_move_on_403: false,
       openai_excel_bps_403_target_group_id: null
@@ -373,15 +374,15 @@ describe('BulkEditAccountModal', () => {
       })
     })
 
-    it('requires explicit bulk selection for BPS image omission and clears it with BPS', async () => {
+    it.each(['images', 'encrypted_content'])('requires explicit bulk selection for BPS %s omission and clears it with BPS', async field => {
       const wrapper = mountModal(oauthProps)
       await enableBPS(wrapper)
-      const selector = '[data-testid="bulk-excel-bps-ignore-images"]'
+      const selector = '[data-testid="bulk-excel-bps-ignore-' + field.replace('_', '-') + '"]'
       expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
       await wrapper.get(selector).setValue(true)
       await submit(wrapper)
       expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
-        extra: { ...defaultExtra, openai_excel_bps_ignore_images: true }
+        extra: { ...defaultExtra, ['openai_excel_bps_ignore_' + field]: true }
       })
       await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(false)
       await wrapper.get('#bulk-edit-status-enabled').setValue(true)
@@ -396,14 +397,15 @@ describe('BulkEditAccountModal', () => {
       })
     })
 
-    it('resets BPS image omission when the bulk modal is reopened', async () => {
+    it.each(['images', 'encrypted-content'])('resets BPS %s omission when the bulk modal is reopened', async field => {
       const wrapper = mountModal(oauthProps)
       await enableBPS(wrapper)
-      await wrapper.get('[data-testid="bulk-excel-bps-ignore-images"]').setValue(true)
+      const selector = '[data-testid="bulk-excel-bps-ignore-' + field + '"]'
+      await wrapper.get(selector).setValue(true)
       await wrapper.setProps({ show: false })
       await wrapper.setProps({ show: true })
       await enableBPS(wrapper)
-      expect(wrapper.get<HTMLInputElement>('[data-testid="bulk-excel-bps-ignore-images"]').element.checked).toBe(false)
+      expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
     })
 
     it('submits normalized selected models, cache creation billing and 403 auto-disable', async () => {
@@ -454,6 +456,7 @@ describe('BulkEditAccountModal', () => {
     it('explicitly disables BPS and clears subordinate settings', async () => {
       const wrapper = mountModal(oauthProps)
       await enableBPS(wrapper)
+      await wrapper.get('[data-testid="bulk-excel-bps-ignore-encrypted-content"]').setValue(true)
       await wrapper.get('[data-testid="bulk-excel-bps-cache-creation-as-input"]').setValue(true)
       await wrapper.get('[data-testid="bulk-excel-bps-auto-disable-on-403"]').setValue(true)
       await wrapper.get('[data-testid="bulk-excel-bps-auto-move-on-403"]').setValue(true)
@@ -477,6 +480,7 @@ describe('BulkEditAccountModal', () => {
       wrapper.get('[data-testid="bulk-excel-bps-model-selection"]')
         .getComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['gpt-6-sol'])
       await wrapper.get('[data-testid="bulk-excel-bps-all-models"]').setValue(true)
+      await wrapper.get('[data-testid="bulk-excel-bps-ignore-encrypted-content"]').setValue(true)
       await wrapper.get('[data-testid="bulk-excel-bps-cache-creation-as-input"]').setValue(true)
       await wrapper.get('[data-testid="bulk-excel-bps-auto-disable-on-403"]').setValue(true)
       await wrapper.get('[data-testid="bulk-excel-bps-auto-move-on-403"]').setValue(true)
