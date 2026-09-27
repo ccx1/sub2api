@@ -53,6 +53,7 @@ func ProvideAdminHandlers(
 	auditLogHandler *admin.AuditLogHandler,
 	spendGuardHandler *admin.SpendGuardHandler,
 	antiDegradeHandler *admin.AntiDegradeHandler,
+	proxyQualityHandler *admin.ProxyQualityHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	openAIGatewayService *service.OpenAIGatewayService,
@@ -109,6 +110,7 @@ func ProvideAdminHandlers(
 		AuditLog:               auditLogHandler,
 		SpendGuard:             spendGuardHandler,
 		AntiDegrade:            antiDegradeHandler,
+		ProxyQuality:           proxyQualityHandler,
 	}
 }
 
@@ -319,6 +321,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAuditLogHandler,
 	admin.NewSpendGuardHandler,
 	admin.NewAntiDegradeHandler,
+	admin.NewProxyQualityHandler,
 	admin.NewRequestCaptureHandler,
 
 	// AdminHandlers and Handlers constructors

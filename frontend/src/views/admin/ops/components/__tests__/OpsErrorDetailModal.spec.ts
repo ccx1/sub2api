@@ -79,6 +79,81 @@ describe('OpsErrorDetailModal', () => {
     expect(wrapper.findAll('pre')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('admin.ops.errorDetail.payloads.upstream_detail')
   })
+
+  it('shows account for non-upstream errors and for each correlated upstream attempt', async () => {
+    mocks.getRequestErrorDetail.mockResolvedValue({
+      id: 2,
+      created_at: '2026-08-19T00:00:00Z',
+      phase: 'request',
+      type: 'invalid_request_error',
+      error_owner: 'client',
+      error_source: 'client_request',
+      severity: 'P2',
+      status_code: 400,
+      platform: 'openai',
+      model: 'gpt-5.6',
+      resolved: false,
+      request_id: 'rid-2',
+      message: 'bad request',
+      account_id: 42,
+      account_name: 'apikey-account',
+      user_email: 'user@example.com',
+      is_business_limited: false
+    })
+    mocks.listRequestErrorUpstreamErrors.mockResolvedValue({
+      items: [{ id: 9, status_code: 502, account_id: 7, account_name: 'retry-account', message: 'bad gateway' }]
+    })
+
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 2, errorType: 'request' },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /></div>' },
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="error-detail-account"]').text()).toBe('apikey-account (#42)')
+    expect(wrapper.text()).toContain('user@example.com')
+    expect(wrapper.text()).toContain('retry-account (#7)')
+  })
+
+  it('falls back to upstream attempt account when top-level account is missing', async () => {
+    mocks.getRequestErrorDetail.mockResolvedValue({
+      id: 3,
+      created_at: '2026-08-19T00:00:00Z',
+      phase: 'routing',
+      type: 'api_error',
+      error_owner: 'platform',
+      error_source: 'gateway',
+      severity: 'P1',
+      status_code: 503,
+      platform: 'anthropic',
+      model: 'claude',
+      resolved: false,
+      request_id: 'rid-3',
+      message: 'no available accounts',
+      account_id: null,
+      account_name: '',
+      upstream_errors: '[{"account_id":5,"account_name":"first"},{"account_id":6,"account_name":"last"}]',
+      is_business_limited: false
+    })
+
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 3, errorType: 'request' },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /></div>' },
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="error-detail-account"]').text()).toBe('last (#6)')
+  })
 })
 
 it('loads only the owned observer error and never requests correlated admin details', async () => {

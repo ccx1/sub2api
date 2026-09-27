@@ -3,15 +3,16 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestBuildExcelBPSAccountTestBodyUsesResponsesContract(t *testing.T) {
@@ -45,6 +46,32 @@ func TestExcelBPSAccountOnlyUsesOAuth(t *testing.T) {
 	if !oauth.IsExcelBPSEnabled() || apiKey.IsExcelBPSEnabled() {
 		t.Fatal("Excel BPS gate must be OAuth-only")
 	}
+}
+
+// The admin probe must reach BPS even when the account is currently not
+// schedulable (paused, cooling down, quota exhausted). Turn admission belongs
+// to user traffic only; routing the probe through Forward reported
+// "request admission denied: account_ineligible" instead of testing the account.
+func TestExcelBPSAccountTestBypassesTurnAdmission(t *testing.T) {
+	wire := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"21\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_excel\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"21\"}]}],\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}}
+	account := excelAccount()
+	account.Schedulable = false
+	latest := *account
+	gateway := openAIClientToolsTestService(upstream)
+	gateway.accountRepo = &turnAdmissionRepo{account: &latest}
+	gateway.requireLatestTurnAdmission = true
+	svc := &AccountTestService{openaiGatewayService: gateway}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.NoError(t, svc.testOpenAIAccountConnection(c, account, "gpt-5.6-sol", "", ""))
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "bps.openai.com", upstream.lastReq.URL.Host)
+	require.NotContains(t, rec.Body.String(), "admission denied")
+	require.Contains(t, rec.Body.String(), `"type":"test_complete"`)
 }
 
 func TestExcelBPSManualTestPreservesNativeProxyAndSessionIdentity(t *testing.T) {

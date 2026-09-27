@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -76,6 +77,76 @@ func TestCodexModelQualityCanaryEvaluation(t *testing.T) {
 			require.Equal(t, tc.calls, status.Requests)
 			require.Equal(t, tc.status, status.Status)
 			require.Equal(t, tc.reason, status.Reason)
+		})
+	}
+}
+
+func TestCodexQualityCanaryExactMatchesFinalAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		answer string
+		match  bool
+	}{
+		{"21", true}, {" 21。", true}, {"**21**", true}, {"答案：21", true}, {"Answer: 21 candies", true},
+		{"21 颗", true}, {"推理过程……\n最终答案：21", true}, {"21.0", true},
+		{"121", false}, {"210", false}, {"-21", false}, {"不是 21，是 18", false}, {"20 或 21", false},
+		{"21\n修正：18", false}, {"", false}, {"twenty-one", false},
+	} {
+		require.Equal(t, tc.match, codexQualityCanaryExactMatches(tc.answer, []string{"21"}), tc.answer)
+	}
+	require.True(t, codexQualityCanaryExactMatches("Paris.", []string{"paris"}))
+	require.False(t, codexQualityCanaryExactMatches("Paris, France", []string{"paris"}))
+	require.True(t, codexQualityCanaryAnswerMatches("不是 21，是 18", []string{"21"}, ""), "contains mode keeps the old behavior")
+	require.False(t, codexQualityCanaryAnswerMatches("不是 21，是 18", []string{"21"}, codexQualityCanaryExact))
+}
+
+func TestCodexModelQualityCanaryMatchPolicyValidation(t *testing.T) {
+	p := DefaultCodexModelQualityPolicy()
+	p.CanaryEnabled, p.CanaryPrompt, p.CanaryExpected = true, "candy", []string{"21"}
+	for _, mode := range []string{"", codexQualityCanaryContains, codexQualityCanaryExact} {
+		p.CanaryMatch = mode
+		require.NoError(t, validateCodexModelQualityPolicy(p))
+	}
+	p.CanaryMatch = "regex"
+	require.Error(t, validateCodexModelQualityPolicy(p))
+
+	// 新字段为零值时不写入 JSON，已有策略的哈希和检测结论保持不变。
+	legacy := DefaultCodexModelQualityPolicy()
+	raw, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "canary_match")
+	require.NotContains(t, string(raw), "canary_only")
+}
+
+func TestCodexModelQualityCanaryOnlySkipsCapabilityAndFingerprint(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, reason string
+		answers              []string
+		calls                int
+	}{
+		{name: "pass", answers: []string{"21"}, status: "passed", reason: "canary_passed", calls: 1},
+		{name: "retry_pass", answers: []string{"18", "21"}, status: "passed", reason: "canary_passed", calls: 2},
+		{name: "degraded", answers: []string{"121", "不是 21，是 18"}, status: "suspect", reason: "canary_failed", calls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, job := qualityRuntimeFixture(t)
+			job.policy.FingerprintEnabled = true
+			job.policy.CanaryEnabled, job.policy.CanaryOnly = true, true
+			job.policy.CanaryPrompt, job.policy.CanaryExpected, job.policy.CanaryMatch = "candy", []string{"21"}, codexQualityCanaryExact
+			calls := 0
+			s.httpUpstream = &codexTicketFuncUpstream{do: func(req *http.Request) (*http.Response, error) {
+				calls++
+				body, _ := io.ReadAll(req.Body)
+				require.Contains(t, string(body), "Output only the final answer")
+				require.Contains(t, string(body), "candy")
+				answer := qualityResponseBody(job.ticket.Model, tc.answers[calls-1])
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(answer))}, nil
+			}}
+			status := s.evaluateCodexModelQuality(context.Background(), job, CodexModelQualityStatus{})
+			require.Equal(t, tc.calls, calls)
+			require.Equal(t, tc.status, status.Status)
+			require.Equal(t, tc.reason, status.Reason)
+			require.Nil(t, status.CapabilityScore)
+			require.Zero(t, status.SampleCount)
 		})
 	}
 }

@@ -1,0 +1,53 @@
+name: Local Platform Release
+
+on:
+  push:
+    tags:
+      - 'v0.2.8.*'
+
+concurrency:
+  group: local-platform-release-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: ${{ github.repository == 'ccx1/sub2api' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Test local release publisher
+        run: python -m unittest discover -s .github/release-tools -p 'test_local_release*.py'
+      - name: Build and publish the tagged version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_TAG: ${{ github.ref_name }}
+        run: |
+          python .github/release-tools/local_release.py publish --expected-tag "$EXPECTED_TAG"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: local-platform-release
+          path: release/
+          if-no-files-found: error

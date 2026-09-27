@@ -19,6 +19,21 @@ export default {
 
   // Version Badge
   version: {
+    versionDetails: '版本信息',
+    localVersion: '本地版本',
+    ranxiVersion: 'Ranxi 版本',
+    localActions: '本地版本更新与回退',
+    localUpdateHint: '平台发行版更新；发行版部署可直接升级，无需重新拉取源码。',
+    ranxiMergeHint: 'Ranxi 源码更新需合并后重新打包，保留本地定制，不会直接替换当前平台。',
+    localUpdateAvailable: '发行版可升级',
+    ranxiUpdateAvailable: '源码待合并',
+    localUpdateTitle: '本地平台发行版有更新',
+    ranxiUpdateTitle: 'Ranxi 源码有更新，需合并后重新打包',
+    bothUpdatesTitle: '本地平台发行版和 Ranxi 源码均有更新',
+    unavailable: '暂无版本信息',
+    checkFailed: '版本检查失败，请刷新重试',
+    cachedWarning: '检查失败，暂时显示缓存信息',
+    cachedInfo: '当前显示缓存的版本信息，可刷新重新检查',
     currentVersion: '当前版本',
     latestVersion: '最新版本',
     upToDate: '已是最新版本',
@@ -53,6 +68,7 @@ export default {
     loadVersionsFailed: '获取版本列表失败',
     rollbackSourceHint: '源码构建不支持在线回退',
     deployScript: '脚本部署',
+    binaryReleaseOnly: '当前仅发布 Linux amd64 二进制，不提供自有 Docker 镜像或镜像回退命令。',
     deployDocker: 'Docker',
     dockerEditCompose: '修改 docker-compose.yml 中的镜像版本',
     dockerRecreate: '重新创建容器'

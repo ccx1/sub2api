@@ -161,7 +161,8 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 	ticket := &openAICodexTicket{AttemptID: attempt.ID, AccountID: account.ID, Model: model, State: state, Length: len(state), CapturedAt: captured,
 		ExpiresAt: captured.Add(ttl), RevalidateAt: captured.Add(ttl), Attempts: 1, Verified: verified, VerificationSkipped: !verified, Binding: binding,
 		Egress: openAICodexTicketEgress(input.ProxyURL), HarvestProxyID: proxy.proxyID, HarvestProxyName: proxy.proxyName,
-		SessionID: harvestSessionID, HarvestEgress: openAICodexTicketEgress(proxy.url)}
+		SessionID: harvestSessionID, HarvestEgress: openAICodexTicketEgress(proxy.url),
+		HarvestCountry: s.codexTicketProxyEgressCountry(ctx, proxy.proxyID)}
 	if metadata, metadataErr := parseOpenAICodexTicketStateMetadata(state); metadataErr == nil && cfg.CredentialMode != config.CodexTicketCredentialCookie {
 		ticket.IssuedAt = metadata.IssuedAt
 		ticket.StateExpiresAt = codexTicketStateExpiresAt(metadata)
@@ -221,7 +222,18 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 		if routeExpires := codexTicketRouteExpiresAt(ticket); !routeExpires.IsZero() {
 			fields = append(fields, zap.Time("route_expires_at", routeExpires))
 		}
+		crossRegion := false
+		if node, ok := codexTicketRouteNode(ticket); ok {
+			crossRegion = codexGatewayRouteCrossRegion(node, ticket.HarvestCountry)
+			fields = append(fields, zap.String("route_node", node.Name()), zap.String("route_node_country", node.Country),
+				zap.String("route_macro_region", node.MacroRegion()), zap.String("harvest_country", ticket.HarvestCountry),
+				zap.Bool("route_cross_region", crossRegion))
+		}
 		logger.L().Info("openai_codex_ticket published", fields...)
+		if crossRegion {
+			// 同大区跨国是正常分配，只有跨大区才提示异常。
+			logger.L().Warn("openai_codex_ticket route crosses macro-region", fields...)
+		}
 	}
 }
 

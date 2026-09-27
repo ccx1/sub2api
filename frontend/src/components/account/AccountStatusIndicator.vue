@@ -33,7 +33,7 @@
     </template>
 
     <!-- Error Info Indicator -->
-    <div v-if="hasError && account.error_message" class="group/error relative">
+    <div v-if="showErrorInfo" class="group/error relative">
       <svg
         class="h-4 w-4 cursor-help text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
         fill="none"
@@ -281,6 +281,12 @@ const isTempUnschedulable = computed(() => {
 // Computed: has error status
 const hasError = computed(() => {
   return props.account.status === 'error'
+})
+
+// 手动暂停的账号遇到错误时后端保持"暂停"状态，只记录 error_message，这里同样展示原因
+const showErrorInfo = computed(() => {
+  if (!props.account.error_message) return false
+  return hasError.value || (props.account.status === 'active' && !props.account.schedulable)
 })
 
 const isQuotaExceeded = computed(() => {

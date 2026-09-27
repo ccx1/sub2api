@@ -13,17 +13,22 @@ import (
 
 const codexOAILBCookieName = "__oailb"
 
-// __oailb 是 base64url 编码的 JSON 路由元数据（非加密值），可能带有 exp。
-// 只读取期限与声明字段，调用方不得记录原始 Cookie 值；无法解析时保持原有行为。
+// __oailb 线上是 JWT（header.payload.sig），payload 为 base64url JSON 路由元数据，
+// 带 host（计算节点）与 exp；旧格式整体即 base64 JSON。这里只读声明、不验签，
+// 调用方不得记录原始 Cookie 值；无法解析时保持原有行为。
 func decodeCodexOAILBCookie(value string) (map[string]any, time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 4096 {
 		return nil, time.Time{}, errors.New("invalid __oailb length")
 	}
+	payload := value
+	if parts := strings.Split(value, "."); len(parts) == 3 {
+		payload = parts[1]
+	}
 	var decoded []byte
 	var err error
 	for _, encoding := range []*base64.Encoding{base64.RawURLEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.StdEncoding} {
-		if decoded, err = encoding.DecodeString(value); err == nil {
+		if decoded, err = encoding.DecodeString(payload); err == nil {
 			break
 		}
 	}
@@ -101,4 +106,30 @@ func codexOAILBClaimsForLog(ticket *openAICodexTicket) map[string]any {
 		}
 	}
 	return nil
+}
+
+// codexOAILBNode 返回 __oailb host 声明对应的计算节点；非节点 host 或无法解析返回 false。
+func codexOAILBNode(value string) (codexGatewayNode, bool) {
+	claims, _, err := decodeCodexOAILBCookie(value)
+	if err != nil {
+		return codexGatewayNode{}, false
+	}
+	host, _ := claims["host"].(string)
+	return parseCodexGatewayNodeHost(host)
+}
+
+// codexTicketRouteNode 返回票据实际发送的 __oailb 所指计算节点。
+func codexTicketRouteNode(ticket *openAICodexTicket) (codexGatewayNode, bool) {
+	if ticket == nil {
+		return codexGatewayNode{}, false
+	}
+	for _, cookie := range ticket.Cookies {
+		if cookie == nil || cookie.Name != codexOAILBCookieName || codexCookieExcluded(normalizeCodexCookieMode(ticket.CookieMode), cookie.Name) {
+			continue
+		}
+		if node, ok := codexOAILBNode(cookie.Value); ok {
+			return node, true
+		}
+	}
+	return codexGatewayNode{}, false
 }

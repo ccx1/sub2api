@@ -780,6 +780,30 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.unrelated).toBe('preserve')
   })
 
+  it('turns off tickets for all-model Excel BPS and never resends a stale ticket switch', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.credentials = { access_token: 'test-token', chatgpt_account_id: 'test-account' }
+    account.extra = { openai_excel_bps: true, codex_ticket_enabled: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.codex_ticket_enabled).toBe(false)
+
+    await wrapper.setProps({ account: { ...account, extra: { openai_excel_bps: true, openai_excel_bps_models: ['gpt-6-astra'], codex_ticket_enabled: true } } })
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('codex_ticket_enabled')
+
+    await wrapper.setProps({ account: { ...account, extra: { codex_ticket_enabled: false } } })
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[2]?.[1]?.extra).not.toHaveProperty('codex_ticket_enabled')
+    wrapper.unmount()
+  })
+
   it('saves, restores and clears Excel BPS cache creation input billing', async () => {
     const account = buildAccount()
     account.type = 'oauth'

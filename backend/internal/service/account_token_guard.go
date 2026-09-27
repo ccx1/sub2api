@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaiauth"
 )
 
 // 智能运维 → 凭证守护：账号令牌巡检 / 自动重登 / 错误态自愈。
@@ -41,16 +43,38 @@ const (
 	AccountTokenGuardEventManual      = "manual_run"
 )
 
+// 激活方式：external=外站授权（调用外部测活/重登接口），builtin=本站授权（进程内 OAuth）。
+const (
+	AccountTokenGuardModeExternal = "external"
+	AccountTokenGuardModeBuiltin  = "builtin"
+)
+
 // AccountTokenGuardReloginAccount 是重登所需凭据（邮箱 / 密码 / 2FA 密钥）。
 type AccountTokenGuardReloginAccount struct {
 	Email     string `json:"email"`
 	Password  string `json:"password"`
 	MFASecret string `json:"mfa_secret"`
+	// Disabled=true 时该凭据不参与巡检（零值=启用，向后兼容旧配置）；
+	// ExpiresAt 为过期时刻（UNIX 秒，0=永不过期），过期后不再检测。
+	Disabled  bool  `json:"disabled,omitempty"`
+	ExpiresAt int64 `json:"expires_at,omitempty"`
+}
+
+// IsActiveAt 判断凭据在给定时刻是否仍可用于巡检（启用且未过期）。
+func (a AccountTokenGuardReloginAccount) IsActiveAt(now int64) bool {
+	if a.Disabled {
+		return false
+	}
+	if a.ExpiresAt > 0 && a.ExpiresAt <= now {
+		return false
+	}
+	return true
 }
 
 // AccountTokenGuardConfig 是页面上的全部可配置项。
 type AccountTokenGuardConfig struct {
 	Enabled             bool                              `json:"enabled"`
+	ActivationMode      string                            `json:"activation_mode"`
 	GroupIDs            []int64                           `json:"group_ids"`
 	IntervalSeconds     int                               `json:"interval_seconds"`
 	ProbeEndpoint       string                            `json:"probe_endpoint"`
@@ -161,6 +185,7 @@ type AccountTokenGuardService struct {
 	accounts    accountTokenGuardAccounts
 	admin       AdminService
 	invalidator TokenCacheInvalidator
+	proxyRepo   ProxyRepository
 	httpClient  *http.Client
 
 	config atomic.Value
@@ -180,9 +205,9 @@ type AccountTokenGuardService struct {
 }
 
 func NewAccountTokenGuardService(settings SettingRepository, repo AccountTokenGuardRepository, accounts accountTokenGuardAccounts,
-	admin AdminService, invalidator TokenCacheInvalidator) *AccountTokenGuardService {
+	admin AdminService, invalidator TokenCacheInvalidator, proxyRepo ProxyRepository) *AccountTokenGuardService {
 	svc := &AccountTokenGuardService{
-		settings: settings, repo: repo, accounts: accounts, admin: admin, invalidator: invalidator,
+		settings: settings, repo: repo, accounts: accounts, admin: admin, invalidator: invalidator, proxyRepo: proxyRepo,
 		httpClient: &http.Client{Timeout: 10 * time.Minute},
 	}
 	svc.config.Store(defaultAccountTokenGuardConfig())
@@ -192,6 +217,7 @@ func NewAccountTokenGuardService(settings SettingRepository, repo AccountTokenGu
 func defaultAccountTokenGuardConfig() AccountTokenGuardConfig {
 	return AccountTokenGuardConfig{
 		Enabled:         false,
+		ActivationMode:  AccountTokenGuardModeExternal,
 		IntervalSeconds: 300,
 		ProbeEndpoint:   "https://session.ameng2027.xyz/api/v1/relogin/probe",
 		ProbeModel:      "gpt-6-astra",
@@ -230,22 +256,33 @@ func ValidateAccountTokenGuardConfig(c AccountTokenGuardConfig) error {
 	if c.FailStreakThreshold < 1 || c.FailStreakThreshold > 10 {
 		return errors.New("连续失效阈值需要在 1 到 10 之间")
 	}
+	if c.ActivationMode != "" && c.ActivationMode != AccountTokenGuardModeExternal && c.ActivationMode != AccountTokenGuardModeBuiltin {
+		return errors.New("授权方式只能是 external（外站授权）或 builtin（本站授权）")
+	}
+	builtin := c.ActivationMode == AccountTokenGuardModeBuiltin
 	if c.Enabled {
-		if err := validateGuardHTTPURL(c.ProbeEndpoint, "probe_endpoint"); err != nil {
-			return err
-		}
-		if c.ProbeModel == "" {
-			return errors.New("启用守护时必须填写探活模型")
-		}
-		if c.AutoRelogin {
-			if err := validateGuardHTTPURL(c.ReloginEndpoint, "relogin_endpoint"); err != nil {
+		if builtin {
+			// 本站授权：进程内 OAuth，无需测活/重登接口；开启自动重登时须有可用凭据。
+			if c.AutoRelogin && len(c.ReloginAccounts) == 0 {
+				return errors.New("开启自动重登时必须至少配置一个凭证")
+			}
+		} else {
+			if err := validateGuardHTTPURL(c.ProbeEndpoint, "probe_endpoint"); err != nil {
 				return err
 			}
-			if len(c.ReloginAccounts) == 0 {
-				return errors.New("开启自动重登时必须至少配置一个重登账号")
+			if c.ProbeModel == "" {
+				return errors.New("启用守护时必须填写探活模型")
+			}
+			if c.AutoRelogin {
+				if err := validateGuardHTTPURL(c.ReloginEndpoint, "relogin_endpoint"); err != nil {
+					return err
+				}
+				if len(c.ReloginAccounts) == 0 {
+					return errors.New("开启自动重登时必须至少配置一个凭证")
+				}
 			}
 		}
-	} else if c.ProbeEndpoint != "" {
+	} else if !builtin && c.ProbeEndpoint != "" {
 		if err := validateGuardHTTPURL(c.ProbeEndpoint, "probe_endpoint"); err != nil {
 			return err
 		}
@@ -258,10 +295,15 @@ func ValidateAccountTokenGuardConfig(c AccountTokenGuardConfig) error {
 	}
 	for _, account := range c.ReloginAccounts {
 		if strings.TrimSpace(account.Email) == "" || !strings.Contains(account.Email, "@") {
-			return errors.New("重登账号邮箱不合法: " + account.Email)
+			return errors.New("凭证邮箱不合法: " + account.Email)
 		}
 		if strings.TrimSpace(account.Password) == "" {
-			return errors.New("重登账号缺少密码: " + account.Email)
+			return errors.New("凭证缺少密码: " + account.Email)
+		}
+		if builtin && strings.TrimSpace(account.MFASecret) != "" {
+			if err := openaiauth.ValidateTOTPSecret(account.MFASecret); err != nil {
+				return errors.New("凭证 2FA 密钥不合法: " + account.Email)
+			}
 		}
 	}
 	return nil
@@ -280,6 +322,9 @@ func validateGuardHTTPURL(raw, field string) error {
 }
 
 func normalizeAccountTokenGuardConfig(c AccountTokenGuardConfig) AccountTokenGuardConfig {
+	if c.ActivationMode != AccountTokenGuardModeBuiltin {
+		c.ActivationMode = AccountTokenGuardModeExternal
+	}
 	c.ProbeEndpoint = strings.TrimRight(strings.TrimSpace(c.ProbeEndpoint), "/")
 	c.ReloginEndpoint = strings.TrimRight(strings.TrimSpace(c.ReloginEndpoint), "/")
 	c.ProbeModel = strings.TrimSpace(c.ProbeModel)
@@ -318,6 +363,9 @@ func normalizeAccountTokenGuardConfig(c AccountTokenGuardConfig) AccountTokenGua
 		account.Email = strings.ToLower(strings.TrimSpace(account.Email))
 		account.Password = strings.TrimSpace(account.Password)
 		account.MFASecret = strings.TrimSpace(account.MFASecret)
+		if account.ExpiresAt < 0 {
+			account.ExpiresAt = 0
+		}
 		if account.Email == "" || seenMail[account.Email] {
 			continue
 		}
@@ -502,7 +550,7 @@ func (s *AccountTokenGuardService) RunCycle(ctx context.Context, manual bool) (A
 		go func(position int) {
 			defer wg.Done()
 			defer func() { <-semaphore }()
-			result := s.probe(cycleCtx, cfg, &accounts[position])
+			result := s.probeAccount(cycleCtx, cfg, &accounts[position])
 			results[position] = result
 			// 探活完成即刻落库，页面无需等整轮结束即可看到进度。
 			now := time.Now()
@@ -619,11 +667,18 @@ func (s *AccountTokenGuardService) finishCycle(started time.Time, stats AccountT
 func (s *AccountTokenGuardService) listAccounts(ctx context.Context, cfg AccountTokenGuardConfig) ([]Account, error) {
 	seen := map[int64]bool{}
 	out := make([]Account, 0, 32)
+	now := time.Now().Unix()
+	skipped := 0
 	appendAccount := func(account Account) {
 		if seen[account.ID] || !account.IsOAuth() || account.Platform != PlatformOpenAI || account.IsShadow() {
 			return
 		}
 		seen[account.ID] = true
+		// 凭证列表里对应凭据已过期或已停用的账号不再巡检；未录入凭据的账号照常巡检。
+		if entry, ok := findGuardReloginAccount(cfg, account.Name); ok && !entry.IsActiveAt(now) {
+			skipped++
+			return
+		}
 		out = append(out, account)
 	}
 	if len(cfg.GroupIDs) > 0 {
@@ -663,7 +718,7 @@ func (s *AccountTokenGuardService) listAccounts(ctx context.Context, cfg Account
 	if cfg.MaxProbePerCycle > 0 && total > cfg.MaxProbePerCycle {
 		out = out[:cfg.MaxProbePerCycle]
 	}
-	slog.Info("account_token_guard_cycle_scope", "total", total, "probe_this_cycle", len(out))
+	slog.Info("account_token_guard_cycle_scope", "total", total, "probe_this_cycle", len(out), "skipped_inactive_credential", skipped)
 	return out, nil
 }
 
@@ -780,7 +835,10 @@ func (s *AccountTokenGuardService) reloginAccount(ctx context.Context, cfg Accou
 	if !ok {
 		return "自动重登", errors.New("缺少该账号的重登凭据，请在凭证守护页面补充")
 	}
-	credential, err := s.relogin(ctx, cfg, entry)
+	if !entry.IsActiveAt(time.Now().Unix()) {
+		return "自动重登", errors.New("该凭据已禁用或已过期，跳过重登")
+	}
+	credential, err := s.reloginWithMode(ctx, cfg, entry, account)
 	if err != nil {
 		return "自动重登", err
 	}
@@ -827,6 +885,14 @@ func findGuardReloginAccount(cfg AccountTokenGuardConfig, accountName string) (A
 		}
 	}
 	return AccountTokenGuardReloginAccount{}, false
+}
+
+// probeAccount 按激活方式分派测活：builtin=本站授权（进程内 OAuth），external=外站接口。
+func (s *AccountTokenGuardService) probeAccount(ctx context.Context, cfg AccountTokenGuardConfig, account *Account) AccountTokenGuardProbeResult {
+	if cfg.ActivationMode == AccountTokenGuardModeBuiltin {
+		return s.probeBuiltin(ctx, cfg, account)
+	}
+	return s.probe(ctx, cfg, account)
 }
 
 // probe 用账号当前的 access_token 调测活接口。
@@ -883,6 +949,14 @@ func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGu
 		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: truncateGuardText(firstNonEmptyGuard(code, status, message), 160), LatencyMS: latency}
 	}
 	return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: truncateGuardText(firstNonEmptyGuard(status, code, message, "unknown"), 160), LatencyMS: latency}
+}
+
+// reloginWithMode 按激活方式分派重登：builtin=本站授权（进程内 OAuth，走账号绑定的代理 IP），external=外站接口。
+func (s *AccountTokenGuardService) reloginWithMode(ctx context.Context, cfg AccountTokenGuardConfig, entry AccountTokenGuardReloginAccount, account *Account) (map[string]any, error) {
+	if cfg.ActivationMode == AccountTokenGuardModeBuiltin {
+		return s.reloginBuiltin(ctx, cfg, entry, account)
+	}
+	return s.relogin(ctx, cfg, entry)
 }
 
 // relogin 调用站点重登接口，返回新的凭据集合。

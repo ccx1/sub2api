@@ -490,6 +490,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// Subscription feature switch
 	updates[SettingKeySubscriptionEnabled] = strconv.FormatBool(settings.SubscriptionEnabled)
 
+	// Shared account pool user entry switch
+	updates[SettingKeySharedPoolEnabled] = strconv.FormatBool(settings.SharedPoolEnabled)
+
 	// Model plaza feature switches + description
 	updates[SettingKeyModelPlazaEnabled] = strconv.FormatBool(settings.ModelPlazaEnabled)
 	updates[SettingKeyModelPlazaRequireAuth] = strconv.FormatBool(settings.ModelPlazaRequireAuth)

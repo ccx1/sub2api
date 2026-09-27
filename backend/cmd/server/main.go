@@ -29,6 +29,9 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
+//go:embed RANXI_VERSION
+var embeddedRanxiVersion string
+
 // Build-time variables (can be set by ldflags)
 var (
 	Version   = ""
@@ -144,8 +147,9 @@ func runMainServer() {
 	}
 
 	buildInfo := handler.BuildInfo{
-		Version:   Version,
-		BuildType: BuildType,
+		Version:      Version,
+		RanxiVersion: strings.TrimSpace(embeddedRanxiVersion),
+		BuildType:    BuildType,
 	}
 
 	app, err := initializeApplication(buildInfo)

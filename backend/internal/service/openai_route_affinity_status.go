@@ -22,6 +22,7 @@ func (s *OpenAIGatewayService) EnrichCodexRouteAffinityStatus(ctx context.Contex
 		status := &statuses[i]
 		status.RouteAffinityStatus = CodexRouteAffinityOff
 		status.RouteAffinityConnections = 0
+		applyCodexTicketRouteNodeStatus(status, account)
 		if !enabled || policy.RouteAffinityMode == CodexRouteAffinityOff {
 			continue
 		}
@@ -85,6 +86,30 @@ func codexTicketRouteAffinityFromInventory(account *Account, model string) (stri
 		return "no_route_cookie", time.Time{}
 	}
 	return "", time.Time{}
+}
+
+// applyCodexTicketRouteNodeStatus 展示首张未过期 Cookie 票的计算节点；节点身份与亲和开关无关。
+func applyCodexTicketRouteNodeStatus(status *OpenAICodexTicketStatus, account *Account) {
+	status.RouteNode, status.RouteNodeCountry, status.RouteNodeRegion = "", "", ""
+	status.RouteMacroRegion, status.RouteEgressCountry, status.RouteCrossRegion = "", "", false
+	if account == nil || account.Extra == nil {
+		return
+	}
+	inventory := parseOpenAICodexTicketFromAny(account.ID, status.Model, account.Extra[openAICodexTicketExtraKey(status.Model)])
+	now := time.Now()
+	for _, slot := range codexTicketSlots(inventory) {
+		if slot == nil || slot.Revoked || !slot.usesCookies() || !slot.hardExpiresAt().IsZero() && !slot.hardExpiresAt().After(now) {
+			continue
+		}
+		node, ok := codexTicketRouteNode(slot)
+		if !ok {
+			continue
+		}
+		status.RouteNode, status.RouteNodeCountry, status.RouteNodeRegion = node.Name(), node.Country, node.Region
+		status.RouteMacroRegion, status.RouteEgressCountry = node.MacroRegion(), slot.HarvestCountry
+		status.RouteCrossRegion = codexGatewayRouteCrossRegion(node, slot.HarvestCountry)
+		return
+	}
 }
 
 // codexTicketRouteFingerprint 用票据实际会发送的 Cookie 计算路由指纹。

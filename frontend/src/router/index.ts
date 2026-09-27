@@ -280,7 +280,7 @@ const routes: RouteRecordRaw[] = [
     path: '/shared-pool',
     name: 'SharedPool',
     component: () => import('@/views/user/SharedPoolView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: false, title: 'Shared Account Pool', titleKey: 'sharedPool.title', descriptionKey: 'sharedPool.description' }
+    meta: { requiresAuth: true, requiresAdmin: false, requiresSharedPool: true, title: 'Shared Account Pool', titleKey: 'sharedPool.title', descriptionKey: 'sharedPool.description' }
   },
   {
     path: '/available-channels',
@@ -454,6 +454,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Request Strategy',
       titleKey: 'codexRequestStrategy.title',
       descriptionKey: 'codexRequestStrategy.description'
+    }
+  },
+  {
+    path: '/admin/codex-model-quality',
+    name: 'AdminCodexModelQuality',
+    component: () => import('@/views/admin/CodexModelQualityView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Model Check Strategy',
+      titleKey: 'codexModelQuality.title',
+      descriptionKey: 'codexModelQuality.pageDescription'
     }
   },
   {
@@ -652,6 +664,19 @@ const routes: RouteRecordRaw[] = [
       title: 'Announcements',
       titleKey: 'admin.announcements.title',
       descriptionKey: 'admin.announcements.description'
+    }
+  },
+  { path: '/admin/proxy-pool', redirect: '/admin/proxy-quality', meta: { requiresAuth: true, requiresAdmin: true } },
+  {
+    path: '/admin/proxy-quality',
+    name: 'AdminProxyQuality',
+    component: () => import('@/views/admin/ProxyQualityView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Proxy Quality',
+      titleKey: 'admin.proxyQuality.title',
+      descriptionKey: 'admin.proxyQuality.description'
     }
   },
   {
@@ -1060,6 +1085,16 @@ router.beforeEach(async (to, _from, next) => {
     to.meta.requiresSubscription &&
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.subscription_enabled === false
+  ) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    return
+  }
+
+  // 共享账号池是 opt-out 开关：只有显式 false 才拦截用户侧共享池页直达。
+  if (
+    to.meta.requiresSharedPool &&
+    appStore.publicSettingsLoaded &&
+    appStore.cachedPublicSettings?.shared_pool_enabled === false
   ) {
     next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
     return

@@ -107,6 +107,7 @@ func (s *SettingService) getProxyPoolSettingValues(ctx context.Context) (map[str
 		SettingKeyOpenAICodexTicketHarvestProxyURL,
 		SettingKeyOpenAICodexTicketHarvestProxyID,
 		SettingKeyProxyPoolMaxAccounts,
+		SettingKeyProxyQualityGuardSettings,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read proxy pool settings: %w", err)

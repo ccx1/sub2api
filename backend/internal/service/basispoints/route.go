@@ -40,7 +40,7 @@ func NativeFallbackReason(body []byte) string {
 			return "tool_choice"
 		}
 	}
-	// Inline data images are handled by Sub2API's local relay before Prepare;
-	// leave them on BPS so the relay can rewrite them to signed HTTPS URLs.
+	// Inline data images stay on BPS: when Prepare rejects them, Sub2API's
+	// local relay rewrites them to signed HTTPS URLs and prepares again.
 	return ""
 }

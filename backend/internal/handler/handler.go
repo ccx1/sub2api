@@ -49,6 +49,7 @@ type AdminHandlers struct {
 	AuditLog               *admin.AuditLogHandler
 	SpendGuard             *admin.SpendGuardHandler
 	AntiDegrade            *admin.AntiDegradeHandler
+	ProxyQuality           *admin.ProxyQualityHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -80,6 +81,7 @@ type Handlers struct {
 
 // BuildInfo contains build-time information
 type BuildInfo struct {
-	Version   string
-	BuildType string // "source" for manual builds, "release" for CI builds
+	Version      string
+	RanxiVersion string
+	BuildType    string // "source" for manual builds, "release" for CI builds
 }

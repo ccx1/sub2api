@@ -12,11 +12,13 @@ import (
 
 func TestProvideServiceBuildInfo(t *testing.T) {
 	in := handler.BuildInfo{
-		Version:   "v-test",
-		BuildType: "release",
+		Version:      "v-test",
+		RanxiVersion: "2.8.14",
+		BuildType:    "release",
 	}
 	out := provideServiceBuildInfo(in)
 	require.Equal(t, in.Version, out.Version)
+	require.Equal(t, in.RanxiVersion, out.RanxiVersion)
 	require.Equal(t, in.BuildType, out.BuildType)
 }
 
@@ -98,9 +100,11 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // upstreamBillingProbe
 		nil, // ollamaCloudUsage
 		nil, // spendGuard
+		nil, // proxyQualityGuard
 		nil, // opencodeGoUsage
 		nil, // auditLog
 		nil, // openAIAutoReset
+		nil, // modelAvailabilityRecheck
 		nil, // sharedPoolAutoTransfer
 		nil, // promptAudit
 		nil, // pluginManager

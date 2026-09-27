@@ -130,6 +130,9 @@ type OpenAITokenInfo struct {
 	PriceCountry           string `json:"price_country,omitempty"`
 	BillingMetadataChecked bool   `json:"billing_metadata_checked,omitempty"`
 	PrivacyMode            string `json:"privacy_mode,omitempty"`
+	// B1 采集：账号 workspace 声明的后端 origin 与地理路由约束。
+	WorkspaceBackendOrigin string `json:"workspace_backend_origin,omitempty"`
+	AccountRoutingOverride string `json:"account_routing_override,omitempty"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
@@ -306,6 +309,13 @@ func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *Ope
 		if tokenInfo.Email == "" && info.Email != "" {
 			tokenInfo.Email = info.Email
 		}
+		// B1：仅采集，不改变路由；缺失时保持为空。
+		if info.WorkspaceBackendOrigin != "" {
+			tokenInfo.WorkspaceBackendOrigin = info.WorkspaceBackendOrigin
+		}
+		if info.AccountRoutingOverride != "" {
+			tokenInfo.AccountRoutingOverride = info.AccountRoutingOverride
+		}
 	}
 	// 账单地区只取个人订阅响应，不能借用 poid 工作区的计费资料。
 	subscription := fetchChatGPTSubscriptionInfo(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, resolveChatGPTSubscriptionAccountID(tokenInfo, orgID))
@@ -433,6 +443,12 @@ func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo)
 	}
 	if tokenInfo.SubscriptionExpiresAt != "" {
 		creds["subscription_expires_at"] = tokenInfo.SubscriptionExpiresAt
+	}
+	if tokenInfo.WorkspaceBackendOrigin != "" {
+		creds["workspace_backend_origin"] = tokenInfo.WorkspaceBackendOrigin
+	}
+	if tokenInfo.AccountRoutingOverride != "" {
+		creds["account_routing_override"] = tokenInfo.AccountRoutingOverride
 	}
 	if tokenInfo.BillingMetadataChecked {
 		creds["billing_currency"] = tokenInfo.BillingCurrency

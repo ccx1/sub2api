@@ -23,6 +23,30 @@ type proxyPoolSettings interface {
 	GetProxyPoolMaxAccounts(context.Context) (int, error)
 }
 
+// proxyQualityGuardSettingsReader 为可选能力：未提供时随机池保持原有健康筛选。
+type proxyQualityGuardSettingsReader interface {
+	GetProxyQualityGuardSettings(context.Context) (service.ProxyQualityGuardSettings, error)
+}
+
+// proxyPoolQualityGate 返回“使用前质量检测”对候选的额外约束；读取失败时不改变原有结论，避免设置异常导致全池不可用。
+func (a *ProxyPoolAllocator) proxyPoolQualityGate(ctx context.Context) func(*service.Proxy, *service.ProxyLatencyInfo, bool, bool) (bool, bool) {
+	passthrough := func(_ *service.Proxy, _ *service.ProxyLatencyInfo, degraded, valid bool) (bool, bool) {
+		return degraded, valid
+	}
+	if a == nil || a.settings == nil {
+		return passthrough
+	}
+	reader, ok := a.settings.(proxyQualityGuardSettingsReader)
+	if !ok {
+		return passthrough
+	}
+	cfg, err := reader.GetProxyQualityGuardSettings(ctx)
+	if err != nil {
+		return passthrough
+	}
+	return cfg.ApplyPoolGate
+}
+
 type proxyPoolCandidate struct {
 	proxy    *service.Proxy
 	fixedIDs []string
@@ -141,15 +165,8 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 	if err != nil {
 		return nil, fmt.Errorf("read proxy pool health: %w", err)
 	}
-	regionFallback := false
-	if selection.CountryCode != "" {
-		regional := filterProxyPoolRegion(candidates, health, selection.CountryCode)
-		if len(regional) > 0 || !selection.AllowCountryFallback {
-			candidates = regional
-		} else {
-			regionFallback = true
-		}
-	}
+	gate := a.proxyPoolQualityGate(ctx)
+	candidates, tier := selectProxyPoolRegion(candidates, health, selection, proxyPoolUsable(health, gate))
 	poolProxies := make([]*service.Proxy, 0, len(candidates))
 	for _, candidate := range candidates {
 		poolProxies = append(poolProxies, candidate.proxy)
@@ -160,7 +177,7 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 	}
 	// Lua 按输入次序打破同档平局，每次独立打散，避免代理 ID 形成固定优先级。
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
-	keys, leases, proxies := prepareProxyPoolLeases(candidates, health, ips)
+	keys, leases, proxies := prepareProxyPoolLeases(candidates, health, ips, gate)
 	member := strconv.FormatInt(selection.AccountID, 10)
 	if selection.AccountID <= 0 {
 		member = "request:" + uuid.NewString()
@@ -184,17 +201,22 @@ func (a *ProxyPoolAllocator) reserve(ctx context.Context, candidates []proxyPool
 	}
 	selectedProxy := proxies[selected]
 	if selectedProxy != nil {
-		selectedProxy.RegionFallback = regionFallback
+		selectedProxy.RegionFallback = tier != proxyPoolTierRegion
+		logProxyPoolRegionFallback(selection.AccountID, selection, tier, selectedProxy.ID)
 	}
 	return selectedProxy, nil
 }
 
-func prepareProxyPoolLeases(candidates []proxyPoolCandidate, health map[int64]*service.ProxyLatencyInfo, ips map[int64]string) ([]string, []proxyPoolLeaseCandidate, map[string]*service.Proxy) {
+func prepareProxyPoolLeases(candidates []proxyPoolCandidate, health map[int64]*service.ProxyLatencyInfo, ips map[int64]string,
+	gate func(*service.Proxy, *service.ProxyLatencyInfo, bool, bool) (bool, bool)) ([]string, []proxyPoolLeaseCandidate, map[string]*service.Proxy) {
 	keys := make([]string, 0, len(candidates))
 	leases := make([]proxyPoolLeaseCandidate, 0, len(candidates))
 	proxies := make(map[string]*service.Proxy, len(candidates))
 	for _, candidate := range candidates {
 		quality, degraded, valid := proxyPoolQuality(candidate.proxy, health[candidate.proxy.ID])
+		if gate != nil {
+			degraded, valid = gate(candidate.proxy, health[candidate.proxy.ID], degraded, valid)
+		}
 		if !valid {
 			continue
 		}

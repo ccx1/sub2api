@@ -58,6 +58,54 @@ func TestProxyPoolRegionFallbackUsesConfiguredPoolAndMarksSelection(t *testing.T
 	require.True(t, selected.RegionFallback)
 }
 
+func TestProxyPoolRegionFallbackPrefersSameMacroRegion(t *testing.T) {
+	now := time.Now()
+	candidates := []proxyPoolCandidate{poolCandidate(1), poolCandidate(2), poolCandidate(3)}
+	health := map[int64]*service.ProxyLatencyInfo{}
+	for i, country := range []string{"US", "ES", "JP"} {
+		candidates[i].proxy.UpdatedAt = now
+		health[candidates[i].proxy.ID] = &service.ProxyLatencyInfo{Success: true, CountryCode: country, UpdatedAt: now}
+	}
+	usable := proxyPoolUsable(health, nil)
+	selected, tier := selectProxyPoolRegion(candidates, health, service.ProxyPoolSelection{CountryCode: "DE", AllowCountryFallback: true}, usable)
+	require.Equal(t, proxyPoolTierMacroRegion, tier)
+	require.Len(t, selected, 1)
+	require.EqualValues(t, 2, selected[0].proxy.ID, "德国缺货时先用同属欧洲大区的出口")
+
+	selected, tier = selectProxyPoolRegion(candidates, health, service.ProxyPoolSelection{CountryCode: "BR", AllowCountryFallback: true}, usable)
+	require.Equal(t, proxyPoolTierPool, tier)
+	require.Len(t, selected, 3, "同大区也无出口时才退回整池")
+
+	selected, tier = selectProxyPoolRegion(candidates, health, service.ProxyPoolSelection{CountryCode: "DE"}, usable)
+	require.Equal(t, proxyPoolTierRegion, tier)
+	require.Empty(t, selected)
+
+	selected, tier = selectProxyPoolRegion(candidates, health, service.ProxyPoolSelection{CountryCode: "JP", AllowCountryFallback: true}, usable)
+	require.Equal(t, proxyPoolTierRegion, tier)
+	require.Len(t, selected, 1)
+	require.EqualValues(t, 3, selected[0].proxy.ID)
+}
+
+func TestProxyPoolRegionFallbackPrefersSameMacroRegionInAllocator(t *testing.T) {
+	now := time.Now()
+	first, second := poolCandidate(1), poolCandidate(2)
+	first.proxy.UpdatedAt, second.proxy.UpdatedAt = now, now
+	a, _ := newProxyPoolAllocatorTest(t, 0, first, second)
+	ctx := context.Background()
+	for id, country := range map[int64]string{1: "US", 2: "ES"} {
+		require.NoError(t, a.latencyCache.SetProxyLatency(ctx, id, &service.ProxyLatencyInfo{
+			Success: true, CountryCode: country, UpdatedAt: now,
+		}))
+	}
+	for accountID := int64(50); accountID < 56; accountID++ {
+		selected, err := a.Select(ctx, service.ProxyPoolSelection{AccountID: accountID, CountryCode: "DE", AllowCountryFallback: true})
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		require.EqualValues(t, 2, selected.ID)
+		require.True(t, selected.RegionFallback)
+	}
+}
+
 func TestProxyPoolRegionFallbackStaysWithinRestrictedPool(t *testing.T) {
 	a, _ := newProxyPoolAllocatorTest(t, 0, poolCandidate(1), poolCandidate(2))
 	ctx := context.Background()

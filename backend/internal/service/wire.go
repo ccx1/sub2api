@@ -29,8 +29,9 @@ func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthCli
 
 // BuildInfo contains build information
 type BuildInfo struct {
-	Version   string
-	BuildType string
+	Version      string
+	RanxiVersion string
+	BuildType    string
 }
 
 // ProvidePricingService creates and initializes PricingService
@@ -45,7 +46,9 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 
 // ProvideUpdateService creates UpdateService with BuildInfo
 func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+	svc := NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+	svc.ranxiVersion = buildInfo.RanxiVersion
+	return svc
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -196,6 +199,23 @@ func ProvideOpenAIQuotaService(
 	service := NewOpenAIQuotaService(accountRepo, proxyRepo, tokenProvider, privacyClientFactory, referralClient)
 	service.agentIdentityWS = openAIGatewayService
 	return service
+}
+
+// ProvideModelAvailabilityRecheckService 启动单模型 503 冷却的后台复检。
+// accountRepo 未实现 ModelAvailabilityRepository 时（如测试替身）不启动。
+func ProvideModelAvailabilityRecheckService(
+	accountRepo AccountRepository,
+	accountTestService *AccountTestService,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+) *ModelAvailabilityRecheckService {
+	availability, ok := accountRepo.(ModelAvailabilityRepository)
+	if !ok || accountTestService == nil {
+		return nil
+	}
+	svc := NewModelAvailabilityRecheckService(accountRepo, availability, accountTestService, lockCache, db)
+	svc.Start()
+	return svc
 }
 
 // ProvideOpenAIQuotaAutoResetService 启动账号级自动用卡队列与补偿扫描。
@@ -913,6 +933,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
 	ProvideOpenAIQuotaAutoResetService,
+	ProvideModelAvailabilityRecheckService,
 	ProvideGrokQuotaService,
 	ProvideCNProviderQuotaService,
 	ProvideCNProviderBalanceService,
@@ -938,6 +959,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsCleanupService,
 	ProvideOpsScheduledReportService,
 	ProvideSpendGuardService,
+	ProvideProxyQualityGuardService,
 	ProvideAntiDegradeService,
 	ProvideAccountOpsService,
 	ProvideAccountTokenGuardService,
@@ -1112,8 +1134,8 @@ func ProvideAccountOpsService(settings SettingRepository, repo AccountOpsReposit
 
 // ProvideAccountTokenGuardService 创建并启动「凭证守护」后台巡检（智能运维子页面）。
 func ProvideAccountTokenGuardService(settings SettingRepository, repo AccountTokenGuardRepository,
-	accounts AccountRepository, admin AdminService, invalidator TokenCacheInvalidator) *AccountTokenGuardService {
-	svc := NewAccountTokenGuardService(settings, repo, accounts, admin, invalidator)
+	accounts AccountRepository, admin AdminService, invalidator TokenCacheInvalidator, proxyRepo ProxyRepository) *AccountTokenGuardService {
+	svc := NewAccountTokenGuardService(settings, repo, accounts, admin, invalidator, proxyRepo)
 	svc.Start()
 	return svc
 }

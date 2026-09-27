@@ -104,6 +104,11 @@ type ChatGPTAccountInfo struct {
 	// plan_type / expires_at 到底属于个人账号还是某个 workspace。
 	AccountID             string
 	SubscriptionExpiresAt string // entitlement.expires_at (RFC3339)
+	// WorkspaceBackendOrigin / AccountRoutingOverride 为 B1 采集字段：账号所属
+	// workspace 声明的后端 origin 与地理路由约束（NO_CONSTRAINT/us/us_cr）。
+	// accounts/check 端点未必返回，缺失时留空，仅作画像与可选路由输入。
+	WorkspaceBackendOrigin string
+	AccountRoutingOverride string
 }
 
 var (
@@ -174,6 +179,8 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 			planType  string
 			expiresAt string
 			accountID string
+			origin    string
+			override  string
 		}
 		var defaultC, paidC, anyC candidate
 		for key, acctRaw := range accounts {
@@ -190,27 +197,32 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 			}
 			ea := extractEntitlementExpiresAt(acct)
 			id := chatGPTAccountObjectID(acct, key)
+			origin := extractWorkspaceBackendOrigin(acct)
+			override := extractAccountRoutingOverride(acct)
 			if anyC.planType == "" {
-				anyC = candidate{planType, ea, id}
+				anyC = candidate{planType, ea, id, origin, override}
 			}
 			if account, ok := acct["account"].(map[string]any); ok {
 				if isDefault, _ := account["is_default"].(bool); isDefault {
-					defaultC = candidate{planType, ea, id}
+					defaultC = candidate{planType, ea, id, origin, override}
 				}
 			}
 			if !strings.EqualFold(planType, "free") && paidC.planType == "" {
-				paidC = candidate{planType, ea, id}
+				paidC = candidate{planType, ea, id, origin, override}
 			}
 		}
 		// 优先级：default > 非 free > 任意
+		var chosen candidate
 		switch {
 		case defaultC.planType != "":
-			info.PlanType, info.SubscriptionExpiresAt, info.AccountID = defaultC.planType, defaultC.expiresAt, defaultC.accountID
+			chosen = defaultC
 		case paidC.planType != "":
-			info.PlanType, info.SubscriptionExpiresAt, info.AccountID = paidC.planType, paidC.expiresAt, paidC.accountID
+			chosen = paidC
 		default:
-			info.PlanType, info.SubscriptionExpiresAt, info.AccountID = anyC.planType, anyC.expiresAt, anyC.accountID
+			chosen = anyC
 		}
+		info.PlanType, info.SubscriptionExpiresAt, info.AccountID = chosen.planType, chosen.expiresAt, chosen.accountID
+		info.WorkspaceBackendOrigin, info.AccountRoutingOverride = chosen.origin, chosen.override
 	}
 
 	if info.PlanType == "" {
@@ -238,6 +250,34 @@ func fillAccountInfo(info *ChatGPTAccountInfo, acct map[string]any, fallbackID s
 	info.PlanType = extractPlanType(acct)
 	info.SubscriptionExpiresAt = extractEntitlementExpiresAt(acct)
 	info.AccountID = chatGPTAccountObjectID(acct, fallbackID)
+	info.WorkspaceBackendOrigin = extractWorkspaceBackendOrigin(acct)
+	info.AccountRoutingOverride = extractAccountRoutingOverride(acct)
+}
+
+// extractWorkspaceBackendOrigin 读取账号声明的后端 origin（若端点返回）。
+func extractWorkspaceBackendOrigin(acct map[string]any) string {
+	if account, ok := acct["account"].(map[string]any); ok {
+		if v, ok := account["workspace_backend_origin"].(string); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	if v, ok := acct["workspace_backend_origin"].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// extractAccountRoutingOverride 读取账号地理路由约束（NO_CONSTRAINT/us/us_cr）。
+func extractAccountRoutingOverride(acct map[string]any) string {
+	if account, ok := acct["account"].(map[string]any); ok {
+		if v, ok := account["account_routing_override"].(string); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	if v, ok := acct["account_routing_override"].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 // chatGPTAccountObjectID 取单个 account 对象的账号标识。

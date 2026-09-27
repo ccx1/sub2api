@@ -37,6 +37,7 @@ func (a *ProxyPoolAllocator) ReportTransportFailure(ctx context.Context, account
 		proxyTransportCooldownTTL.Milliseconds()).Err(); err != nil {
 		return fmt.Errorf("report proxy transport failure: %w", err)
 	}
+	a.recordProxyQualityRuntimeFailure(ctx, proxy.ID)
 	return nil
 }
 

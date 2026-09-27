@@ -31,6 +31,11 @@ type CodexRequestStrategyPolicy struct {
 	// request. It does not synthesize current-date or current-time prompts.
 	TimeContextMode string `json:"time_context_mode"`
 	Timezone        string `json:"timezone"`
+	// PathContextMode controls the absolute <cwd> path leaked inside the Codex
+	// <environment_context> block. placeholder replaces every cwd value with a
+	// fixed token; it never invents a cwd where none is present.
+	PathContextMode string `json:"path_context_mode"`
+	PathPlaceholder string `json:"path_placeholder"`
 	// ComplianceMode controls account-derived FedRAMP signaling. Manual
 	// enabling is intentionally unsupported to avoid spoofing compliance.
 	ComplianceMode string `json:"compliance_mode"`
@@ -53,6 +58,9 @@ const (
 	CodexRequestTimeContextPreserve      = "preserve"
 	CodexRequestTimeContextStrip         = "strip"
 	CodexRequestTimeContextOverride      = "override"
+	CodexRequestPathContextPreserve      = "preserve"
+	CodexRequestPathContextPlaceholder   = "placeholder"
+	CodexRequestPathDefaultPlaceholder   = "/workspace"
 	CodexRequestComplianceAccount        = "account"
 	CodexRequestCompliancePreserve       = "preserve"
 	CodexRequestComplianceStrip          = "strip"
@@ -72,6 +80,10 @@ func DefaultCodexRequestStrategyPolicy() CodexRequestStrategyPolicy {
 		// context by default. Account-derived compliance is re-applied below.
 		RegionMode:      CodexRequestRegionStrip,
 		TimeContextMode: CodexRequestTimeContextStrip,
+		// Path context defaults to preserve: replacing cwd changes prompt
+		// content the model may rely on, so an administrator opts in explicitly.
+		PathContextMode: CodexRequestPathContextPreserve,
+		PathPlaceholder: CodexRequestPathDefaultPlaceholder,
 		ComplianceMode:  CodexRequestComplianceAccount,
 	}
 }
@@ -122,6 +134,14 @@ func ValidateCodexRequestStrategyPolicy(p CodexRequestStrategyPolicy) error {
 			return fmt.Errorf("timezone: %w", err)
 		}
 	}
+	if p.PathContextMode != "" && p.PathContextMode != CodexRequestPathContextPreserve && p.PathContextMode != CodexRequestPathContextPlaceholder {
+		return fmt.Errorf("path_context_mode must be preserve or placeholder")
+	}
+	if p.PathContextMode == CodexRequestPathContextPlaceholder {
+		if err := validateCodexPathPlaceholder(p.PathPlaceholder); err != nil {
+			return err
+		}
+	}
 	if p.ComplianceMode != CodexRequestComplianceAccount && p.ComplianceMode != CodexRequestCompliancePreserve && p.ComplianceMode != CodexRequestComplianceStrip {
 		return fmt.Errorf("compliance_mode must be account, preserve or strip")
 	}
@@ -157,9 +177,38 @@ func normalizeCodexRequestStrategyPolicy(p CodexRequestStrategyPolicy) CodexRequ
 	if strings.TrimSpace(p.ComplianceMode) == "" {
 		p.ComplianceMode = d.ComplianceMode
 	}
+	if strings.TrimSpace(p.PathContextMode) == "" {
+		p.PathContextMode = d.PathContextMode
+	}
+	if p.PathContextMode == CodexRequestPathContextPlaceholder && strings.TrimSpace(p.PathPlaceholder) == "" {
+		p.PathPlaceholder = d.PathPlaceholder
+	}
+	p.PathPlaceholder = strings.TrimSpace(p.PathPlaceholder)
 	p.AccountRoutingOverride = strings.TrimSpace(p.AccountRoutingOverride)
 	p.Residency = strings.TrimSpace(strings.ToLower(p.Residency))
 	p.Timezone = strings.TrimSpace(p.Timezone)
 	p.CookieMode = normalizeCodexCookieMode(p.CookieMode)
 	return p
+}
+
+// validateCodexPathPlaceholder restricts the replacement token to a small,
+// safe character set. The placeholder is injected verbatim into the prompt, so
+// it must not carry markup or newlines that could break the surrounding XML.
+func validateCodexPathPlaceholder(placeholder string) error {
+	placeholder = strings.TrimSpace(placeholder)
+	if placeholder == "" {
+		return fmt.Errorf("path_placeholder must not be empty when path_context_mode is placeholder")
+	}
+	if len(placeholder) > 128 {
+		return fmt.Errorf("path_placeholder must be at most 128 characters")
+	}
+	for _, r := range placeholder {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '/' || r == '\\' || r == '_' || r == '-' || r == '.' || r == ':' || r == '~':
+		default:
+			return fmt.Errorf("path_placeholder contains unsupported character %q", r)
+		}
+	}
+	return nil
 }

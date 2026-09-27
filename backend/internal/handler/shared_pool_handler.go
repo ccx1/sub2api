@@ -32,6 +32,7 @@ type SharedPoolHandler struct {
 	ticketConfig   *config.Config
 	ticketSettings sharedCodexTicketSettings
 	actions        sharedAccountActions
+	feature        sharedPoolFeatureSettings
 	importSettings sharedAccountImportSettings
 }
 
@@ -51,6 +52,7 @@ func NewSharedPoolHandler(pool *service.SharedPoolService, earnings service.Shar
 	h.ticketConfig = cfg
 	if settings != nil {
 		h.ticketSettings = settings
+		h.feature = settings
 		h.importSettings = settings
 	}
 	return h

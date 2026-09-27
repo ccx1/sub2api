@@ -12,6 +12,22 @@ const (
 	CodexTicketRefreshReplace      = "replace"
 	DefaultCodexTicketPoolCapacity = 5
 	MaxCodexTicketPoolCapacity     = 20
+
+	// CodexTicketRejectSafetyBuffering* 控制 Safety Buffering 否决闸的严格度。
+	// off:               不因 Safety Buffering 信号否决（默认，保持既有行为）。
+	// faster_model_only: 仅当服务端已声明降级模型（X-Codex-Safety-Buffering-Faster-Model 非空）时否决。
+	// any:               只要 X-Codex-Safety-Buffering-Enabled=true 就否决。
+	CodexTicketRejectSafetyBufferingOff         = "off"
+	CodexTicketRejectSafetyBufferingFasterModel = "faster_model_only"
+	CodexTicketRejectSafetyBufferingAny         = "any"
+
+	// CodexTicketWorkspaceOriginRouting* 控制 B2：是否把账号声明的
+	// workspace_backend_origin 作为打票探测的目标 host。
+	// off:   始终使用默认 chatgpt.com（默认，仅 B1 采集，不改路由）。
+	// probe: 使用 origin，但带健康探测；连续失败达阈值后静默回落默认 host，
+	//        半开窗口再探测恢复。
+	CodexTicketWorkspaceOriginRoutingOff   = "off"
+	CodexTicketWorkspaceOriginRoutingProbe = "probe"
 )
 
 // CodexTicketBusinessVerificationEnabled 让未配置此开关的旧安装继续复核业务出口。
@@ -102,6 +118,24 @@ func NormalizeOpenAICodexTicketConfig(cfg OpenAICodexTicketConfig) OpenAICodexTi
 	}
 	if cfg.RateLimitCooldownSeconds <= 0 {
 		cfg.RateLimitCooldownSeconds = 300
+	}
+	switch cfg.RejectSafetyBuffering {
+	case CodexTicketRejectSafetyBufferingFasterModel, CodexTicketRejectSafetyBufferingAny:
+		// 保留管理员选择的严格度。
+	default:
+		cfg.RejectSafetyBuffering = CodexTicketRejectSafetyBufferingOff
+	}
+	switch cfg.WorkspaceOriginRouting {
+	case CodexTicketWorkspaceOriginRoutingProbe:
+		// 保留管理员选择。
+	default:
+		cfg.WorkspaceOriginRouting = CodexTicketWorkspaceOriginRoutingOff
+	}
+	if cfg.WorkspaceOriginFailureThreshold <= 0 {
+		cfg.WorkspaceOriginFailureThreshold = 3
+	}
+	if cfg.WorkspaceOriginSilenceSeconds <= 0 {
+		cfg.WorkspaceOriginSilenceSeconds = 600
 	}
 	return cfg
 }

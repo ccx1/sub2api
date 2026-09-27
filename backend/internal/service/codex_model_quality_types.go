@@ -26,12 +26,17 @@ type CodexModelQualityPolicy struct {
 	// ModelPriorities controls automatic quality-check order. Larger values
 	// run first; models absent from the map keep the configured model order.
 	ModelPriorities map[string]int `json:"model_priorities,omitempty"`
-	// Canary is an optional administrator-defined question. The answer must
-	// contain one of CanaryExpected (case/whitespace-insensitive); it runs in
-	// addition to the capability and fingerprint checks.
+	// Canary is an optional administrator-defined question. By default the
+	// answer must contain one of CanaryExpected (case/whitespace-insensitive)
+	// and it runs in addition to the capability and fingerprint checks.
 	CanaryEnabled  bool     `json:"canary_enabled"`
 	CanaryPrompt   string   `json:"canary_prompt,omitempty"`
 	CanaryExpected []string `json:"canary_expected,omitempty"`
+	// CanaryMatch is "contains" (default) or "exact": the final answer must
+	// equal one expected answer. CanaryOnly makes the canary the whole check.
+	// Both omit their zero values so existing policy hashes stay unchanged.
+	CanaryMatch string `json:"canary_match,omitempty"`
+	CanaryOnly  bool   `json:"canary_only,omitempty"`
 }
 
 // UnmarshalJSON keeps requests and stored policies from before the per-account
@@ -77,15 +82,40 @@ type CodexModelQualityStatus struct {
 	BaselineReused         bool       `json:"baseline_reused,omitempty"`
 	ConsecutiveLowQuality  int        `json:"consecutive_low_quality,omitempty"`
 	QualityPausedUntil     *time.Time `json:"quality_paused_until,omitempty"`
+	// TicketReplaced marks a conclusion kept for display after the tested
+	// ticket was replaced. The replacement ticket has not been checked yet.
+	TicketReplaced bool `json:"ticket_replaced,omitempty"`
+	// PreviousStatus keeps the last finished status when the displayed status
+	// was downgraded to stale, so the last conclusion stays visible.
+	PreviousStatus string `json:"previous_status,omitempty"`
+	// History lists recent finished checks, newest first. It is only filled
+	// in status responses and never persisted inside Status.
+	History []CodexModelQualityHistoryEntry `json:"history,omitempty"`
 }
 
+// CodexModelQualityHistoryEntry is one finished check. Like the status it
+// contains only summaries, never ticket, Cookie, proxy or response contents.
+type CodexModelQualityHistoryEntry struct {
+	Status           string     `json:"status"`
+	Reason           string     `json:"reason"`
+	Source           string     `json:"source"`
+	CheckedAt        *time.Time `json:"checked_at,omitempty"`
+	DurationMS       int64      `json:"duration_ms,omitempty"`
+	CapabilityScore  *float64   `json:"capability_score,omitempty"`
+	ModelIdentity    string     `json:"model_identity,omitempty"`
+	TicketCapturedAt *time.Time `json:"ticket_captured_at,omitempty"`
+}
+
+const codexModelQualityHistoryLimit = 20
+
 type CodexModelQualityRecord struct {
-	Status                CodexModelQualityStatus `json:"status"`
-	Scope                 string                  `json:"scope"`
-	Policy                string                  `json:"policy"`
-	ConsecutiveLowQuality int                     `json:"consecutive_low_quality,omitempty"`
-	QualityPausedUntil    *time.Time              `json:"quality_paused_until,omitempty"`
-	LastLowQualityTicket  string                  `json:"last_low_quality_ticket,omitempty"`
+	Status                CodexModelQualityStatus         `json:"status"`
+	Scope                 string                          `json:"scope"`
+	Policy                string                          `json:"policy"`
+	ConsecutiveLowQuality int                             `json:"consecutive_low_quality,omitempty"`
+	QualityPausedUntil    *time.Time                      `json:"quality_paused_until,omitempty"`
+	LastLowQualityTicket  string                          `json:"last_low_quality_ticket,omitempty"`
+	History               []CodexModelQualityHistoryEntry `json:"history,omitempty"`
 }
 
 type CodexModelQualityStore interface {

@@ -1,10 +1,14 @@
 package basispoints
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 )
+
+// ErrInlineImage marks base64 input that the caller may rewrite through ImageRelay.
+var ErrInlineImage = errors.New("basispoints does not accept data:image/base64 image input while image support is disabled; provide an HTTPS image URL, or disable Basispoints and start a new conversation to send this image")
 
 // Accept HTTPS URLs or validated native attachment references.
 func validateImage(part object) error {
@@ -22,7 +26,7 @@ func validateImage(part object) error {
 			return fmt.Errorf("basispoints input_image requires an HTTPS image_url or file_id")
 		}
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "data:") {
-			return fmt.Errorf("basispoints does not accept data:image input while image support is disabled; provide an HTTPS image URL, or disable Basispoints and start a new conversation")
+			return ErrInlineImage
 		}
 		parsed, err := url.Parse(raw)
 		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" || strings.TrimSpace(raw) != raw {

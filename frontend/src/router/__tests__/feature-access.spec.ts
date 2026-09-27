@@ -8,6 +8,7 @@ type NavigationGuard = (
 
 const routerHarness = vi.hoisted(() => ({
   guard: null as NavigationGuard | null,
+  routes: [] as { path: string; meta?: Record<string, unknown> }[],
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const appStore = vi.hoisted(() => ({
     payment_enabled?: boolean
     risk_control_enabled?: boolean
     subscription_enabled?: boolean
+    shared_pool_enabled?: boolean
     custom_menu_items?: []
   },
   fetchPublicSettings: vi.fn(),
@@ -35,13 +37,16 @@ const appStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
+  createRouter: vi.fn((options) => {
+    routerHarness.routes = options.routes
+    return {
     beforeEach: vi.fn((guard: NavigationGuard) => {
       routerHarness.guard = guard
     }),
     afterEach: vi.fn(),
     onError: vi.fn(),
-  })),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -190,6 +195,7 @@ describe('feature route guard', () => {
       '/admin/settings',
     ],
     ['subscription', { requiresSubscription: true }, { subscription_enabled: false }, '/dashboard'],
+    ['shared pool', { requiresSharedPool: true }, { shared_pool_enabled: false }, '/dashboard'],
   ])('redirects when loaded settings explicitly disable %s', async (_name, meta, settings, target) => {
     authStore.isAdmin = meta.requiresRiskControl === true
     appStore.cachedPublicSettings = settings
@@ -201,6 +207,45 @@ describe('feature route guard', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith(target)
+  })
+})
+
+describe('observer and proxy-quality route boundaries', () => {
+  beforeEach(() => {
+    authStore.isAuthenticated = true
+    authStore.isAdmin = false
+    authStore.isObserver = false
+    authStore.canManageAccounts = false
+    authStore.isSimpleMode = false
+    appStore.backendModeEnabled = false
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = {}
+  })
+
+  it.each(['user', 'observer', 'admin'])('limits proxy-quality administration for %s', async (role) => {
+    authStore.isAdmin = role === 'admin'
+    authStore.isObserver = role === 'observer'
+    authStore.canManageAccounts = role !== 'user'
+    const route = routerHarness.routes.find((item) => item.path === '/admin/proxy-quality')
+    expect(route?.meta?.requiresAdmin).toBe(true)
+    const { navigation, next } = runGuard(route!.meta!, route!.path)
+    await navigation
+    if (role === 'admin') expect(next).toHaveBeenCalledWith()
+    else expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
+  it('keeps account management available to observers in backend mode', async () => {
+    authStore.isObserver = true
+    authStore.canManageAccounts = true
+    appStore.backendModeEnabled = true
+    const route = routerHarness.routes.find((item) => item.path === '/admin/accounts')
+    expect(route?.meta?.requiresAccountManagement).toBe(true)
+    const { navigation, next } = runGuard(route!.meta!, route!.path)
+    await navigation
+    expect(next).toHaveBeenCalledWith()
+    appStore.backendModeEnabled = false
+    authStore.isObserver = false
+    authStore.canManageAccounts = false
   })
 })
 

@@ -90,8 +90,11 @@ func (s *OpenAIGatewayService) finishCodexModelQuality(job *codexModelQualityJob
 	if !s.codexModelQualityCurrent(ctx, job) {
 		status.Status, status.Reason = "stale", "stale"
 	}
+	quarantine := CodexModelQualityFailure(status) && (codexQualityAnswerFailure(status.Reason) || job.policy.QuarantineOnFailure) && !job.diagnostic
+	// 撤票后下一次检测属于新票，按换票宽限；票仍在用时（未撤的失败、未完成）
+	// 按重试间隔，宽限为 0 也不会对同一张票反复发请求。
 	delay := job.policy.RetryIntervalSeconds
-	if status.Status == "passed" || codexQualityAnswerFailure(status.Reason) || status.Reason == "model_mismatch" {
+	if quarantine {
 		delay = job.policy.ReplacementCheckDelaySeconds
 	}
 	next := now.Add(time.Duration(delay) * time.Second)
@@ -99,7 +102,6 @@ func (s *OpenAIGatewayService) finishCodexModelQuality(job *codexModelQualityJob
 	if status.Status == "passed" {
 		status.NextCheckAt = nil
 	}
-	quarantine := CodexModelQualityFailure(status) && (codexQualityAnswerFailure(status.Reason) || job.policy.QuarantineOnFailure) && !job.diagnostic
 	if quarantine {
 		s.quarantineCodexModelQuality(ctx, job, store, status)
 	} else if !saveCodexModelQualityRecord(ctx, store, job, s.codexModelQualityRecord(ctx, store, job, status, now)) {
@@ -141,6 +143,7 @@ func (s *OpenAIGatewayService) quarantineCodexModelQuality(ctx context.Context, 
 	}
 	record := *previous
 	advanceCodexModelQualityCircuit(&record, job, time.Now())
+	appendCodexModelQualityHistory(&record, status)
 	if !saveCodexModelQualityRecord(ctx, store, job, &record) || ctx.Err() != nil {
 		return
 	}
@@ -156,13 +159,15 @@ func (s *OpenAIGatewayService) quarantineCodexModelQuality(ctx context.Context, 
 			status.Status, status.Reason = "stale", "stale"
 		}
 		previous.Status = status
+		appendCodexModelQualityHistory(previous, status)
 		_ = saveCodexModelQualityRecord(ctx, store, job, previous)
 		return
 	}
 	s.rememberCodexTicketRevocation(key, used)
 	s.openaiCodexTickets.Store(key, revokeCodexTicketSlot(inventory, used))
 	status.Status = "quarantined"
-	record.Status = status
+	record.Status, record.History = status, previous.History
+	appendCodexModelQualityHistory(&record, status)
 	_ = saveCodexModelQualityRecord(ctx, store, job, &record)
 	s.markCodexQualityTicketFailed(ctx, job, used.Invalidation.Reason)
 	// 质量不合格且开启了路由亲和时，对该模型路由施加冷却，促使下一次打票
@@ -198,6 +203,10 @@ func (s *OpenAIGatewayService) markCodexQualityTicketFailed(ctx context.Context,
 }
 
 func (s *OpenAIGatewayService) evaluateCodexModelQuality(ctx context.Context, job *codexModelQualityJob, status CodexModelQualityStatus) CodexModelQualityStatus {
+	if job.policy.CanaryEnabled && job.policy.CanaryOnly {
+		// 快速模式：金丝雀题本身就是判定依据，跳过能力题和指纹以缩短检测时间。
+		return s.evaluateCodexQualityCanary(ctx, job, status)
+	}
 	score, err := s.runCodexQualityCapability(ctx, job, &status)
 	if err != nil {
 		return codexQualityIncomplete(status, err)
@@ -303,6 +312,13 @@ func mergeCodexQualityIdentity(status *CodexModelQualityStatus, identity string)
 }
 
 func codexQualityIncomplete(status CodexModelQualityStatus, err error) CodexModelQualityStatus {
+	// Safety Buffering 否决是确认失败（账号被 cyber 风控标记），必须撤票并计入
+	// 低质量熔断，不能当作 inconclusive 继续放行调度。
+	var buffering *codexQualitySafetyBufferingError
+	if errors.As(err, &buffering) {
+		status.Status, status.Reason = "suspect", buffering.reason
+		return status
+	}
 	status.Status, status.Reason = "inconclusive", err.Error()
 	return status
 }

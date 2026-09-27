@@ -416,6 +416,8 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 					out.CodexTurnTickets[i].QualityStatus = item.Status
 					out.CodexTurnTickets[i].QualityReason = item.Reason
 					out.CodexTurnTickets[i].QualityCheckedAt = item.CheckedAt
+					out.CodexTurnTickets[i].QualityNextCheckAt = item.NextCheckAt
+					out.CodexTurnTickets[i].QualityTicketReplaced = item.TicketReplaced
 					if qualityGateEnabled && service.CodexModelQualityFailure(item) {
 						status := &out.CodexTurnTickets[i]
 						status.QualityPaused, status.Blocked, status.Ready = true, true, false

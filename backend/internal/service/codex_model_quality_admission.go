@@ -31,8 +31,10 @@ func CodexModelQualityFailure(status CodexModelQualityStatus) bool {
 	// proof.  A fingerprint mismatch remains visible as a suspected anomaly,
 	// but cannot pause a model or revoke a ticket by itself.
 	confirmed := codexQualityAnswerFailure(status.Reason) || status.Reason == "model_mismatch" ||
-		status.Reason == "quarantine_persist_failed"
-	return confirmed && (status.Status == "suspect" || status.Status == "quarantined")
+		status.Reason == "quarantine_persist_failed" || codexSafetyBufferingReasonConfirmed(status.Reason)
+	// A conclusion kept for display after the ticket was replaced belongs to
+	// the old ticket and must not block its replacement.
+	return confirmed && !status.TicketReplaced && (status.Status == "suspect" || status.Status == "quarantined")
 }
 
 // codexModelQualityCircuitPaused is the account/model quality circuit. A
@@ -47,6 +49,11 @@ func (s *OpenAIGatewayService) codexModelQualityCircuitPaused(ctx context.Contex
 		return false
 	}
 	if s.settingService == nil {
+		return false
+	}
+	// An administrator diagnosis never revokes tickets or advances the
+	// circuit, so it stays available while the model is paused.
+	if isCodexModelQualityDiagnostic(ctx) {
 		return false
 	}
 	policy, err := s.settingService.GetCodexModelQualityPolicy(ctx)
@@ -85,7 +92,7 @@ func (s *OpenAIGatewayService) codexModelQualityPaused(ctx context.Context, acco
 	if err != nil {
 		return true
 	}
-	if !policy.Enabled || record.Policy != codexModelQualityPolicyHash(policy) {
+	if !policy.Enabled || !codexModelQualityPolicyMatches(record.Policy, policy) {
 		return false
 	}
 	// A quality result belongs to the ticket that was actually tested.  When a

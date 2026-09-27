@@ -33,7 +33,7 @@ func validateCodexModelQualityPolicy(p CodexModelQualityPolicy) error {
 		{"retry_interval_seconds", p.RetryIntervalSeconds, 60, 3600},
 		{"low_quality_consecutive_threshold", p.LowQualityConsecutiveThreshold, 1, 100},
 		{"low_quality_cooldown_seconds", p.LowQualityCooldownSeconds, 60, 86400},
-		{"replacement_check_delay_seconds", p.ReplacementCheckDelaySeconds, 60, 86400},
+		{"replacement_check_delay_seconds", p.ReplacementCheckDelaySeconds, 0, 86400},
 	}
 	for _, limit := range limits {
 		if limit.value < limit.min || limit.value > limit.max {
@@ -56,6 +56,9 @@ func validateCodexModelQualityPolicy(p CodexModelQualityPolicy) error {
 		if normalizeCodexQualityCanaryText(expected) == "" || len(expected) > codexQualityCanaryExpectedMaxBytes {
 			return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", fmt.Sprintf("canary_expected entries must be non-empty and at most %d bytes", codexQualityCanaryExpectedMaxBytes))
 		}
+	}
+	if p.CanaryMatch != "" && p.CanaryMatch != codexQualityCanaryContains && p.CanaryMatch != codexQualityCanaryExact {
+		return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", "canary_match must be contains or exact")
 	}
 	if p.CanaryEnabled && (strings.TrimSpace(p.CanaryPrompt) == "" || len(p.CanaryExpected) == 0) {
 		return infraerrors.BadRequest("INVALID_MODEL_QUALITY_POLICY", "canary_prompt and canary_expected are required when canary is enabled")

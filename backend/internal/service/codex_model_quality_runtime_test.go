@@ -145,15 +145,52 @@ func TestCodexModelQualityWorkerAppliesGlobalAndAccountLimits(t *testing.T) {
 func TestCodexModelQualityDiagnosticWorkerStartsWithoutBackgroundLoop(t *testing.T) {
 	s := &OpenAIGatewayService{}
 
-	runCtx, acquired, reason := s.takeCodexModelQualityDiagnosticWorker(41, 1, 1)
+	runCtx, acquired, reason := s.takeCodexModelQualityDiagnosticWorker()
 	require.True(t, acquired, reason)
 	require.NotNil(t, runCtx)
 	require.NoError(t, runCtx.Err())
-	s.finishCodexModelQualityWorker(41)
+	s.finishCodexModelQualityDiagnosticWorker()
 
 	_, acquired, reason = s.takeCodexModelQualityWorker(41, 1, 1)
 	require.False(t, acquired)
 	require.Equal(t, "capacity", reason)
+}
+
+func TestCodexModelQualityDiagnosticWorkerDoesNotShareAutomaticSlots(t *testing.T) {
+	s := &OpenAIGatewayService{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.codexModelQuality.ctx = ctx
+
+	_, acquired, reason := s.takeCodexModelQualityWorker(41, 1, 1)
+	require.True(t, acquired, reason)
+	_, acquired, reason = s.takeCodexModelQualityDiagnosticWorker()
+	require.True(t, acquired, "a busy background scan must not block a diagnosis: %s", reason)
+	_, acquired, reason = s.takeCodexModelQualityWorker(42, 1, 1)
+	require.False(t, acquired)
+	require.Equal(t, "capacity", reason, "a diagnosis must not consume automatic slots either")
+
+	s.finishCodexModelQualityDiagnosticWorker()
+	s.finishCodexModelQualityWorker(41)
+	s.codexModelQuality.mu.Lock()
+	require.Zero(t, s.codexModelQuality.active)
+	require.Zero(t, s.codexModelQuality.diagnosticActive)
+	require.Empty(t, s.codexModelQuality.activeByAccount)
+	s.codexModelQuality.mu.Unlock()
+}
+
+func TestCodexModelQualityDiagnosticFollowsRunningCheck(t *testing.T) {
+	s, repo, job := qualityRuntimeFixture(t)
+	repo.lease = "automatic-lease"
+	ctx := withCodexModelQualityDiagnostic(context.Background())
+	result := s.scheduleCodexModelQualityWithPolicyHash(ctx, job.account, job.ticket.Model, "diagnostic", job.policy, job.policyHash)
+	require.True(t, result.Scheduled)
+	require.Equal(t, "following", result.Reason)
+	require.Zero(t, s.codexModelQuality.diagnosticActive)
+
+	manual := s.scheduleCodexModelQuality(context.Background(), job.account, job.ticket.Model, "manual", job.policy)
+	require.False(t, manual.Scheduled)
+	require.Contains(t, []string{"already_running", "capacity"}, manual.Reason)
 }
 
 func TestCodexModelQualityRequestPinsCredentialsAndDoesNotRotateCookie(t *testing.T) {

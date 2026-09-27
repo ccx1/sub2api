@@ -39,6 +39,8 @@ env:
 
 jobs:
   prepare:
+    # 本地四段发行版由 local-release.yml / local_release.py 负责，避免重复发布。
+    if: ${{ github.repository != 'ccx1/sub2api' }}
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.plan.outputs.sha }}

@@ -48,6 +48,11 @@ type openAICodexTicketProbeInput struct {
 	BackgroundQuality          bool
 	HarvestProxy               *openAICodexTicketProxy
 	Revalidation               bool
+	// OriginUsed, when non-nil, receives true if this attempt targeted the
+	// account workspace_backend_origin (B2 probe routing) instead of the
+	// default chatgpt.com host. Callers use it to attribute transport
+	// reachability outcomes to the origin circuit breaker.
+	OriginUsed *bool
 }
 
 func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, account *Account, token, model, proxyURL string, attemptTimeout time.Duration) (string, int, error) {
@@ -60,6 +65,11 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	}
 	attemptCtx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
+	// B2：让 builder 回填本次是否使用了 origin，用于把可达性结果记入熔断器。
+	originUsed := false
+	if in.OriginUsed == nil {
+		in.OriginUsed = &originUsed
+	}
 	req, err := s.buildOpenAICodexTicketProbeRequest(attemptCtx, in)
 	if err != nil {
 		return "", 0, err
@@ -68,6 +78,17 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	redactOpenAICodexTicketCookies(diagnostic)
 	sentCookies := codexTicketBusinessCookieSnapshotForProbe(in)
 	resp, err := s.doOpenAICodexTicketProbe(req, in)
+	// B2 可达性归账：传输层错误或网关级状态（502/503/504、Cloudflare 52x）
+	// 视为 origin 不可达，计入熔断；拿到任何应用层响应（200/401/403/429）都算
+	// 可达并清熔断。业务层降智（safety buffering/model_mismatch）另由 Block A
+	// 处理，绝不记入 origin 账——换 host 治不了降智。
+	if *in.OriginUsed && in.Config != nil {
+		if codexWorkspaceOriginTransportUnreachable(resp, err) {
+			codexWorkspaceOriginReportTransportFailure(in.Account, *in.Config, time.Now())
+		} else {
+			codexWorkspaceOriginReportSuccess(in.Account)
+		}
+	}
 	var originalHeaders http.Header
 	if resp != nil {
 		originalHeaders = resp.Header.Clone()
@@ -119,6 +140,13 @@ func (s *OpenAIGatewayService) probeOpenAICodexTicket(ctx context.Context, in op
 	if err := readOpenAICodexTicketProbeResponseWithDiagnostic(resp.Body, in.Model, diagnostic); err != nil {
 		return "", resp.StatusCode, err
 	}
+	// 模型名匹配通过后，再按配置的严格度否决带 Safety Buffering 标记的链路：
+	// 账号被 cyber 风控标记的票即使本次终态模型恰好匹配，也随时会被降级。
+	if in.Config != nil && diagnostic != nil {
+		if reason := codexSafetyBufferingRejectReason(in.Config.RejectSafetyBuffering, diagnostic.exchange.Signals); reason != "" {
+			return "", resp.StatusCode, &codexTicketProbeResponseError{reason: reason}
+		}
+	}
 	if !in.FreezeCredentials && sentCookies != nil && sentCookies.cookieResponseChanged(originalHeaders) && !cookieChanged {
 		return "", resp.StatusCode, &codexTicketProbeResponseError{reason: "ticket_rejected"}
 	}
@@ -146,11 +174,21 @@ func (s *OpenAIGatewayService) buildOpenAICodexTicketProbeRequest(ctx context.Co
 	body := []byte(`{"model":` + jsonString(in.Model) + `,"store":false,"stream":true,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}]}`)
 	ctx = WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAIHarvest)
 	ctx = WithHTTPUpstreamRedirectsDisabled(ctx)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
+	// B2：按开关与 origin 健康度决定目标 host；默认回落 chatgpt.com。
+	targetURL, targetHost := chatgptCodexURL, "chatgpt.com"
+	if in.Config != nil {
+		if u, h, _, usingOrigin := codexWorkspaceOriginResponsesURL(in.Account, *in.Config, time.Now()); usingOrigin {
+			targetURL, targetHost = u, h
+			if in.OriginUsed != nil {
+				*in.OriginUsed = true
+			}
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, errors.New("codex ticket probe request construction failed")
 	}
-	req.Close, req.Host = true, "chatgpt.com"
+	req.Close, req.Host = true, targetHost
 	req.Header.Set("Authorization", "Bearer "+in.Token)
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Accept-Encoding", "identity")

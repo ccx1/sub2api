@@ -1018,12 +1018,15 @@ func (s *AccountTestService) testExcelBPSAccountConnection(c *gin.Context, accou
 		probeCtx.Request.Header = make(http.Header)
 	}
 	// Manual one-shot tests have no client conversation. Give them a scoped
-	// identity so enabling the session proxy does not break the test button.
+	// identity so replay and tool-catalog caches cannot mix separate probes.
 	// Explicit identities (including load-test sessions) remain unchanged.
 	if scope, _ := resolveOpenAIWSExecutionScope(probeCtx, body, 0); scope == "" {
 		probeCtx.Request.Header.Set("Session-Id", "account-test-"+uuid.NewString())
 	}
-	result, err := s.openaiGatewayService.Forward(probeCtx, probeCtx, account, body)
+	// Call the BPS forwarder directly: Forward's pre-send turn admission requires
+	// the account to be schedulable, so paused/limited accounts could never be
+	// tested and failed with "request admission denied: account_ineligible".
+	result, err := s.openaiGatewayService.forwardExcelBPS(probeCtx, probeCtx, account, body, time.Now())
 	if err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}

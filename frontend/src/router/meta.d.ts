@@ -64,6 +64,12 @@ declare module 'vue-router' {
     requiresSubscription?: boolean
 
     /**
+     * 是否要求共享账号池开关（shared_pool_enabled，opt-out）未被显式关闭
+     * @default false
+     */
+    requiresSharedPool?: boolean
+
+    /**
      * i18n key for the page title
      */
     titleKey?: string

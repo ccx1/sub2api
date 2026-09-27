@@ -32,7 +32,20 @@ func (a *ProxyPoolAllocator) ReportFailure(ctx context.Context, accountID, proxy
 		int(proxyPoolFailureWindow.Seconds()), proxyPoolFailureThreshold).Err(); err != nil {
 		return fmt.Errorf("report account proxy failure: %w", err)
 	}
+	a.recordProxyQualityRuntimeFailure(ctx, proxyID)
 	return nil
+}
+
+// recordProxyQualityRuntimeFailure 累计代理出口运行时失败，质量巡检据此提前复检；计数失败不影响请求路径。
+func (a *ProxyPoolAllocator) recordProxyQualityRuntimeFailure(ctx context.Context, proxyID int64) {
+	if a == nil || a.rdb == nil || proxyID <= 0 {
+		return
+	}
+	key := proxyQualityRuntimeFailureKey(proxyID)
+	pipe := a.rdb.TxPipeline()
+	pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, proxyQualityRuntimeFailureTTL)
+	_, _ = pipe.Exec(ctx)
 }
 
 func (a *ProxyPoolAllocator) ReportSuccess(ctx context.Context, accountID, proxyID int64) error {

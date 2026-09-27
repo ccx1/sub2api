@@ -13,6 +13,8 @@ type ProxyPoolSelection struct {
 	Restricted           bool
 	AllowCountryFallback bool
 	MaxReuseDuration     time.Duration
+	// FallbackCountryCode 是 CountryCode 没有可用代理时优先尝试的默认代理地区，不受 AllowCountryFallback 控制。
+	FallbackCountryCode string
 }
 
 type BalancedProxySelector interface {

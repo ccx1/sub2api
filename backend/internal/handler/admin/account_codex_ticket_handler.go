@@ -41,6 +41,13 @@ func (h *AccountHandler) SetCodexTicketEnabled(c *gin.Context) {
 		))
 		return
 	}
+	if req.Enabled && service.ExcelBPSBlocksCodexTicket(account) {
+		response.ErrorFrom(c, infraerrors.BadRequest(
+			"CODEX_TICKET_EXCEL_BPS_CONFLICT",
+			"Excel / BPS 已对全部模型开启，与打票互斥；请先关闭 BPS 再开启打票",
+		))
+		return
+	}
 
 	if err := h.adminService.UpdateAccountExtra(ctx, accountID, map[string]any{
 		service.OpenAICodexTicketEnabledExtraKey: req.Enabled,

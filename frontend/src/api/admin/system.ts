@@ -11,14 +11,19 @@ export interface ReleaseInfo {
   html_url: string
 }
 
-export interface VersionInfo {
+export interface VersionSourceInfo {
+  repository?: string
   current_version: string
   latest_version: string
   has_update: boolean
   release_info?: ReleaseInfo
   cached: boolean
   warning?: string
+}
+
+export interface VersionInfo extends VersionSourceInfo {
   build_type: string // "source" for manual builds, "release" for CI builds
+  ranxi?: VersionSourceInfo
 }
 
 /**

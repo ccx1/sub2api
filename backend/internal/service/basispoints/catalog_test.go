@@ -29,6 +29,21 @@ func TestCatalogKeepsNamespacedToolContractsInProse(t *testing.T) {
 	}
 }
 
+// BPS models sometimes fall back to Excel-native tools; the protocol must name them as disabled.
+func TestProtocolRestrictsNativeToolsToTransport(t *testing.T) {
+	source := testSource()
+	source["tools"] = []any{object{"type": "function", "name": "shell", "parameters": object{"type": "object"}}}
+	wire, _ := mustPrepare(t, source, "test", nil)
+	items := mustTestValue[[]any](t, wire["input"])
+	message := mustTestValue[object](t, items[1])
+	protocol := text(mustTestValue[object](t, mustTestValue[[]any](t, message["content"])[0])["text"])
+	for _, want := range []string{"run_officejs is the only native tool you may call", "read_ranges", "search_workbook", "never any other native tool"} {
+		if !strings.Contains(protocol, want) {
+			t.Fatalf("protocol lost native tool restriction %q", want)
+		}
+	}
+}
+
 func TestCatalogPreservesComplexSchemaConstraints(t *testing.T) {
 	schema := object{"type": "array", "items": object{"type": "object", "properties": object{"entry": object{"$ref": "#/$defs/entry"}}}, "minItems": 1, "$defs": object{"entry": object{"type": "string", "pattern": "^allowed$"}}}
 	got := describeSchema(schema, 0)

@@ -37,6 +37,7 @@ import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import pluginsAPI from './plugins'
 import spendGuardAPI from './spendGuard'
+import proxyQualityAPI from './proxyQuality'
 import securityPolicyAPI from './securityPolicy'
 
 /**
@@ -77,6 +78,7 @@ export const adminAPI = {
   audit: auditAPI,
   plugins: pluginsAPI,
   spendGuard: spendGuardAPI,
+  proxyQuality: proxyQualityAPI,
   securityPolicy: securityPolicyAPI
 }
 
@@ -115,6 +117,7 @@ export {
   auditAPI,
   pluginsAPI,
   spendGuardAPI,
+  proxyQualityAPI,
   securityPolicyAPI
 }
 

@@ -34,6 +34,17 @@
           <form v-if="draft" class="settings-form" @submit.prevent="save">
             <fieldset :disabled="saving">
               <label class="enable-row"><span><strong>{{ t('tokenGuard.enabled') }}</strong><small>{{ t('tokenGuard.enabledHint') }}</small></span><input v-model="draft.enabled" type="checkbox" role="switch" :aria-label="t('tokenGuard.enabled')" /></label>
+
+              <label class="field-label">{{ t('tokenGuard.activationMode') }}</label>
+              <div class="mode-switch">
+                <button type="button" class="mode-pill" :class="{ active: draft.activation_mode === 'builtin' }" @click="draft.activation_mode = 'builtin'">
+                  <strong>{{ t('tokenGuard.modeBuiltin') }}</strong><small>{{ t('tokenGuard.modeBuiltinHint') }}</small>
+                </button>
+                <button type="button" class="mode-pill" :class="{ active: draft.activation_mode === 'external' }" @click="draft.activation_mode = 'external'">
+                  <strong>{{ t('tokenGuard.modeExternal') }}</strong><small>{{ t('tokenGuard.modeExternalHint') }}</small>
+                </button>
+              </div>
+
               <label class="field-label">{{ t('tokenGuard.groupIds') }}</label>
               <input v-model="groupIdsText" class="input w-full" placeholder="1, 2" />
               <p class="field-hint">{{ t('tokenGuard.groupIdsHint') }}</p>
@@ -46,22 +57,30 @@
                 <label class="field-label">{{ t('tokenGuard.failStreak') }}<input v-model.number="draft.fail_streak_threshold" type="number" min="1" max="10" class="input w-full" /></label>
               </div>
 
-              <label class="field-label">{{ t('tokenGuard.probeEndpoint') }}<input v-model.trim="draft.probe_endpoint" class="input w-full" /></label>
-              <label class="field-label">{{ t('tokenGuard.probeModel') }}<input v-model.trim="draft.probe_model" class="input w-full" placeholder="gpt-6-astra" /></label>
-              <p class="field-hint">{{ t('tokenGuard.probeModelHint') }}</p>
-              <label class="field-label">{{ t('tokenGuard.probeHeaders') }}</label>
-              <textarea v-model="probeHeadersText" rows="3" class="input w-full" placeholder="Header-Name: value"></textarea>
-              <p class="field-hint">{{ t('tokenGuard.headersHint') }}</p>
+              <template v-if="draft.activation_mode === 'external'">
+                <label class="field-label">{{ t('tokenGuard.probeEndpoint') }}<input v-model.trim="draft.probe_endpoint" class="input w-full" /></label>
+                <label class="field-label">{{ t('tokenGuard.probeModel') }}<input v-model.trim="draft.probe_model" class="input w-full" placeholder="gpt-6-astra" /></label>
+                <p class="field-hint">{{ t('tokenGuard.probeModelHint') }}</p>
+                <label class="field-label">{{ t('tokenGuard.probeHeaders') }}</label>
+                <textarea v-model="probeHeadersText" rows="3" class="input w-full" placeholder="Header-Name: value"></textarea>
+                <p class="field-hint">{{ t('tokenGuard.headersHint') }}</p>
+              </template>
+              <p v-else class="field-hint builtin-note">{{ t('tokenGuard.builtinProbeNote') }}</p>
 
-              <label class="kind-option"><input v-model="draft.auto_relogin" type="checkbox" /><span><strong>{{ t('tokenGuard.autoRelogin') }}</strong><small>{{ t('tokenGuard.reloginEndpoint') }}</small></span></label>
-              <input v-model.trim="draft.relogin_endpoint" class="input w-full" />
-              <label class="field-label">{{ t('tokenGuard.reloginHeaders') }}</label>
-              <textarea v-model="reloginHeadersText" rows="3" class="input w-full" placeholder="Header-Name: value"></textarea>
-              <p class="field-hint">{{ t('tokenGuard.headersHint') }}</p>
+              <label class="kind-option"><input v-model="draft.auto_relogin" type="checkbox" /><span><strong>{{ t('tokenGuard.autoRelogin') }}</strong><small>{{ draft.activation_mode === 'builtin' ? t('tokenGuard.modeBuiltinHint') : t('tokenGuard.reloginEndpoint') }}</small></span></label>
+              <template v-if="draft.activation_mode === 'external'">
+                <input v-model.trim="draft.relogin_endpoint" class="input w-full" />
+                <label class="field-label">{{ t('tokenGuard.reloginHeaders') }}</label>
+                <textarea v-model="reloginHeadersText" rows="3" class="input w-full" placeholder="Header-Name: value"></textarea>
+                <p class="field-hint">{{ t('tokenGuard.headersHint') }}</p>
+              </template>
               <label class="kind-option"><input v-model="draft.restore_schedulable" type="checkbox" /><span><strong>{{ t('tokenGuard.restoreSchedulable') }}</strong><small>{{ t('tokenGuard.scopeNote') }}</small></span></label>
 
               <label class="field-label">{{ t('tokenGuard.reloginAccounts') }}</label>
-              <textarea v-model="reloginText" rows="7" class="input w-full font-mono text-xs" placeholder="user@example.com,password,JBSWY3DPEHPK3PXP"></textarea>
+              <button type="button" class="creds-open" @click="openCredsModal">
+                <span class="creds-open-left"><Icon name="key" size="sm" /><span>{{ t('tokenGuard.manageCredentials') }}</span></span>
+                <span class="creds-count">{{ t('tokenGuard.credentialsCount', { total: credentials.length, active: activeCredentialCount }) }}</span>
+              </button>
               <p class="field-hint">{{ t('tokenGuard.reloginAccountsHint') }}</p>
 
               <div class="grid-2">
@@ -118,6 +137,86 @@
           </section>
         </div>
       </div>
+
+      <!-- 凭证列表弹窗：新增/导入/过期时间/启用停用 -->
+      <div v-if="credsModalOpen" class="creds-overlay" @click.self="closeCredsModal">
+        <div class="creds-modal" role="dialog" aria-modal="true">
+          <header class="creds-modal-head">
+            <div>
+              <h3>{{ t('tokenGuard.credentialsTitle') }}</h3>
+              <p>{{ t('tokenGuard.credentialsSubtitle') }}</p>
+            </div>
+            <button class="icon-btn" :aria-label="t('tokenGuard.close')" @click="closeCredsModal"><Icon name="x" size="md" /></button>
+          </header>
+
+          <div class="creds-modal-body">
+            <!-- 新增单条 -->
+            <div class="creds-add">
+              <div class="creds-add-grid">
+                <input v-model.trim="newCred.email" class="input" :placeholder="t('tokenGuard.email')" @keyup.enter="addCredential" />
+                <input v-model.trim="newCred.password" class="input" :placeholder="t('tokenGuard.password')" @keyup.enter="addCredential" />
+                <input v-model.trim="newCred.mfa_secret" class="input" :placeholder="t('tokenGuard.mfaSecret')" @keyup.enter="addCredential" />
+                <input v-model="newCred.expires" type="datetime-local" class="input" :title="t('tokenGuard.expiresAt')" />
+                <button type="button" class="btn btn-primary shrink-0" @click="addCredential"><Icon name="plus" size="sm" />{{ t('tokenGuard.add') }}</button>
+              </div>
+              <p v-if="credError" class="creds-inline-error">{{ credError }}</p>
+              <p class="field-hint">{{ t('tokenGuard.addFormatHint') }}</p>
+            </div>
+
+            <!-- 批量导入 -->
+            <details class="creds-import">
+              <summary><Icon name="upload" size="sm" />{{ t('tokenGuard.bulkImport') }}</summary>
+              <textarea v-model="importText" rows="5" class="input w-full font-mono text-xs" :placeholder="t('tokenGuard.importPlaceholder')"></textarea>
+              <div class="creds-import-actions">
+                <label class="file-btn">
+                  <Icon name="document" size="sm" />{{ t('tokenGuard.importFile') }}
+                  <input type="file" accept=".txt,text/plain" class="hidden" @change="onImportFile" />
+                </label>
+                <button type="button" class="btn btn-secondary" @click="applyImport">{{ t('tokenGuard.importApply') }}</button>
+              </div>
+              <p class="field-hint">{{ t('tokenGuard.importHint') }}</p>
+            </details>
+
+            <!-- 列表 -->
+            <div class="creds-list">
+              <div v-if="!credentials.length" class="creds-empty"><Icon name="inbox" size="xl" /><p>{{ t('tokenGuard.noCredentials') }}</p></div>
+              <table v-else class="creds-table">
+                <thead><tr>
+                  <th>{{ t('tokenGuard.email') }}</th>
+                  <th>{{ t('tokenGuard.mfaSecret') }}</th>
+                  <th>{{ t('tokenGuard.expiresAt') }}</th>
+                  <th>{{ t('tokenGuard.credStatus') }}</th>
+                  <th></th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="(cred, index) in credentials" :key="index" :class="{ 'row-inactive': !isCredActive(cred) }">
+                    <td><strong :title="cred.email">{{ cred.email }}</strong></td>
+                    <td class="mono">{{ cred.mfa_secret ? '••••' + cred.mfa_secret.slice(-4) : '-' }}</td>
+                    <td>
+                      <input :value="toDatetimeLocal(cred.expires_at)" type="datetime-local" class="input input-sm" @input="setExpiry(index, ($event.target as HTMLInputElement).value)" />
+                      <button v-if="cred.expires_at" type="button" class="link-btn ml-1" @click="setExpiry(index, '')">{{ t('tokenGuard.clearExpiry') }}</button>
+                    </td>
+                    <td>
+                      <span class="failure-badge" :class="credBadgeClass(cred)">{{ credStatusLabel(cred) }}</span>
+                    </td>
+                    <td class="creds-row-actions">
+                      <button type="button" class="link-btn" @click="toggleCredential(index)">{{ t(cred.disabled ? 'tokenGuard.enable' : 'tokenGuard.disable') }}</button>
+                      <button type="button" class="link-btn danger" @click="removeCredential(index)"><Icon name="trash" size="sm" /></button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <footer class="creds-modal-foot">
+            <span class="creds-foot-note">{{ t('tokenGuard.credentialsCount', { total: credentials.length, active: activeCredentialCount }) }}</span>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary" @click="closeCredsModal">{{ t('tokenGuard.close') }}</button>
+            </div>
+          </footer>
+        </div>
+      </div>
     </div>
   </AppLayout>
 </template>
@@ -135,6 +234,7 @@ import {
   saveTokenGuardConfig,
   type TokenGuardConfig,
   type TokenGuardEvent,
+  type TokenGuardReloginAccount,
   type TokenGuardStatus
 } from '@/api/admin/accountTokenGuard'
 
@@ -142,8 +242,12 @@ const { t } = useI18n()
 const remote = ref<TokenGuardStatus | null>(null)
 const draft = ref<TokenGuardConfig | null>(null)
 const groupIdsText = ref('')
-const reloginText = ref('')
+const credentials = ref<TokenGuardReloginAccount[]>([])
 const probeHeadersText = ref('')
+const credsModalOpen = ref(false)
+const importText = ref('')
+const credError = ref('')
+const newCred = ref({ email: '', password: '', mfa_secret: '', expires: '' })
 const reloginHeadersText = ref('')
 const loading = ref(false), saving = ref(false), running = ref(false), reloginBusy = ref(0)
 const error = ref(''), notice = ref('')
@@ -165,11 +269,19 @@ const date = (value: string) => {
 }
 const message = (e: unknown) => (e as { message?: string })?.message || t('qualityOps.error')
 const parseGroupIds = (raw: string) => raw.split(/[,\s;]+/).map(value => Number(value.trim())).filter(value => Number.isFinite(value) && value > 0)
-const parseRelogin = (raw: string) => raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
-  const [email = '', password = '', mfa = ''] = line.split(',')
-  return { email: email.trim(), password: password.trim(), mfa_secret: mfa.trim() }
-}).filter(item => item.email && item.password)
-const reloginTextOf = (config: TokenGuardConfig | null) => (config?.relogin_accounts ?? []).map(item => `${item.email},${item.password},${item.mfa_secret}`).join('\n')
+
+// 单行凭据解析：同时支持 `邮箱----密码----2FA` 与 `邮箱,密码,2FA` 两种分隔。
+function parseCredentialLine(line: string): TokenGuardReloginAccount | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  const parts = trimmed.includes('----') ? trimmed.split('----') : trimmed.split(/[,\t]/)
+  const email = (parts[0] ?? '').trim().toLowerCase()
+  const password = (parts[1] ?? '').trim()
+  const mfa = (parts[2] ?? '').trim()
+  if (!email || !password) return null
+  return { email, password, mfa_secret: mfa }
+}
+const parseCredentialLines = (raw: string) => raw.split(/\r?\n/).map(parseCredentialLine).filter((x): x is TokenGuardReloginAccount => x !== null)
 const parseHeaders = (raw: string) => raw.split(/\r?\n/).reduce<Record<string, string>>((acc, line) => {
   const index = line.indexOf(':')
   if (index > 0) {
@@ -182,11 +294,19 @@ const parseHeaders = (raw: string) => raw.split(/\r?\n/).reduce<Record<string, s
 const headersTextOf = (headers: Record<string, string> | undefined) => Object.entries(headers ?? {}).map(([name, value]) => `${name}: ${value}`).join('\n')
 const groupTextOf = (config: TokenGuardConfig | null) => (config?.group_ids ?? []).join(', ')
 
+function normalizeCred(item: TokenGuardReloginAccount): TokenGuardReloginAccount {
+  const out: TokenGuardReloginAccount = { email: item.email.toLowerCase(), password: item.password, mfa_secret: item.mfa_secret ?? '' }
+  if (item.disabled) out.disabled = true
+  if (item.expires_at && item.expires_at > 0) out.expires_at = item.expires_at
+  return out
+}
+
 function normalize(config: TokenGuardConfig): TokenGuardConfig {
   return {
     ...config,
+    activation_mode: config.activation_mode === 'builtin' ? 'builtin' : 'external',
     group_ids: [...(config.group_ids ?? [])].sort((a, b) => a - b),
-    relogin_accounts: [...(config.relogin_accounts ?? [])].map(item => ({ email: item.email.toLowerCase(), password: item.password, mfa_secret: item.mfa_secret })).sort((a, b) => a.email.localeCompare(b.email)),
+    relogin_accounts: [...(config.relogin_accounts ?? [])].map(normalizeCred).sort((a, b) => a.email.localeCompare(b.email)),
     probe_headers: config.probe_headers ?? {},
     relogin_headers: config.relogin_headers ?? {}
   }
@@ -194,8 +314,15 @@ function normalize(config: TokenGuardConfig): TokenGuardConfig {
 
 function collect(): TokenGuardConfig {
   const base = draft.value!
-  return normalize({ ...base, group_ids: parseGroupIds(groupIdsText.value), relogin_accounts: parseRelogin(reloginText.value),
+  return normalize({ ...base, group_ids: parseGroupIds(groupIdsText.value), relogin_accounts: credentials.value.map(normalizeCred),
     probe_headers: parseHeaders(probeHeadersText.value), relogin_headers: parseHeaders(reloginHeadersText.value) })
+}
+
+const activeCredentialCount = computed(() => credentials.value.filter(isCredActive).length)
+function isCredActive(cred: TokenGuardReloginAccount): boolean {
+  if (cred.disabled) return false
+  if (cred.expires_at && cred.expires_at > 0 && cred.expires_at <= Math.floor(Date.now() / 1000)) return false
+  return true
 }
 
 const probeClass = (state: string) => (state === 'ok' ? 'ok' : state === 'auth' ? 'danger' : '')
@@ -211,9 +338,9 @@ async function load(silent = false) {
     const preserveDraft = dirty.value
     remote.value = status
     if (!preserveDraft) {
-      draft.value = { ...status.config }
+      draft.value = { ...status.config, activation_mode: status.config.activation_mode === 'builtin' ? 'builtin' : 'external' }
       groupIdsText.value = groupTextOf(status.config)
-      reloginText.value = reloginTextOf(status.config)
+      credentials.value = (status.config.relogin_accounts ?? []).map(item => ({ ...item }))
       probeHeadersText.value = headersTextOf(status.config.probe_headers)
       reloginHeadersText.value = headersTextOf(status.config.relogin_headers)
     }
@@ -230,9 +357,9 @@ async function save() {
   try {
     const saved = await saveTokenGuardConfig(collect())
     if (!alive) return
-    draft.value = { ...saved }
+    draft.value = { ...saved, activation_mode: saved.activation_mode === 'builtin' ? 'builtin' : 'external' }
     groupIdsText.value = groupTextOf(saved)
-    reloginText.value = reloginTextOf(saved)
+    credentials.value = (saved.relogin_accounts ?? []).map(item => ({ ...item }))
     probeHeadersText.value = headersTextOf(saved.probe_headers)
     reloginHeadersText.value = headersTextOf(saved.relogin_headers)
     if (remote.value) remote.value = { ...remote.value, config: saved }
@@ -272,6 +399,92 @@ async function relogin(item: { account_id: number }) {
   } finally {
     reloginBusy.value = 0
   }
+}
+
+// ------- 凭证列表弹窗逻辑 -------
+function openCredsModal() { credError.value = ''; credsModalOpen.value = true }
+function closeCredsModal() { credsModalOpen.value = false; credError.value = '' }
+
+// datetime-local <-> UNIX 秒 互转（按本地时区）
+function toDatetimeLocal(unix?: number): string {
+  if (!unix || unix <= 0) return ''
+  const d = new Date(unix * 1000)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function fromDatetimeLocal(value: string): number {
+  if (!value) return 0
+  const ms = new Date(value).getTime()
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000)
+}
+
+function addCredential() {
+  credError.value = ''
+  const email = newCred.value.email.trim().toLowerCase()
+  const password = newCred.value.password.trim()
+  if (!email || !password) { credError.value = t('tokenGuard.addRequired'); return }
+  if (credentials.value.some(c => c.email === email)) { credError.value = t('tokenGuard.duplicateEmail'); return }
+  const entry: TokenGuardReloginAccount = { email, password, mfa_secret: newCred.value.mfa_secret.trim() }
+  const exp = fromDatetimeLocal(newCred.value.expires)
+  if (exp > 0) entry.expires_at = exp
+  credentials.value = [...credentials.value, entry].sort((a, b) => a.email.localeCompare(b.email))
+  newCred.value = { email: '', password: '', mfa_secret: '', expires: '' }
+}
+
+function removeCredential(index: number) {
+  credentials.value = credentials.value.filter((_, i) => i !== index)
+}
+function toggleCredential(index: number) {
+  credentials.value = credentials.value.map((c, i) => i === index ? { ...c, disabled: !c.disabled } : c)
+}
+function setExpiry(index: number, value: string) {
+  const exp = fromDatetimeLocal(value)
+  credentials.value = credentials.value.map((c, i) => {
+    if (i !== index) return c
+    const next = { ...c }
+    if (exp > 0) next.expires_at = exp
+    else delete next.expires_at
+    return next
+  })
+}
+
+function applyImport() {
+  credError.value = ''
+  const parsed = parseCredentialLines(importText.value)
+  if (!parsed.length) { credError.value = t('tokenGuard.importEmpty'); return }
+  const map = new Map<string, TokenGuardReloginAccount>()
+  for (const c of credentials.value) map.set(c.email, c)
+  let added = 0
+  for (const c of parsed) {
+    if (!map.has(c.email)) added++
+    // 导入覆盖已有同邮箱的密码/2FA，但保留其过期与停用设置。
+    const prev = map.get(c.email)
+    map.set(c.email, { ...c, disabled: prev?.disabled, expires_at: prev?.expires_at })
+  }
+  credentials.value = [...map.values()].sort((a, b) => a.email.localeCompare(b.email))
+  importText.value = ''
+  notice.value = t('tokenGuard.importDone', { count: parsed.length, added })
+}
+
+function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    importText.value = importText.value ? `${importText.value}\n${String(reader.result ?? '')}` : String(reader.result ?? '')
+  }
+  reader.readAsText(file)
+  input.value = ''
+}
+
+function credStatusLabel(cred: TokenGuardReloginAccount): string {
+  if (cred.disabled) return t('tokenGuard.credDisabled')
+  if (cred.expires_at && cred.expires_at > 0 && cred.expires_at <= Math.floor(Date.now() / 1000)) return t('tokenGuard.credExpired')
+  return t('tokenGuard.credActive')
+}
+function credBadgeClass(cred: TokenGuardReloginAccount): string {
+  return isCredActive(cred) ? 'ok' : 'danger'
 }
 
 onMounted(() => {
@@ -345,5 +558,53 @@ td.detail { max-width: 24rem; @apply whitespace-normal leading-5 text-gray-500 d
 .success-banner { @apply mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300; }
 button:disabled { @apply cursor-not-allowed opacity-40; }
 textarea.input { @apply font-mono text-[11px] leading-5; }
-@media(max-width:1100px) { .ops-columns {grid-template-columns:1fr;} .events-scroll {max-height:28rem;} }
+
+/* 授权方式切换 */
+.mode-switch { display:grid; grid-template-columns:1fr 1fr; gap:10px; @apply mb-1; }
+.mode-pill { @apply flex flex-col items-start gap-1 rounded-xl border border-gray-200 p-3 text-left transition-colors dark:border-dark-700; }
+.mode-pill strong { @apply text-sm font-medium; }
+.mode-pill small { @apply text-xs leading-relaxed text-gray-400; }
+.mode-pill.active { @apply border-primary-400 bg-primary-50/50 dark:border-primary-700 dark:bg-primary-950/20; }
+.builtin-note { @apply mt-4 rounded-lg border border-primary-100 bg-primary-50/40 p-3 dark:border-primary-900 dark:bg-primary-950/20; }
+
+/* 凭证入口按钮 */
+.creds-open { @apply mt-1 flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40 dark:border-dark-700 dark:hover:bg-dark-800; }
+.creds-open-left { @apply flex items-center gap-2 font-medium; }
+.creds-count { @apply rounded-md bg-gray-100 px-2 py-0.5 text-xs tabular-nums text-gray-500 dark:bg-dark-800; }
+
+/* 弹窗 */
+.creds-overlay { position:fixed; inset:0; z-index:50; @apply flex items-center justify-center bg-black/50 p-4; backdrop-filter:blur(2px); }
+.creds-modal { @apply flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-dark-700 dark:bg-dark-900; }
+.creds-modal-head { @apply flex items-start justify-between gap-4 border-b border-gray-100 p-5 dark:border-dark-700; }
+.creds-modal-head h3 { @apply text-base font-semibold; }
+.creds-modal-head p { @apply mt-1 text-xs text-gray-400; }
+.icon-btn { @apply rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-800; }
+.creds-modal-body { @apply min-h-0 flex-1 space-y-4 overflow-auto p-5; }
+.creds-modal-foot { @apply flex items-center justify-between gap-3 border-t border-gray-100 p-4 dark:border-dark-700; }
+.creds-foot-note { @apply text-xs text-gray-400; }
+
+.creds-add { @apply rounded-xl border border-gray-100 bg-gray-50/50 p-3 dark:border-dark-700 dark:bg-dark-800/40; }
+.creds-add-grid { display:grid; grid-template-columns:1.4fr 1.2fr 1fr 1fr auto; gap:8px; align-items:center; }
+.creds-add-grid .btn { @apply inline-flex items-center gap-1 whitespace-nowrap; }
+.creds-inline-error { @apply mt-2 text-xs text-red-600; }
+
+.creds-import summary { @apply flex cursor-pointer items-center gap-2 text-sm font-medium text-primary-600; }
+.creds-import textarea { @apply mt-3; }
+.creds-import-actions { @apply mt-2 flex items-center gap-2; }
+.file-btn { @apply inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-800; }
+.hidden { display:none; }
+
+.creds-list { @apply rounded-xl border border-gray-100 dark:border-dark-700; }
+.creds-empty { @apply flex flex-col items-center justify-center gap-2 p-8 text-center text-gray-400; }
+.creds-table { @apply w-full text-left text-xs; min-width:0; }
+.creds-table th { @apply whitespace-nowrap px-3 py-2.5 font-medium text-gray-400; }
+.creds-table td { @apply border-t border-gray-100 px-3 py-2.5 align-middle dark:border-dark-800; }
+.creds-table td.mono, .creds-table .mono { font-family:ui-monospace,monospace; }
+.creds-table .row-inactive { @apply opacity-55; }
+.input-sm { @apply px-2 py-1 text-xs; width:auto; max-width:200px; }
+.creds-row-actions { @apply flex items-center justify-end gap-2 whitespace-nowrap; }
+.link-btn.danger { @apply border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950/30; }
+.ml-1 { margin-left:0.25rem; }
+
+@media(max-width:640px) { .creds-add-grid { grid-template-columns:1fr 1fr; } }
 </style>

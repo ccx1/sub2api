@@ -19,6 +19,10 @@ func (transientCooldownAccountRepo) SetOverloaded(context.Context, int64, time.T
 	return nil
 }
 
+func (transientCooldownAccountRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
+	return nil
+}
+
 type transientAccountBlockRepo struct {
 	AccountRepository
 	setTempCalls int
@@ -28,6 +32,10 @@ type transientAccountBlockRepo struct {
 }
 
 func (r *transientAccountBlockRepo) SetOverloaded(context.Context, int64, time.Time) error {
+	return nil
+}
+
+func (r *transientAccountBlockRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
 	return nil
 }
 

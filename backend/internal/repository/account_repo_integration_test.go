@@ -1144,6 +1144,19 @@ func (s *AccountRepoSuite) TestSetError() {
 	s.Require().Equal(1, outboxCount)
 }
 
+func (s *AccountRepoSuite) TestSetError_KeepsManuallyPausedAccountPaused() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-paused", Status: service.StatusActive})
+	s.Require().NoError(s.repo.SetSchedulable(s.ctx, account.ID, false))
+
+	s.Require().NoError(s.repo.SetError(s.ctx, account.ID, "refresh failed"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.StatusActive, got.Status, "manually paused account must stay paused instead of turning into error")
+	s.Require().Equal("refresh failed", got.ErrorMessage)
+	s.Require().False(got.Schedulable)
+}
+
 func (s *AccountRepoSuite) TestSetGrokOAuthErrorIfCredentialsUnchanged_AppliesAndSyncsSchedulerState() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "grok-conditional-error-applied",

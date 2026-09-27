@@ -47,6 +47,7 @@ type openAICodexTicket struct {
 	HarvestProxyID      int64                    `json:"harvest_proxy_id,omitempty"`
 	HarvestProxyName    string                   `json:"harvest_proxy_name,omitempty"`
 	HarvestEgress       string                   `json:"harvest_egress,omitempty"`
+	HarvestCountry      string                   `json:"harvest_country,omitempty"` // 采集出口国家，判断 __oailb 节点是否跨大区
 	SessionID           string                   `json:"session_id,omitempty"`
 	AccountID           int64                    `json:"account_id"`
 	Model               string                   `json:"model"`
@@ -162,6 +163,10 @@ type OpenAICodexTicketStatus struct {
 	QualityStatus    string     `json:"quality_status,omitempty"`
 	QualityReason    string     `json:"quality_reason,omitempty"`
 	QualityCheckedAt *time.Time `json:"quality_checked_at,omitempty"`
+	// QualityNextCheckAt is when the next automatic check may start, and
+	// QualityTicketReplaced marks a result that belongs to a replaced ticket.
+	QualityNextCheckAt    *time.Time `json:"quality_next_check_at,omitempty"`
+	QualityTicketReplaced bool       `json:"quality_ticket_replaced,omitempty"`
 	// QualityPaused is true when a confirmed quality failure blocks this model
 	// at the same admission gate as a missing ticket.
 	QualityPaused            bool   `json:"quality_paused,omitempty"`
@@ -169,6 +174,14 @@ type OpenAICodexTicketStatus struct {
 	RouteAffinityConnections int    `json:"route_affinity_connections,omitempty"`
 	// RouteExpiresAt 来自 __oailb 解码后的 exp，仅在能解析时返回。
 	RouteExpiresAt *time.Time `json:"route_expires_at,omitempty"`
+	// Route node 字段来自 __oailb 的 host 声明与节点枚举表；地名是 Azure IP 归属地。
+	RouteNode          string `json:"route_node,omitempty"`
+	RouteNodeCountry   string `json:"route_node_country,omitempty"`
+	RouteNodeRegion    string `json:"route_node_region,omitempty"`
+	RouteMacroRegion   string `json:"route_macro_region,omitempty"`
+	RouteEgressCountry string `json:"route_egress_country,omitempty"`
+	// RouteCrossRegion 仅在节点与采集出口大区都已知且不同才为 true；同大区跨国属正常。
+	RouteCrossRegion bool `json:"route_cross_region,omitempty"`
 }
 
 func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) []OpenAICodexTicketStatus {

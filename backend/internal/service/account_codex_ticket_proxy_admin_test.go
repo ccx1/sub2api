@@ -131,6 +131,25 @@ func TestAdminAccountCodexTicketProxyBulkShadowRejectsBeforeAnyWrite(t *testing.
 	require.Empty(t, shadow.Extra)
 }
 
+func TestAdminAccountCodexTicketProxyAllowsSavingWhileDisablingExcelBPS(t *testing.T) {
+	for _, operation := range []string{"update", "extra"} {
+		t.Run(operation, func(t *testing.T) {
+			account := ticketTestAccount(41)
+			account.Extra = map[string]any{"openai_excel_bps": true}
+			repo := &longContextBillingRepoStub{account: account}
+			svc := &adminServiceImpl{accountRepo: repo}
+			extra := map[string]any{CodexTicketProxyModeExtraKey: "random", CodexTicketProxyIDExtraKey: 0}
+			var err error
+			if operation == "update" {
+				_, err = svc.UpdateAccount(context.Background(), 41, &UpdateAccountInput{Extra: extra})
+			} else {
+				err = svc.UpdateAccountExtra(context.Background(), 41, extra)
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestAdminAccountCodexTicketProxyUnrelatedEditPreservesConcurrentModeChange(t *testing.T) {
 	for _, extra := range []map[string]any{nil, {"custom": true}} {
 		account := ticketTestAccount(41)

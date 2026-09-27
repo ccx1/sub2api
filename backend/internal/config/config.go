@@ -1263,6 +1263,17 @@ type OpenAICodexTicketConfig struct {
 	AuthCooldownSeconds           int                          `mapstructure:"auth_cooldown_seconds" json:"auth_cooldown_seconds"`
 	RateLimitCooldownSeconds      int                          `mapstructure:"rate_limit_cooldown_seconds" json:"rate_limit_cooldown_seconds"`
 	RespectRetryAfter             bool                         `mapstructure:"respect_retry_after" json:"respect_retry_after"`
+	// RejectSafetyBuffering 控制是否在打票探测与后台测智中，把带有 Safety Buffering
+	// 标记（账号被 cyber 风控、随时会 reroute 降级模型）的响应判为不合格。
+	// 取值：off（默认）/ faster_model_only / any。
+	RejectSafetyBuffering string `mapstructure:"reject_safety_buffering" json:"reject_safety_buffering,omitempty"`
+	// WorkspaceOriginRouting 控制 B2：是否把账号声明的 workspace_backend_origin
+	// 作为打票探测目标 host。off（默认）/ probe。
+	WorkspaceOriginRouting string `mapstructure:"workspace_origin_routing" json:"workspace_origin_routing,omitempty"`
+	// WorkspaceOriginFailureThreshold 连续探测失败达到该阈值后，origin 进入静默、回落默认 host。
+	WorkspaceOriginFailureThreshold int `mapstructure:"workspace_origin_failure_threshold" json:"workspace_origin_failure_threshold,omitempty"`
+	// WorkspaceOriginSilenceSeconds origin 静默时长（秒），到期后半开探测。
+	WorkspaceOriginSilenceSeconds int `mapstructure:"workspace_origin_silence_seconds" json:"workspace_origin_silence_seconds,omitempty"`
 }
 
 type CodexTicketTierRule struct {

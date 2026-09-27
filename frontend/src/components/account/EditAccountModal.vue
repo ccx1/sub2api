@@ -6025,10 +6025,14 @@ const handleSubmit = async () => {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
+      // 打票开关由列表开关单独维护；不回写弹窗打开时的快照，避免覆盖期间的手动切换。
+      delete newExtra.codex_ticket_enabled
       if (props.account.type === 'oauth' && !isSparkShadow.value && excelBPSEnabled.value) {
         newExtra.openai_excel_bps = true
         if (excelBPSAllModels.value) {
           delete newExtra.openai_excel_bps_models
+          // 全模型 BPS 与打票互斥；关闭 BPS 后需手动重新开启打票。
+          newExtra.codex_ticket_enabled = false
         } else {
           newExtra.openai_excel_bps_models = [...new Set(excelBPSModels.value.map(model => model.trim()).filter(Boolean))]
         }

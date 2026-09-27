@@ -114,6 +114,11 @@ export const FeatureFlags = {
     mode: 'opt-out',
     label: 'Subscription',
   }),
+  sharedPool: defineFlag({
+    key: 'shared_pool_enabled',
+    mode: 'opt-out',
+    label: 'Shared Pool',
+  }),
   modelPlaza: defineFlag({
     key: 'model_plaza_enabled',
     mode: 'opt-in',

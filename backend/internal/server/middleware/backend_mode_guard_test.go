@@ -110,6 +110,12 @@ func TestBackendModeUserGuard(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			name:       "enabled_observer_blocked",
+			enabled:    "true",
+			role:       stringPtr("observer"),
+			wantStatus: http.StatusForbidden,
+		},
+		{
 			name:       "enabled_user_blocked",
 			enabled:    "true",
 			role:       stringPtr("user"),
@@ -154,6 +160,89 @@ func TestBackendModeUserGuard(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestBackendModeUserGuardObserverAllowlist(t *testing.T) {
+	tests := []struct {
+		name       string
+		enabled    string
+		role       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{
+			name:       "observer_can_load_current_user",
+			enabled:    "true",
+			role:       "observer",
+			method:     http.MethodGet,
+			path:       "/api/v1/auth/me",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "observer_cannot_revoke_sessions",
+			enabled:    "true",
+			role:       "observer",
+			method:     http.MethodPost,
+			path:       "/api/v1/auth/revoke-all-sessions",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "observer_cannot_prepare_oauth_bind",
+			enabled:    "true",
+			role:       "observer",
+			method:     http.MethodPost,
+			path:       "/api/v1/auth/oauth/bind-token",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "observer_cannot_use_user_self_service",
+			enabled:    "true",
+			role:       "observer",
+			method:     http.MethodGet,
+			path:       "/api/v1/user/profile",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "user_cannot_load_current_user",
+			enabled:    "true",
+			role:       "user",
+			method:     http.MethodGet,
+			path:       "/api/v1/auth/me",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "disabled_observer_uses_user_routes",
+			enabled:    "false",
+			role:       "observer",
+			method:     http.MethodGet,
+			path:       "/api/v1/user/profile",
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				c.Set(string(ContextKeyUserRole), tc.role)
+				c.Next()
+			})
+			r.Use(BackendModeUserGuard(newBackendModeSettingService(t, tc.enabled)))
+			r.Handle(tc.method, tc.path, func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"ok": true})
+			})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
 			r.ServeHTTP(w, req)
 
 			require.Equal(t, tc.wantStatus, w.Code)

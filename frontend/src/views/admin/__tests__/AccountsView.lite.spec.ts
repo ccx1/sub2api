@@ -18,6 +18,7 @@ const {
   listProxyGroups,
   getAllGroups,
   refreshCredentials,
+  setCodexTicketEnabled,
   showError,
   showWarning
 } = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ const {
   listProxyGroups: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
+  setCodexTicketEnabled: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn()
 }))
@@ -47,7 +49,8 @@ vi.mock('@/api/admin', () => ({
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn(),
-      refreshCredentials
+      refreshCredentials,
+      setCodexTicketEnabled
     },
     proxies: { getAll: getAllProxies, listGroups: listProxyGroups },
     groups: { getAll: getAllGroups }
@@ -75,6 +78,7 @@ const DataTableStub = defineComponent({
         <slot name="cell-select" :row="row" />
         <slot name="cell-groups" :row="row" />
         <slot name="cell-proxy" :row="row" />
+        <slot name="cell-codex_ticket" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -207,6 +211,7 @@ describe('admin AccountsView lite account list', () => {
     listProxyGroups.mockReset().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     refreshCredentials.mockReset()
+    setCodexTicketEnabled.mockReset()
     showError.mockReset()
     showWarning.mockReset()
   })
@@ -299,6 +304,33 @@ describe('admin AccountsView lite account list', () => {
       expect(wrapper.findComponent(CodexTicketAlerts).props('accounts')[0].codex_turn_tickets?.[0].credential_state).toBe(credential_state)
       expect(showWarning).toHaveBeenCalledTimes(credential_state === 'expired' ? 1 : 0)
     } finally { wrapper.unmount() }
+  })
+
+  it('locks the ticket switch while all-model Excel BPS is on and re-enables it after BPS is off', async () => {
+    const ticketRow = { ...listRow, codex_ticket_global_enabled: true, codex_ticket_enabled: false }
+    listAccounts.mockResolvedValue({
+      items: [
+        { ...ticketRow, id: 42, name: 'bps all', extra: { openai_excel_bps: true } },
+        { ...ticketRow, id: 43, name: 'bps off', extra: {} }
+      ],
+      total: 2, page: 1, page_size: 20, pages: 1
+    })
+    setCodexTicketEnabled.mockImplementation(async (id: number, enabled: boolean) => ({ ...ticketRow, id, name: 'bps off', extra: {}, codex_ticket_enabled: enabled }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const blocked = wrapper.get('[data-account-name="bps all"] button[title="admin.accounts.codexTicketBlockedByExcelBPS"]')
+    expect(blocked.attributes('disabled')).toBeDefined()
+    await blocked.trigger('click')
+    expect(setCodexTicketEnabled).not.toHaveBeenCalled()
+
+    const toggle = wrapper.get('[data-account-name="bps off"] button[title="admin.accounts.codexTicketDisabled"]')
+    expect(toggle.attributes('disabled')).toBeUndefined()
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(setCodexTicketEnabled).toHaveBeenCalledWith(43, true)
+    expect(wrapper.find('[data-account-name="bps off"] button[title="admin.accounts.codexTicketEnabled"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {

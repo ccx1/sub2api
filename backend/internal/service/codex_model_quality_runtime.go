@@ -15,9 +15,17 @@ type codexModelQualityRuntime struct {
 	ctx             context.Context
 	active          int
 	activeByAccount map[int64]int
-	workers         sync.WaitGroup
-	anomalies       map[string]time.Time
+	// Diagnostic checks use their own slots so a busy background scan can never
+	// starve an administrator action. Each account/model is still limited to
+	// one check at a time by the shared lease.
+	diagnosticActive int
+	workers          sync.WaitGroup
+	anomalies        map[string]time.Time
 }
+
+// codexModelQualityDiagnosticLimit bounds concurrent diagnostic checks per
+// instance. One diagnosis selects at most 32 models of a single account.
+const codexModelQualityDiagnosticLimit = 32
 
 func (s *OpenAIGatewayService) runCodexModelQualityLoop(ctx context.Context) {
 	r := &s.codexModelQuality
@@ -127,26 +135,85 @@ func (s *OpenAIGatewayService) markCodexModelQualityAnomaly(accountID int64, mod
 	}
 }
 
+// codexModelQualityKickMaxDelay bounds the replacement grace handled by a
+// per-ticket timer. Longer graces are left to the regular 15s scan.
+const codexModelQualityKickMaxDelay = time.Minute
+
+// kickCodexModelQualityForNewTicket queues a freshly published ticket as soon
+// as its replacement grace ends instead of waiting for the next scan tick.
+// Capacity and every due/pause check still go through the normal scheduler.
+func (s *OpenAIGatewayService) kickCodexModelQualityForNewTicket(account *Account, model string) {
+	if s == nil || account == nil || s.settingService == nil {
+		return
+	}
+	r := &s.codexModelQuality
+	r.mu.Lock()
+	loopCtx := r.ctx
+	r.mu.Unlock()
+	if loopCtx == nil || loopCtx.Err() != nil {
+		return
+	}
+	snapshot := cloneOpenAICodexTicketAccount(account)
+	go func() {
+		ctx, cancel := context.WithTimeout(loopCtx, 10*time.Second)
+		p, err := s.settingService.GetCodexModelQualityPolicy(ctx)
+		cancel()
+		delay := time.Duration(p.ReplacementCheckDelaySeconds) * time.Second
+		if err != nil || !p.Enabled || delay > codexModelQualityKickMaxDelay {
+			return
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-loopCtx.Done():
+			return
+		case <-timer.C:
+		}
+		ctx, cancel = context.WithTimeout(loopCtx, 10*time.Second)
+		defer cancel()
+		s.scheduleCodexModelQuality(ctx, snapshot, model, "automatic", p)
+	}()
+}
+
 func (s *OpenAIGatewayService) takeCodexModelQualityWorker(accountID int64, limit, accountLimit int) (context.Context, bool, string) {
-	return s.takeCodexModelQualityWorkerWithContext(accountID, limit, accountLimit, false)
+	return s.takeCodexModelQualityWorkerWithContext(accountID, limit, accountLimit)
 }
 
 // Diagnostic checks are explicit operator actions and must remain available
-// when the background harvester has not been started. Automatic checks still
-// require the harvester context, while a diagnostic gets an independent
-// background context whose execution is bounded by the ticket budget.
-func (s *OpenAIGatewayService) takeCodexModelQualityDiagnosticWorker(accountID int64, limit, accountLimit int) (context.Context, bool, string) {
-	return s.takeCodexModelQualityWorkerWithContext(accountID, limit, accountLimit, true)
-}
-
-func (s *OpenAIGatewayService) takeCodexModelQualityWorkerWithContext(accountID int64, limit, accountLimit int, standalone bool) (context.Context, bool, string) {
+// when the background harvester has not been started, and must not compete with
+// automatic checks for their slots. A diagnostic gets an independent background
+// context whose execution is bounded by the ticket budget.
+func (s *OpenAIGatewayService) takeCodexModelQualityDiagnosticWorker() (context.Context, bool, string) {
 	r := &s.codexModelQuality
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	runCtx := r.ctx
-	if (runCtx == nil || runCtx.Err() != nil) && standalone {
+	if runCtx == nil || runCtx.Err() != nil {
 		runCtx = context.Background()
 	}
+	if r.diagnosticActive >= codexModelQualityDiagnosticLimit {
+		return nil, false, "capacity"
+	}
+	r.diagnosticActive++
+	r.workers.Add(1)
+	return runCtx, true, ""
+}
+
+func (s *OpenAIGatewayService) finishCodexModelQualityDiagnosticWorker() {
+	r := &s.codexModelQuality
+	r.mu.Lock()
+	if r.diagnosticActive > 0 {
+		r.diagnosticActive--
+	}
+	r.mu.Unlock()
+	r.workers.Done()
+}
+
+func (s *OpenAIGatewayService) takeCodexModelQualityWorkerWithContext(accountID int64, limit, accountLimit int) (context.Context, bool, string) {
+	r := &s.codexModelQuality
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	runCtx := r.ctx
 	if runCtx == nil || runCtx.Err() != nil || r.active >= limit {
 		return nil, false, "capacity"
 	}
@@ -185,7 +252,9 @@ func (s *OpenAIGatewayService) scheduleCodexModelQuality(ctx context.Context, ac
 // temporary execution policy (for example, enabled without quarantine) while
 // retaining the persisted policy hash used by the current-ticket fence.
 func (s *OpenAIGatewayService) scheduleCodexModelQualityWithPolicyHash(ctx context.Context, account *Account, model, source string, p CodexModelQualityPolicy, policyHash string) CodexModelQualityScheduleResult {
-	if s.codexModelQualityCircuitPaused(ctx, account, model) {
+	// A diagnosis never revokes tickets or counts toward the circuit, so the
+	// low-quality pause only applies to other sources.
+	if source != "diagnostic" && s.codexModelQualityCircuitPaused(ctx, account, model) {
 		return CodexModelQualityScheduleResult{Reason: "quality_paused"}
 	}
 	job, reason := s.prepareCodexModelQuality(ctx, account, model, p)
@@ -210,8 +279,10 @@ func (s *OpenAIGatewayService) scheduleCodexModelQualityWithPolicyHash(ctx conte
 	var runCtx context.Context
 	var acquired bool
 	var capacityReason string
+	finishWorker := func() { s.finishCodexModelQualityWorker(account.ID) }
 	if job.diagnostic {
-		runCtx, acquired, capacityReason = s.takeCodexModelQualityDiagnosticWorker(account.ID, p.Concurrency, p.AccountConcurrency)
+		runCtx, acquired, capacityReason = s.takeCodexModelQualityDiagnosticWorker()
+		finishWorker = s.finishCodexModelQualityDiagnosticWorker
 	} else {
 		runCtx, acquired, capacityReason = s.takeCodexModelQualityWorker(account.ID, p.Concurrency, p.AccountConcurrency)
 	}
@@ -223,9 +294,14 @@ func (s *OpenAIGatewayService) scheduleCodexModelQualityWithPolicyHash(ctx conte
 	job.leaseExpiresAt = time.Now().Add(leaseTTL)
 	locked, err := store.AcquireCodexModelQuality(ctx, account.ID, model, job.lease, leaseTTL)
 	if err != nil || !locked {
-		s.finishCodexModelQualityWorker(account.ID)
+		finishWorker()
 		if err != nil {
 			return CodexModelQualityScheduleResult{Reason: "shared_state_unavailable"}
+		}
+		if job.diagnostic {
+			// The same ticket is being checked right now. Its result answers the
+			// diagnosis, so follow it instead of reporting a failure.
+			return CodexModelQualityScheduleResult{Scheduled: true, Reason: "following"}
 		}
 		return CodexModelQualityScheduleResult{Reason: "already_running"}
 	}
@@ -235,11 +311,11 @@ func (s *OpenAIGatewayService) scheduleCodexModelQualityWithPolicyHash(ctx conte
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = store.ReleaseCodexModelQuality(releaseCtx, account.ID, model, job.lease)
 		cancel()
-		s.finishCodexModelQualityWorker(account.ID)
+		finishWorker()
 		return CodexModelQualityScheduleResult{Reason: "cooldown"}
 	}
 	go func() {
-		defer s.finishCodexModelQualityWorker(account.ID)
+		defer finishWorker()
 		if job.diagnostic {
 			// The worker runtime context is shared by automatic checks. Preserve
 			// the diagnostic marker so current-ticket fences continue to allow a
@@ -272,13 +348,14 @@ func (s *OpenAIGatewayService) codexModelQualitySource(accountID int64, model, s
 }
 
 func codexModelQualityDue(previous *CodexModelQualityRecord, job *codexModelQualityJob, source string, now time.Time) bool {
-	if previous != nil && previous.QualityPausedUntil != nil && now.Before(*previous.QualityPausedUntil) {
-		return false
-	}
 	if source == "diagnostic" {
-		// An explicit administrator action is a force recheck. The shared lease
+		// An explicit administrator action is a force recheck, also during a
+		// low-quality pause because it never revokes tickets. The shared lease
 		// below still prevents two workers from probing the same ticket at once.
 		return true
+	}
+	if previous != nil && previous.QualityPausedUntil != nil && now.Before(*previous.QualityPausedUntil) {
+		return false
 	}
 	if previous != nil && previous.Status.Status == "passed" && previous.Status.TicketCapturedAt != nil &&
 		previous.Status.TicketCapturedAt.Equal(job.ticket.lineageCapturedAt()) {
@@ -292,13 +369,15 @@ func codexModelQualityDue(previous *CodexModelQualityRecord, job *codexModelQual
 	if previous == nil {
 		return true
 	}
+	if previous.Status.TicketCapturedAt != nil && !previous.Status.TicketCapturedAt.Equal(job.ticket.lineageCapturedAt()) {
+		// A newly harvested ticket has already waited its own grace above; the
+		// previous ticket's retry backoff does not apply to it.
+		return true
+	}
 	if previous.Status.Status != "passed" && previous.Status.NextCheckAt != nil && now.Before(*previous.Status.NextCheckAt) {
 		return false
 	}
-	if previous.Status.TicketCapturedAt != nil && !previous.Status.TicketCapturedAt.Equal(job.ticket.lineageCapturedAt()) {
-		return true
-	}
-	if previous.Scope != job.scope || previous.Policy != job.policyHash {
+	if previous.Scope != job.scope || previous.Policy != job.policyHash && !codexModelQualityPolicyMatches(previous.Policy, job.policy) {
 		// A changed ticket, proxy or policy needs one fresh check immediately.
 		// Once that check has recorded a stale result, keep its retry backoff;
 		// otherwise a scope that changes on every harvest can bypass the retry

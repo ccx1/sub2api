@@ -424,6 +424,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PelicanShowcaseEnabled:   settings.PelicanShowcaseEnabled,
 		PelicanShowcase:          settings.PelicanShowcase,
 		SubscriptionEnabled:      settings.SubscriptionEnabled,
+		SharedPoolEnabled:        settings.SharedPoolEnabled,
 
 		ModelPlazaEnabled:       settings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:   settings.ModelPlazaRequireAuth,

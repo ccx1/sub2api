@@ -19,6 +19,21 @@ export default {
 
   // Version Badge
   version: {
+    versionDetails: 'Version Details',
+    localVersion: 'Local Version',
+    ranxiVersion: 'Ranxi Version',
+    localActions: 'Local Update and Rollback',
+    localUpdateHint: 'Platform release update. Release deployments can upgrade directly without pulling source code.',
+    ranxiMergeHint: 'Merge Ranxi source updates and rebuild to preserve local customizations. They do not directly replace the running platform.',
+    localUpdateAvailable: 'Release upgrade',
+    ranxiUpdateAvailable: 'Source merge needed',
+    localUpdateTitle: 'A local platform release is available',
+    ranxiUpdateTitle: 'Ranxi source updates require a merge and rebuild',
+    bothUpdatesTitle: 'Local platform and Ranxi source updates are available',
+    unavailable: 'Version information unavailable',
+    checkFailed: 'Version check failed. Refresh to retry.',
+    cachedWarning: 'Check failed. Showing cached information.',
+    cachedInfo: 'Showing cached version information. Refresh to check again.',
     currentVersion: 'Current Version',
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
@@ -54,6 +69,7 @@ export default {
     loadVersionsFailed: 'Failed to load versions',
     rollbackSourceHint: 'Online rollback is not available for source builds',
     deployScript: 'Script',
+    binaryReleaseOnly: 'Only Linux amd64 binaries are published. No custom Docker image or image rollback command is available.',
     deployDocker: 'Docker',
     dockerEditCompose: 'Edit the image tag in docker-compose.yml',
     dockerRecreate: 'Recreate the container'

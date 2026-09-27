@@ -728,6 +728,7 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagPelicanShowcase = makeSidebarFlag(FeatureFlags.pelicanShowcase)
 const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
+const flagSharedPool = makeSidebarFlag(FeatureFlags.sharedPool)
 
 // 购买入口文案随站点计费模式切换：仅充值 → 「充值」，仅订阅 → 「订阅」，否则「充值/订阅」。
 const purchaseNavLabel = computed(() => {
@@ -759,7 +760,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   }
   items.push(
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
-    { path: '/shared-pool', label: t('sharedPool.title'), icon: UsersIcon },
+    { path: '/shared-pool', label: t('sharedPool.title'), icon: UsersIcon, featureFlag: flagSharedPool },
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: !authStore.isObserver },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
@@ -831,9 +832,12 @@ const adminNavItems = computed((): NavItem[] => {
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/account-protection', label: t('accountProtection.title'), icon: ShieldIcon },
-    { path: '/admin/codex-ticket-settings', label: t('codexTicketSettings.title'), icon: ShieldIcon },
-    { path: '/admin/codex-request-strategy', label: t('codexRequestStrategy.title'), icon: ShieldIcon },
+    { path: '/admin/strategy', label: t('nav.strategyManagement'), icon: ShieldIcon, expandOnly: true, children: [
+      { path: '/admin/account-protection', label: t('accountProtection.title'), icon: ShieldIcon },
+      { path: '/admin/codex-ticket-settings', label: t('codexTicketSettings.title'), icon: TicketIcon },
+      { path: '/admin/codex-request-strategy', label: t('codexRequestStrategy.title'), icon: ShieldIcon },
+      { path: '/admin/codex-model-quality', label: t('codexModelQuality.title'), icon: ChartIcon },
+    ] },
     { path: '/admin/shared-pool', label: t('sharedPool.adminTitle'), icon: UsersIcon },
     { path: '/admin/smart-ops', label: t('accountOps.smartTitle'), icon: ChartIcon, expandOnly: true, children: [
       { path: '/admin/account-quality', label: t('qualityOps.title'), icon: ChartIcon },
@@ -842,7 +846,10 @@ const adminNavItems = computed((): NavItem[] => {
     ] },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    { path: '/admin/proxy-pool', label: t('nav.proxyPool'), icon: ServerIcon, expandOnly: true, children: [
+      { path: '/admin/proxy-quality', label: t('nav.proxyQuality'), icon: ChartIcon },
+      { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    ] },
     { path: '/admin/spend-guard', label: t('nav.spendGuard'), icon: ShieldIcon },
     {
       path: '/admin/security-audit',

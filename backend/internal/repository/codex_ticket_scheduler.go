@@ -277,6 +277,7 @@ func (a *ProxyPoolAllocator) codexSchedulerDeferredProxy(ctx context.Context, re
 	candidates, _, err := a.codexSchedulerCandidates(ctx, service.CodexTicketReserveRequest{
 		FixedProxy: proxy, Selection: service.ProxyPoolSelection{
 			CountryCode:          req.Selection.CountryCode,
+			FallbackCountryCode:  req.Selection.FallbackCountryCode,
 			AllowCountryFallback: req.Selection.AllowCountryFallback,
 		},
 	})
@@ -365,19 +366,19 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 	if err != nil {
 		return nil, nil, err
 	}
-	regionFallback := false
-	if req.Selection.CountryCode != "" {
-		regional := make([]proxyPoolCandidate, 0, len(items))
-		for _, item := range items {
-			if item.proxy != nil && proxyMatchesRegion(item.proxy, health[item.proxy.ID], req.Selection.CountryCode) {
-				regional = append(regional, item)
-			}
+	gate := a.proxyPoolQualityGate(ctx)
+	usableGate := gate
+	if !req.PoolMode {
+		usableGate = nil
+	}
+	items, tier := selectProxyPoolRegion(items, health, req.Selection, proxyPoolUsable(health, usableGate))
+	regionFallback := tier != proxyPoolTierRegion
+	if regionFallback && req.PoolMode {
+		accountID := req.Selection.AccountID
+		if accountID <= 0 {
+			accountID = req.AccountID
 		}
-		if len(regional) > 0 || !req.Selection.AllowCountryFallback {
-			items = regional
-		} else {
-			regionFallback = true
-		}
+		logProxyPoolRegionFallback(accountID, req.Selection, tier, 0)
 	}
 	result, proxies := []codexSchedulerCandidate{}, map[string]*service.Proxy{}
 	for _, item := range items {
@@ -393,6 +394,9 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 			continue
 		}
 		quality, degraded, healthy := proxyPoolQuality(proxy, health[proxy.ID])
+		if req.PoolMode {
+			degraded, healthy = gate(proxy, health[proxy.ID], degraded, healthy)
+		}
 		id := strconv.FormatInt(proxy.ID, 10)
 		result = append(result, codexSchedulerCandidate{ID: id, Version: codexSchedulerVersion(proxy.URL()), IP: identities[proxy.ID], Fixed: append([]string{}, item.fixedIDs...), Healthy: healthy, Degraded: degraded,
 			Quality: quality, AffinityVersion: fmt.Sprintf("%x", sha256.Sum256([]byte(proxy.URL())))})
@@ -406,7 +410,7 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 // 地区元数据仍有效但本次健康探测失败时保留等待候选，避免误判空池而直连。
 func codexSchedulerRegionPending(proxy *service.Proxy, info *service.ProxyLatencyInfo, country string) bool {
 	return country != "" && service.ProxyLatencyMatchesProxy(info, proxy) && !info.Success &&
-		strings.EqualFold(strings.TrimSpace(info.CountryCode), country)
+		service.CanonicalProxyCountry(info.CountryCode) == service.CanonicalProxyCountry(country)
 }
 
 func containsCodexProxyID(ids []int64, target int64) bool {

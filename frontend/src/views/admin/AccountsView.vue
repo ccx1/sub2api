@@ -313,10 +313,10 @@
             <button
               v-if="isCodexTicketToggleVisible(row)"
               @click="handleToggleCodexTicket(row)"
-              :disabled="togglingCodexTicket === row.id"
+              :disabled="togglingCodexTicket === row.id || isCodexTicketBlockedByExcelBPS(row)"
               class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800"
               :class="[isCodexTicketEnabled(row) ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']"
-              :title="isCodexTicketEnabled(row) ? t('admin.accounts.codexTicketEnabled') : t('admin.accounts.codexTicketDisabled')"
+              :title="isCodexTicketBlockedByExcelBPS(row) ? t('admin.accounts.codexTicketBlockedByExcelBPS') : isCodexTicketEnabled(row) ? t('admin.accounts.codexTicketEnabled') : t('admin.accounts.codexTicketDisabled')"
             >
               <span
                 class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
@@ -929,6 +929,12 @@ const isCodexTicketToggleVisible = (account: AccountListItem): boolean =>
 
 const isCodexTicketEnabled = (account: Pick<AccountListItem, 'codex_ticket_enabled'>): boolean =>
   account.codex_ticket_enabled !== false
+
+// 全模型 Excel / BPS 与打票互斥：开启期间打票固定关闭，关闭 BPS 后才能手动开启。
+const isCodexTicketBlockedByExcelBPS = (account: Pick<AccountListItem, 'type' | 'extra'>): boolean =>
+  account.type === 'oauth'
+  && account.extra?.openai_excel_bps === true
+  && !Object.prototype.hasOwnProperty.call(account.extra, 'openai_excel_bps_models')
 
 type AccountWithCodexTicketProxy = Pick<AccountListItem, 'platform' | 'type' | 'parent_account_id' | 'codex_ticket_enabled' | 'extra'>
 
@@ -2731,6 +2737,10 @@ const handleToggleSchedulable = async (a: Account) => {
 }
 const handleToggleCodexTicket = async (a: AccountListItem) => {
   if (!isCodexTicketToggleVisible(a)) return
+  if (isCodexTicketBlockedByExcelBPS(a)) {
+    appStore.showError(t('admin.accounts.codexTicketBlockedByExcelBPS'))
+    return
+  }
   const nextEnabled = !isCodexTicketEnabled(a)
   togglingCodexTicket.value = a.id
   try {
@@ -2739,7 +2749,7 @@ const handleToggleCodexTicket = async (a: AccountListItem) => {
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle Codex ticket:', error)
-    appStore.showError(t('admin.accounts.failedToToggleCodexTicket'))
+    appStore.showError((error as { message?: string })?.message || t('admin.accounts.failedToToggleCodexTicket'))
   } finally {
     togglingCodexTicket.value = null
   }

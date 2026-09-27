@@ -102,6 +102,25 @@ func (s *OpenAIGatewayService) readCodexModelQualityProxy(ctx context.Context, a
 }
 
 func codexModelQualityPolicyHash(policy CodexModelQualityPolicy) string {
+	// Concurrency limits, model priorities and check intervals only change how
+	// quickly checks are scheduled, not how a ticket is judged. Tuning them must
+	// not discard existing conclusions.
+	policy.IntervalSeconds, policy.RetryIntervalSeconds, policy.ReplacementCheckDelaySeconds = 0, 0, 0
+	return codexModelQualityConcurrencyFreePolicyHash(policy)
+}
+
+// codexModelQualityConcurrencyFreePolicyHash is the format that excluded only
+// concurrency and priorities; records written with it stay valid while the
+// current check intervals still match.
+func codexModelQualityConcurrencyFreePolicyHash(policy CodexModelQualityPolicy) string {
+	policy.Concurrency, policy.AccountConcurrency, policy.ModelPriorities = 0, 0, nil
+	return codexModelQualityLegacyPolicyHash(policy)
+}
+
+// codexModelQualityLegacyPolicyHash is the hash format used before scheduling
+// knobs were excluded. Records written with it remain valid while the current
+// scheduling knobs still match; the next check rewrites them in the new format.
+func codexModelQualityLegacyPolicyHash(policy CodexModelQualityPolicy) string {
 	// Toggling ticket revocation changes only the side effect of a confirmed
 	// result. It must not invalidate the result or lift the model pause.
 	policy.QuarantineOnFailure = false
@@ -109,6 +128,11 @@ func codexModelQualityPolicyHash(policy CodexModelQualityPolicy) string {
 		Policy CodexModelQualityPolicy
 		Bank   string
 	}{policy, modelquality.BankVersion})
+}
+
+func codexModelQualityPolicyMatches(recorded string, policy CodexModelQualityPolicy) bool {
+	return recorded == codexModelQualityPolicyHash(policy) || recorded == codexModelQualityConcurrencyFreePolicyHash(policy) ||
+		recorded == codexModelQualityLegacyPolicyHash(policy)
 }
 
 func codexModelQualityScope(account *Account, ticket *openAICodexTicket, cfg config.OpenAICodexTicketConfig) string {
@@ -132,33 +156,45 @@ func codexModelQualityDisplayStatus(record *CodexModelQualityRecord, account *Ac
 	if status.QualityPausedUntil != nil && !time.Now().Before(*status.QualityPausedUntil) {
 		status.ConsecutiveLowQuality, status.QualityPausedUntil = 0, nil
 	}
-	if record.Policy != codexModelQualityPolicyHash(policy) {
-		status.Status, status.Reason = "stale", "stale"
+	markStale := func(reason string) {
+		if status.Status != "stale" && status.Status != "pending" && status.Status != "running" {
+			status.PreviousStatus = status.Status
+		}
+		status.Status, status.Reason = "stale", reason
+	}
+	if !codexModelQualityPolicyMatches(record.Policy, policy) {
+		markStale("stale")
 		return status
 	}
 	if ticket == nil || !ticket.usable(time.Now(), account, cfg) {
 		if status.Status != "quarantined" {
-			status.Status, status.Reason = "stale", "no_ticket"
+			markStale("no_ticket")
 		}
 		return status
 	}
 	if record.Scope != codexModelQualityScope(account, ticket, cfg) {
-		status.Status, status.Reason = "stale", "stale"
+		markStale("stale")
 		return status
 	}
 	lineage := ticket.lineageCapturedAt()
 	changed := status.TicketCapturedAt == nil || !lineage.Equal(*status.TicketCapturedAt)
 	status.BaselineReused = false
 	if changed {
+		// The new ticket only waits for its own grace, matching codexModelQualityDue.
 		next := lineage.Add(time.Duration(policy.ReplacementCheckDelaySeconds) * time.Second)
-		if status.Status != "passed" && status.NextCheckAt != nil && status.NextCheckAt.After(next) {
-			next = *status.NextCheckAt
+		status.NextCheckAt = &next
+		if status.Status == "running" || status.Status == "pending" {
+			captured, expires := lineage, ticket.effectiveExpiresAt(cfg)
+			status.Status, status.Reason = "pending", "not_checked"
+			status.TicketCapturedAt, status.TicketExpiresAt = &captured, &expires
+			status.CapabilityScore, status.FingerprintCandidate, status.FingerprintProbability, status.FingerprintSimilarity = nil, "", nil, nil
+			status.SampleCount, status.Requests, status.ModelIdentity = 0, 0, "unknown"
+		} else {
+			// Keep the last conclusion and its evidence visible. It still describes
+			// the previous ticket, so it is marked as replaced and can no longer
+			// gate the replacement ticket (see CodexModelQualityFailure).
+			status.TicketReplaced = true
 		}
-		captured, expires := lineage, ticket.effectiveExpiresAt(cfg)
-		status.Status, status.Reason, status.NextCheckAt = "pending", "not_checked", &next
-		status.TicketCapturedAt, status.TicketExpiresAt = &captured, &expires
-		status.CapabilityScore, status.FingerprintCandidate, status.FingerprintProbability, status.FingerprintSimilarity = nil, "", nil, nil
-		status.SampleCount, status.Requests, status.ModelIdentity = 0, 0, "unknown"
 	}
 	if status.Status == "running" && status.NextCheckAt != nil && time.Now().After(*status.NextCheckAt) {
 		status.Status, status.Reason = "inconclusive", "timeout"

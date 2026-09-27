@@ -148,7 +148,9 @@ func (s *adminServiceImpl) validateCodexTicketProxyAccountUpdate(ctx context.Con
 	if !hasCodexTicketProxyUpdates(extra) {
 		return nil
 	}
-	if !isOpenAICodexTicketAccount(account) {
+	// 按账号身份判断，不看 BPS：校验用的是更新前的 Extra，BPS 开关可能在同一次保存中关闭；
+	// BPS 账号保留打票代理配置也无副作用，关闭 BPS 后直接生效。
+	if account == nil || !account.IsOpenAIOAuthLike() || account.IsShadow() {
 		return infraerrors.BadRequest("CODEX_TICKET_PROXY_ACCOUNT_UNSUPPORTED", "仅支持为非影子 OpenAI OAuth 账号设置打票代理")
 	}
 	return s.validateCodexTicketProxyAvailable(ctx, extra)

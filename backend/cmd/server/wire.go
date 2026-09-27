@@ -70,8 +70,9 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
-		Version:   buildInfo.Version,
-		BuildType: buildInfo.BuildType,
+		Version:      buildInfo.Version,
+		RanxiVersion: buildInfo.RanxiVersion,
+		BuildType:    buildInfo.BuildType,
 	}
 }
 
@@ -129,9 +130,11 @@ func provideCleanup(
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	spendGuard *service.SpendGuardService,
+	proxyQualityGuard *service.ProxyQualityGuardService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	auditLog *service.AuditLogService,
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
+	modelAvailabilityRecheck *service.ModelAvailabilityRecheckService,
 	sharedPoolAutoTransfer *service.SharedPoolAutoTransferService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
@@ -162,6 +165,12 @@ func provideCleanup(
 			{"OpenAIQuotaAutoResetService", func() error {
 				if openAIAutoReset != nil {
 					openAIAutoReset.Stop()
+				}
+				return nil
+			}},
+			{"ModelAvailabilityRecheckService", func() error {
+				if modelAvailabilityRecheck != nil {
+					modelAvailabilityRecheck.Stop()
 				}
 				return nil
 			}},
@@ -416,6 +425,12 @@ func provideCleanup(
 			{"SpendGuardService", func() error {
 				if spendGuard != nil {
 					spendGuard.Stop()
+				}
+				return nil
+			}},
+			{"ProxyQualityGuardService", func() error {
+				if proxyQualityGuard != nil {
+					proxyQualityGuard.Stop()
 				}
 				return nil
 			}},

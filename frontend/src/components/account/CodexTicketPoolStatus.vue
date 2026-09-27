@@ -60,13 +60,25 @@
         <span v-if="validExpiry(ticket.route_expires_at)" class="tabular-nums" :title="formatDateTime(ticket.route_expires_at)" data-testid="route-expires">{{ t('admin.accounts.openai.codexTicketPoolRouteExpires', { time: shortExpiry(ticket.route_expires_at!) }) }}</span>
       </div>
       <div
+        v-if="ticket.route_node"
+        class="flex flex-wrap items-center gap-x-1.5 text-[10px] text-gray-500 dark:text-gray-400"
+        data-testid="ticket-route-node"
+        :title="t('admin.accounts.openai.codexTicketPoolRouteNodeHint')"
+      >
+        <span class="font-mono">{{ ticket.route_node }}</span>
+        <span v-if="routeNodeLocation(ticket)">{{ routeNodeLocation(ticket) }}</span>
+        <span v-if="ticket.route_egress_country" data-testid="route-egress-country">{{ t('admin.accounts.openai.codexTicketPoolRouteEgress', { country: ticket.route_egress_country }) }}</span>
+        <span v-if="ticket.route_cross_region" class="text-amber-600 dark:text-amber-400" data-testid="route-cross-region">{{ t('admin.accounts.openai.codexTicketPoolRouteCrossRegion') }}</span>
+      </div>
+      <div
         v-if="ticket.quality_status"
         class="flex flex-wrap items-center gap-1 text-[10px]"
         data-testid="ticket-quality-status"
         :class="qualityStatusClass(ticket.quality_status)"
         :title="qualityReasonText(ticket.quality_reason)"
       >
-        <span>{{ qualityStatusLabel(ticket.quality_status) }}</span>
+        <span>{{ qualityStatusLabel(ticket) }}</span>
+        <span v-if="ticket.quality_ticket_replaced" class="text-cyan-600 dark:text-cyan-400" data-testid="ticket-quality-replaced">· {{ t('admin.accounts.openai.codexTicketQualityReplaced') }}</span>
         <span v-if="qualityReasonText(ticket.quality_reason)" class="text-gray-500 dark:text-gray-400" data-testid="ticket-quality-reason">· {{ qualityReasonText(ticket.quality_reason) }}</span>
         <span v-if="ticket.quality_paused">· {{ t('admin.accounts.openai.codexTicketQualityPaused') }}</span>
       </div>
@@ -171,29 +183,48 @@ function routeAffinityLabel(ticket: TicketStatus) {
   }
 }
 
+function routeNodeLocation(ticket: TicketStatus) {
+  const place = [ticket.route_node_country, ticket.route_node_region].filter(Boolean).join(' ')
+  if (!place) return ''
+  return ticket.route_macro_region ? `${place} · ${ticket.route_macro_region}` : place
+}
+
 function routeAffinityClass(ticket: TicketStatus) {
   if (ticket.route_affinity_status === 'available') return 'text-emerald-600 dark:text-emerald-400'
   if (ticket.route_affinity_status === 'unavailable') return 'text-amber-600 dark:text-amber-400'
   return 'text-gray-500 dark:text-gray-400'
 }
 
-function qualityStatusLabel(status: NonNullable<TicketStatus['quality_status']>) {
-  switch (status) {
+function qualityStatusLabel(ticket: TicketStatus) {
+  switch (ticket.quality_status) {
     case 'passed': return t('admin.accounts.openai.codexTicketQualityPassed')
     case 'quarantined':
     case 'suspect': return t('admin.accounts.openai.codexTicketQualityFailed')
     case 'running': return t('admin.accounts.openai.codexTicketQualityChecking')
-    case 'inconclusive':
-    case 'stale': return t('admin.accounts.openai.codexTicketQualityPending')
+    case 'inconclusive': return t('admin.accounts.openai.codexTicketQualityIncomplete')
+    case 'stale': return t('admin.accounts.openai.codexTicketQualityStale')
     case 'skipped': return t('admin.accounts.openai.codexTicketQualitySkipped')
-    default: return t('admin.accounts.openai.codexTicketQualityPending')
+    default: {
+      const minutes = qualityQueueMinutes(ticket.quality_next_check_at)
+      return minutes === undefined
+        ? t('admin.accounts.openai.codexTicketQualityQueued')
+        : t('admin.accounts.openai.codexTicketQualityQueuedIn', { minutes })
+    }
   }
+}
+
+// Minutes until the next automatic check may start; undefined when it is due now.
+function qualityQueueMinutes(value?: string) {
+  if (!validExpiry(value)) return undefined
+  const remaining = Date.parse(value!) - Date.now()
+  return remaining > 0 ? Math.max(1, Math.ceil(remaining / 60000)) : undefined
 }
 
 function qualityStatusClass(status: NonNullable<TicketStatus['quality_status']>) {
   if (status === 'passed') return 'text-emerald-600 dark:text-emerald-400'
   if (status === 'quarantined' || status === 'suspect') return 'font-medium text-rose-600 dark:text-rose-400'
   if (status === 'running') return 'text-cyan-600 dark:text-cyan-400'
+  if (status === 'inconclusive') return 'text-amber-600 dark:text-amber-400'
   return 'text-gray-500 dark:text-gray-400'
 }
 

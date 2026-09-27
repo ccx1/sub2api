@@ -503,9 +503,10 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 	return count > 0, err
 }
 
-// CountAccountsByProxyID returns the number of accounts using a specific proxy
+// CountAccountsByProxyID 只统计固定绑定（账号固定代理、打票固定代理）。
+// 随机代理池账号的绑定是运行时关联，代理删除后会自动改选其他代理，不阻止删除。
 func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
-	accounts, err := r.ListAccountSummariesByProxyID(ctx, proxyID)
+	accounts, err := r.fixedProxyAccountSummaries(ctx, proxyID)
 	if err != nil {
 		return 0, err
 	}
@@ -517,6 +518,26 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 	if err != nil {
 		return nil, err
 	}
+	fixed, err := r.fixedProxyAccountSummaries(ctx, proxyID)
+	if err != nil {
+		return nil, err
+	}
+	out := append([]service.ProxyAccountSummary{}, dynamic[proxyID]...)
+	seen := make(map[int64]bool, len(out))
+	for _, account := range out {
+		seen[account.ID] = true
+	}
+	for _, account := range fixed {
+		if seen[account.ID] {
+			continue
+		}
+		out = append(out, account)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out, nil
+}
+
+func (r *proxyRepository) fixedProxyAccountSummaries(ctx context.Context, proxyID int64) ([]service.ProxyAccountSummary, error) {
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT id, name, platform, type, notes
 		FROM accounts
@@ -531,11 +552,7 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 	}
 	defer func() { _ = rows.Close() }()
 
-	out := append([]service.ProxyAccountSummary{}, dynamic[proxyID]...)
-	seen := make(map[int64]bool, len(out))
-	for _, account := range out {
-		seen[account.ID] = true
-	}
+	out := []service.ProxyAccountSummary{}
 	for rows.Next() {
 		var (
 			id       int64
@@ -546,9 +563,6 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 		)
 		if err := rows.Scan(&id, &name, &platform, &accType, &notes); err != nil {
 			return nil, err
-		}
-		if seen[id] {
-			continue
 		}
 		var notesPtr *string
 		if notes.Valid {
@@ -565,7 +579,6 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	return out, nil
 }
 

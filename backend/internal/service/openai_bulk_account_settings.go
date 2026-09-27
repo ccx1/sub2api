@@ -124,6 +124,12 @@ func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
 			extra["openai_excel_bps_models"] = normalized
 		}
 	}
+	// 批量开启全模型 BPS（范围为 null）时关闭打票，两者互斥；关闭 BPS 不自动恢复打票。
+	if scope, scoped := extra["openai_excel_bps_models"]; scoped && scope == nil {
+		if enabled, _ := extra["openai_excel_bps"].(bool); enabled {
+			extra[OpenAICodexTicketEnabledExtraKey] = false
+		}
+	}
 	if enabled, exists := extra["openai_excel_bps"].(bool); exists && !enabled {
 		extra["openai_excel_bps_models"] = nil
 		extra["openai_excel_bps_cache_creation_as_input"] = false

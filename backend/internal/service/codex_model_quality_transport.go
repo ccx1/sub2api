@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tidwall/gjson"
 )
@@ -16,7 +17,16 @@ const codexModelQualityResponseLimit = 256 << 10
 
 type codexQualityOutput struct{ text, identity string }
 
+const (
+	codexQualityJSONInstructions   = "Complete the task directly. Do not use tools. Return only the requested JSON."
+	codexQualityAnswerInstructions = "Answer the question directly. Do not use tools. Output only the final answer."
+)
+
 func (s *OpenAIGatewayService) requestCodexModelQuality(ctx context.Context, job *codexModelQualityJob, prompt string) (codexQualityOutput, error) {
+	return s.requestCodexModelQualityWithInstructions(ctx, job, codexQualityJSONInstructions, prompt)
+}
+
+func (s *OpenAIGatewayService) requestCodexModelQualityWithInstructions(ctx context.Context, job *codexModelQualityJob, instructions, prompt string) (codexQualityOutput, error) {
 	if !s.codexModelQualityCurrent(ctx, job) {
 		return codexQualityOutput{}, errors.New("stale")
 	}
@@ -26,12 +36,15 @@ func (s *OpenAIGatewayService) requestCodexModelQuality(ctx context.Context, job
 		SubscriptionTier: openAICodexTicketSubscriptionTier(job.account), SessionID: &session,
 		BusinessVerification: true, BusinessCredentialSnapshot: job.ticket, FreezeCredentials: true, SkipSchedulerAdmission: true}
 	input.BackgroundQuality = true
+	// B2：后台测智同样按 origin 健康度路由，并把可达性结果记入同一熔断器。
+	originUsed := false
+	input.OriginUsed = &originUsed
 	req, err := s.buildOpenAICodexTicketProbeRequest(ctx, input)
 	if err != nil {
 		return codexQualityOutput{}, errors.New("request_unavailable")
 	}
 	body, _ := json.Marshal(map[string]any{"model": job.ticket.Model, "store": false, "stream": true,
-		"instructions": "Complete the task directly. Do not use tools. Return only the requested JSON.",
+		"instructions": instructions,
 		"reasoning":    map[string]string{"effort": job.policy.ReasoningEffort},
 		"input":        []any{map[string]any{"role": "user", "content": []any{map[string]string{"type": "input_text", "text": prompt}}}}})
 	req.Body, req.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
@@ -40,6 +53,13 @@ func (s *OpenAIGatewayService) requestCodexModelQuality(ctx context.Context, job
 	setOpenAICodexRoutingHintFromBody(req.Header, job.account, body)
 	// 专用传输保留原有 TLS/代理设置；不采集响应 Cookie、不续票、不写采票调度状态。
 	resp, err := s.doOpenAICodexTicketProbe(req, input)
+	if originUsed {
+		if codexWorkspaceOriginTransportUnreachable(resp, err) {
+			codexWorkspaceOriginReportTransportFailure(input.Account, job.config, time.Now())
+		} else {
+			codexWorkspaceOriginReportSuccess(input.Account)
+		}
+	}
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
 	}
@@ -52,8 +72,19 @@ func (s *OpenAIGatewayService) requestCodexModelQuality(ctx context.Context, job
 	if resp.StatusCode != http.StatusOK {
 		return codexQualityOutput{}, codexQualityHTTPError(resp.StatusCode)
 	}
+	// 后台测智与打票探测共用同一 Safety Buffering 否决口径：账号被 cyber 风控
+	// 标记（响应头声明降级模型/开启 buffering）时，即便 200 也判为确认失败。
+	if reason := codexSafetyBufferingRejectReason(job.config.RejectSafetyBuffering, codexTicketSignalsFromHeaders(resp.Header)); reason != "" {
+		return codexQualityOutput{}, &codexQualitySafetyBufferingError{reason: reason}
+	}
 	return readCodexQualityOutput(resp.Body, job.ticket.Model)
 }
+
+// codexQualitySafetyBufferingError 标记后台测智命中 Safety Buffering 否决闸。
+// 它经由 codexQualityIncomplete 映射为确认失败（suspect），而不是 inconclusive。
+type codexQualitySafetyBufferingError struct{ reason string }
+
+func (e *codexQualitySafetyBufferingError) Error() string { return e.reason }
 
 func codexQualityHTTPError(status int) error {
 	switch status {

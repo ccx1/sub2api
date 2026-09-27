@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -146,19 +148,45 @@ func TestCodexModelQualityNewTicketWaitsFromItsOwnCaptureTime(t *testing.T) {
 	}
 }
 
-func TestCodexModelQualityCircuitPauseAppliesToEveryCheckSource(t *testing.T) {
+func TestCodexModelQualityCircuitPauseAppliesToBackgroundSources(t *testing.T) {
 	_, _, job := qualityRuntimeFixture(t)
 	now, until := time.Now(), time.Now().Add(time.Hour)
 	record := qualityAdmissionRecord(job, "inconclusive", "timeout")
 	record.QualityPausedUntil = &until
-	for _, source := range []string{"automatic", "manual", "anomaly", "diagnostic"} {
+	for _, source := range []string{"automatic", "manual", "anomaly"} {
 		require.False(t, codexModelQualityDue(record, job, source, now), source)
 		require.True(t, codexModelQualityDue(record, job, source, until), source)
 	}
+	// A diagnosis never revokes tickets, so the pause does not block it.
+	require.True(t, codexModelQualityDue(record, job, "diagnostic", now))
+}
+
+func TestCodexModelQualityDiagnosticRunsDuringQualityPause(t *testing.T) {
+	s, repo, job := qualityRuntimeFixture(t)
+	until := time.Now().Add(time.Hour)
+	repo.record = qualityAdmissionRecord(job, "quarantined", "capability_failed")
+	repo.record.QualityPausedUntil = &until
+	repo.lease = ""
+	var requests atomic.Int32
+	s.httpUpstream = &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, errors.New("offline")
+	}}
+	ctx := withCodexModelQualityDiagnostic(context.Background())
+	require.False(t, s.codexModelQualityCircuitPaused(ctx, job.account, job.ticket.Model))
+	require.True(t, s.codexModelQualityCircuitPaused(context.Background(), job.account, job.ticket.Model))
+	result := s.scheduleCodexModelQualityWithPolicyHash(ctx, job.account, job.ticket.Model, "diagnostic", job.policy, job.policyHash)
+	require.True(t, result.Scheduled, result.Reason)
+	require.Equal(t, "scheduled", result.Reason)
+	s.codexModelQuality.workers.Wait()
+	require.Positive(t, requests.Load(), "the probe transport must not reject a diagnosis during the pause")
+	require.Equal(t, "diagnostic", repo.record.Status.Source)
+	require.Equal(t, &until, repo.record.QualityPausedUntil, "a diagnosis does not change the pause")
+	require.Zero(t, repo.writes)
 }
 
 func TestCodexModelQualitySchedulingReportsPauseBeforeTicketOrCapacity(t *testing.T) {
-	for _, source := range []string{"automatic", "manual", "anomaly", "diagnostic"} {
+	for _, source := range []string{"automatic", "manual", "anomaly"} {
 		t.Run(source, func(t *testing.T) {
 			s, repo, job := qualityRuntimeFixture(t)
 			until := time.Now().Add(time.Hour)
@@ -185,4 +213,51 @@ func TestCodexModelQualityStaleScopeRespectsRetryBackoff(t *testing.T) {
 		Status: CodexModelQualityStatus{Status: "stale", Reason: "stale", NextCheckAt: &next}}
 	require.False(t, codexModelQualityDue(record, job, "automatic", now))
 	require.True(t, codexModelQualityDue(record, job, "automatic", next))
+}
+
+func TestCodexModelQualityNewTicketIsCheckedRightAfterPublish(t *testing.T) {
+	s, repo, job := qualityRuntimeFixture(t)
+	repo.lease = ""
+	p := job.policy
+	p.ReplacementCheckDelaySeconds = 0
+	_, err := s.settingService.UpdateCodexModelQualityPolicy(context.Background(), p)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.codexModelQuality.ctx = ctx
+	job.ticket.CapturedAt, job.ticket.OriginCapturedAt = time.Now(), time.Time{}
+	s.openaiCodexTickets.Store(openAICodexTicketKey(job.account.ID, job.ticket.Model), job.ticket)
+	var requests atomic.Int32
+	s.httpUpstream = &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, errors.New("offline")
+	}}
+	s.kickCodexModelQualityForNewTicket(job.account, job.ticket.Model)
+	require.Eventually(t, func() bool { return requests.Load() > 0 }, 5*time.Second, 10*time.Millisecond,
+		"a zero grace checks the new ticket without waiting for the scan tick")
+	s.codexModelQuality.workers.Wait()
+}
+
+func TestCodexModelQualityUnrevokedResultWaitsForRetryInterval(t *testing.T) {
+	s, repo, job := qualityRuntimeFixture(t)
+	job.policy.ReplacementCheckDelaySeconds, job.policy.RetryIntervalSeconds = 0, 120
+	s.httpUpstream = &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("offline")
+	}}
+	s.executeCodexModelQuality(context.Background(), job, repo)
+	require.Equal(t, "inconclusive", repo.record.Status.Status)
+	require.NotNil(t, repo.record.Status.NextCheckAt)
+	require.WithinDuration(t, time.Now().Add(2*time.Minute), *repo.record.Status.NextCheckAt, 5*time.Second,
+		"a zero grace must not re-probe the same ticket on every scan")
+}
+
+func TestCodexModelQualityNewTicketIgnoresPreviousTicketBackoff(t *testing.T) {
+	_, _, job := qualityRuntimeFixture(t)
+	now := time.Now()
+	oldCapture, later := now.Add(-time.Hour), now.Add(time.Hour)
+	record := qualityAdmissionRecord(job, "inconclusive", "timeout")
+	record.Status.NextCheckAt = &later
+	require.False(t, codexModelQualityDue(record, job, "automatic", now), "the same ticket keeps its retry backoff")
+	record.Status.TicketCapturedAt = &oldCapture
+	require.True(t, codexModelQualityDue(record, job, "automatic", now), "a replacement ticket is not held by the old backoff")
 }

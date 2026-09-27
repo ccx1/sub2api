@@ -54,6 +54,14 @@
         <textarea :value="canaryExpectedText" @input="setCanaryExpected" rows="4" class="input w-full" data-testid="quality-canary-expected" :placeholder="t('codexModelQuality.canaryExpectedPlaceholder')"></textarea>
         <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.canaryExpectedHint', { count: qualityCanaryLimits.expectedCount }) }}</span>
       </label>
+      <label class="flex items-start gap-3 text-sm text-gray-900 dark:text-white">
+        <input :checked="policy.canary_match === 'exact'" @change="setCanaryExact" type="checkbox" data-testid="quality-canary-exact" class="mt-1 h-4 w-4" />
+        <span>{{ t('codexModelQuality.canaryExact') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.canaryExactHint') }}</span></span>
+      </label>
+      <label class="flex items-start gap-3 text-sm text-gray-900 dark:text-white">
+        <input :checked="!!policy.canary_only" @change="setCanaryOnly" type="checkbox" data-testid="quality-canary-only" class="mt-1 h-4 w-4" />
+        <span>{{ t('codexModelQuality.canaryOnly') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.canaryOnlyHint') }}</span></span>
+      </label>
     </div>
   </fieldset>
 </template>
@@ -77,6 +85,15 @@ function setCanaryExpected(event: Event) {
   canaryExpectedText.value = (event.target as HTMLTextAreaElement).value
   const expected = canaryExpectedLines(canaryExpectedText.value)
   policy.value.canary_expected = expected.length ? expected : undefined
+}
+
+// 未勾选时删除字段，保持旧策略的保存内容不变。
+function setCanaryExact(event: Event) {
+  policy.value.canary_match = (event.target as HTMLInputElement).checked ? 'exact' : undefined
+}
+
+function setCanaryOnly(event: Event) {
+  policy.value.canary_only = (event.target as HTMLInputElement).checked || undefined
 }
 
 function priorityValue(model: string): number | '' {

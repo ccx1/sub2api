@@ -223,6 +223,9 @@ type SystemSettings struct {
 	// to form the admin-facing "site billing mode" selector.
 	SubscriptionEnabled bool `json:"subscription_enabled"`
 
+	// Shared account pool user entry switch (see SettingKeySharedPoolEnabled)
+	SharedPoolEnabled bool `json:"shared_pool_enabled"`
+
 	// Model Plaza feature (public group/model pricing showcase)
 	ModelPlazaEnabled       bool   `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool   `json:"model_plaza_require_auth"`
@@ -436,6 +439,9 @@ type PublicSettings struct {
 
 	// Subscription feature switch (see SystemSettings.SubscriptionEnabled)
 	SubscriptionEnabled bool `json:"subscription_enabled"`
+
+	// Shared account pool user entry switch (see SettingKeySharedPoolEnabled)
+	SharedPoolEnabled bool `json:"shared_pool_enabled"`
 
 	// Model Plaza feature (public group/model pricing showcase)
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`

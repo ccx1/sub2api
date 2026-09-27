@@ -117,3 +117,17 @@ func TestTicketProxyDeletionCountIncludesFixedTicketReference(t *testing.T) {
 	require.EqualValues(t, 1, count)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestProxyDeletionCountIgnoresRandomPoolBindings(t *testing.T) {
+	r, mock, allocator := newProxyPoolAdminTest(t)
+	ctx := context.Background()
+	_, err := allocator.Select(ctx, service.ProxyPoolSelection{AccountID: 7})
+	require.NoError(t, err)
+	// 随机代理池运行时绑定不查询也不计入删除阻塞，只统计固定绑定。
+	mock.ExpectQuery("(?s)SELECT id, name, platform, type, notes.*codex_ticket_proxy_mode.*codex_ticket_proxy_id").WithArgs(int64(1)).WillReturnRows(
+		sqlmock.NewRows([]string{"id", "name", "platform", "type", "notes"}))
+	count, err := r.CountAccountsByProxyID(ctx, 1)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

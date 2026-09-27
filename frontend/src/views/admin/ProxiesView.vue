@@ -1932,6 +1932,8 @@ const qualityTargetLabel = (target: string) => {
   switch (target) {
     case 'base_connectivity':
       return t('admin.proxies.qualityTargetBase')
+    case 'ipfm_location':
+      return t('admin.proxies.qualityTargetIPFMLocation')
     case 'openai':
       return 'OpenAI'
     case 'anthropic':
@@ -2091,11 +2093,9 @@ const handleExportData = async () => {
   }
 }
 
+// account_count 含随机代理池的运行时绑定，删除后这些账号会自动改选其他代理；
+// 是否被固定绑定由后端判断（PROXY_IN_USE）。
 const handleDelete = (proxy: Proxy) => {
-  if ((proxy.account_count || 0) > 0) {
-    appStore.showError(t('admin.proxies.deleteBlockedInUse'))
-    return
-  }
   deletingProxy.value = proxy
   showDeleteDialog.value = true
 }
@@ -2119,7 +2119,11 @@ const confirmDelete = async () => {
     void loadProxyGroups()
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToDelete'))
+    appStore.showError(
+      error?.code === 'PROXY_IN_USE'
+        ? t('admin.proxies.deleteBlockedInUse')
+        : error?.message || t('admin.proxies.failedToDelete')
+    )
     console.error('Error deleting proxy:', error)
   }
 }
@@ -2147,7 +2151,7 @@ const confirmBatchDelete = async () => {
     void loadProxyGroups()
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.batchDeleteFailed'))
+    appStore.showError(error?.message || t('admin.proxies.batchDeleteFailed'))
     console.error('Error batch deleting proxies:', error)
   }
 }

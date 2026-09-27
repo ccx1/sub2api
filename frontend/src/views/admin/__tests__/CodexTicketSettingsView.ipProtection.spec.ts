@@ -22,7 +22,7 @@ const settings = (): CodexTicketSettings => ({
 let page: ReturnType<typeof mount<typeof CodexTicketSettingsView>> | undefined
 function render() {
   page = mount(CodexTicketSettingsView, {
-    global: { stubs: { RouterLink: true, CodexTicketTagSelect: true, CodexModelQuality: true } }
+    global: { stubs: { RouterLink: true, CodexTicketTagSelect: true } }
   })
   return page
 }

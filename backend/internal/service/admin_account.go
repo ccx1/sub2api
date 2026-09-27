@@ -798,6 +798,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			}
 		}
 		normalizedExtra = MergeOpenAICodexTicketExtra(normalizedExtra, account.Extra)
+		disableCodexTicketForExcelBPS(account, normalizedExtra)
 		normalizedExtra = preserveMode1ManagedExtra(ctx, account, normalizedExtra)
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
 		account.Extra = normalizedExtra
@@ -1114,6 +1115,21 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 		}
 		if err := ValidateOpenAILongContextBillingExtra(account.Platform, updates); err != nil {
 			return err
+		}
+	}
+	if enabled, _ := updates[excelBPSExtraKey].(bool); enabled {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		merged := maps.Clone(account.Extra)
+		if merged == nil {
+			merged = map[string]any{}
+		}
+		maps.Copy(merged, updates)
+		disableCodexTicketForExcelBPS(account, merged)
+		if ticketEnabled, exists := merged[OpenAICodexTicketEnabledExtraKey]; exists {
+			updates[OpenAICodexTicketEnabledExtraKey] = ticketEnabled
 		}
 	}
 	if len(updates) == 0 {

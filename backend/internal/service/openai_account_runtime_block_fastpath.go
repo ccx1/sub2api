@@ -200,6 +200,12 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		accountDecision := s.recordOpenAITransient503Failure(account, time.Now())
 		s.blockOpenAIAccountAfterTransientFailure(stateCtx, account, statusCode, responseBody, accountDecision)
 	}
+	// 单模型 503（如 "Service temporarily unavailable"）：持久化 (账号, 模型) 冷却，
+	// 冷却到期后由 ModelAvailabilityRecheckService 复检，仍失败则从 model_mapping 删除该模型。
+	// 不改变返回值，账号级熔断与模型瞬时退避照常生效。
+	if !shouldDisable && len(canonicalModel) > 0 {
+		s.rateLimitService.HandleUpstreamModelUnavailable(stateCtx, account, canonicalModel[0], statusCode, responseBody)
+	}
 	if !shouldDisable && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey &&
 		shouldCooldownOpenAITransientUpstreamError(statusCode, responseBody) && !poolModeRetryable {
 		model := ""

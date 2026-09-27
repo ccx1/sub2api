@@ -41,7 +41,7 @@ export default {
           storageEntries: '进程暂存图片数',
           ttlMinutes: '链接有效期 (分钟)',
           retentionHint: '支持 PNG、JPEG、GIF 和 WebP，单张仍受 64 百万像素保护。图片数量和总大小统计整份请求中的内嵌图片（含历史消息、工具截图和重复项），大小按解码后计算。保存后新转换立即使用新限制；链接有效期从最后一次提交起算，已有链接在再次提交前保留原到期时间。降低暂存上限不会删除有效图片，占用超限时拒绝新增转换。链接持有者可在有效期内读取。',
-          capacityHint: '请求接入限制覆盖 OpenAI/Composite 的 Responses、Chat 和 Messages HTTP 请求, 包括纯文本. 大请求可用并发更低; 超额返回 503, 不在内存中排队. 提高预算会增加内存压力.',
+          capacityHint: '仅当 BPS 因 base64 图片拒绝请求时才转为临时链接后重试, 纯文本和 HTTPS 图片请求不经过中转. 网关已有请求体上限仍生效.',
           invalidBaseUrl: '请填写有效的 HTTPS 访问地址, 不包含路径, 账号密码, 查询参数或片段.',
           invalidCapacity: '请求体上限须为 1–128 MiB, 共享预算为 512–2048 MiB 且至少为请求体的 8 倍, 在途请求数为 1–512.',
         },
@@ -129,6 +129,12 @@ export default {
           description: '控制管理员侧边栏是否显示插件管理入口。此开关不控制插件运行状态。',
           enabled: '显示插件管理菜单',
           enabledHint: '关闭后仅隐藏侧边栏菜单；已加载或正在运行的插件不会因此停止。',
+        },
+        sharedPool: {
+          title: '共享账号池',
+          description: '控制用户侧「共享账号池」入口与接口是否开放。管理员共享池管理页面不受影响。',
+          enabled: '开放共享账号池',
+          enabledHint: '关闭后隐藏用户菜单与页面，用户无法新增、导入、修改共享账号或转出收益；已分配到分组的共享账号仍正常调度。',
         },
         riskControl: {
           title: '风控中心',

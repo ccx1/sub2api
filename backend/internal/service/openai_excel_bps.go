@@ -251,46 +251,58 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if transient {
 		scope = "transient:" + scope
 	}
-	imageSettings, err := s.settingService.GetExcelBPSImageRelaySettings(ctx)
-	if err != nil {
-		return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
-	}
-	var images *basispoints.NativeImages
-	if imageSettings.Enabled && imageSettings.Mode == ExcelBPSImageModeNative {
-		images, err = basispoints.PrepareNativeImagesWithLimit(body, imageSettings.Limits.MaxImages)
-		if err == nil {
-			body, err = images.Body()
-		}
-	} else {
-		var relay *basispoints.ImageRelay
-		relay, err = s.excelBPSImageRelayForSettings(imageSettings)
-		if err != nil {
-			return fail(503, "basispoints_image_relay_unavailable", "Excel BPS image relay is unavailable")
-		}
-		body, err = relay.Rewrite(body, scope)
-	}
-	if err != nil {
-		if errors.Is(err, basispoints.ErrImageRelayFull) {
-			return fail(503, "basispoints_image_relay_full", err.Error())
-		}
-		if errors.Is(err, basispoints.ErrImageRelayStorage) {
-			return fail(503, "basispoints_image_relay_unavailable", err.Error())
-		}
-		return fail(400, "basispoints_request_invalid", err.Error())
-	}
-	// Validate the complete request before uploading any attachments. The native
-	// plan contains valid placeholder IDs until all local protocol checks pass.
 	var replay *basispoints.ReplayCache
 	var catalog *basispoints.CatalogCache
 	if identity != "" {
 		replay, catalog = &excelBPSReplay, &excelBPSCatalog
 	}
-	var upstreamBody []byte
-	var bridge *basispoints.Bridge
-	if images != nil {
-		upstreamBody, bridge, err = images.PrepareWithCatalog(scope, replay, catalog)
-	} else {
-		upstreamBody, bridge, err = basispoints.PrepareWithCatalog(body, scope, replay, catalog)
+	upstreamBody, bridge, err := basispoints.PrepareWithCatalog(body, scope, replay, catalog)
+	var images *basispoints.NativeImages
+	var digestUsage OpenAIUsage
+	// 仅内联图片需要读取图片配置；纯文本和现成 HTTPS/file_id 不触碰图片存储。
+	if errors.Is(err, basispoints.ErrInlineImage) {
+		imageSettings, settingsErr := s.settingService.GetExcelBPSImageRelaySettings(ctx)
+		if settingsErr != nil {
+			return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
+		}
+		if imageSettings.Enabled {
+			// 图片超过窗口时，先把最早的图片理解为文字描述，只保留最近的图片。
+			if body, err = s.rollExcelBPSImages(ctx, c, account, body, scope, imageSettings, &digestUsage); err != nil {
+				status, code, message := excelBPSImageDigestFailure(err)
+				setOpsUpstreamError(c, status, "Excel BPS image description failed", "")
+				return fail(status, code, message)
+			}
+		}
+		if imageSettings.Enabled && imageSettings.Mode == ExcelBPSImageModeNative {
+			images, err = basispoints.PrepareNativeImagesWithLimit(body, imageSettings.Limits.MaxImages)
+			if err == nil {
+				body, err = images.Body()
+			}
+		} else {
+			relay, relayErr := s.excelBPSImageRelayForSettings(imageSettings)
+			if relayErr != nil {
+				return fail(503, "basispoints_image_relay_unavailable", "Excel BPS image relay is unavailable")
+			}
+			if relay == nil {
+				return fail(400, "basispoints_request_invalid", err.Error())
+			}
+			body, err = relay.Rewrite(body, scope)
+		}
+		if err != nil {
+			if errors.Is(err, basispoints.ErrImageRelayFull) {
+				return fail(503, "basispoints_image_relay_full", err.Error())
+			}
+			if errors.Is(err, basispoints.ErrImageRelayStorage) {
+				return fail(503, "basispoints_image_relay_unavailable", err.Error())
+			}
+			return fail(400, "basispoints_request_invalid", err.Error())
+		}
+		// 原生附件暂用有效占位 ID，完整协议校验通过后才允许上传。
+		if images != nil {
+			upstreamBody, bridge, err = images.PrepareWithCatalog(scope, replay, catalog)
+		} else {
+			upstreamBody, bridge, err = basispoints.PrepareWithCatalog(body, scope, replay, catalog)
+		}
 	}
 	if err != nil {
 		return fail(400, "basispoints_request_invalid", err.Error())
@@ -308,7 +320,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		attachmentProxy = account.Proxy.URL()
 	}
 	if images != nil && images.HasImages() {
-		// 附件与推理必须复用已选出口，上传后不可切换代理。
+		// 上传与后续生成、修复沿用同一出口，不能在已上传后切换代理。
 		ctx = context.WithValue(ctx, excelBPSPinnedEgressKey{}, true)
 	}
 	if images != nil && images.HasImages() {
@@ -526,6 +538,8 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	// client effort for usage display, and the BPS-normalized effort for billing.
 	requestedEffort := coalesceRequestedReasoningEffort(RequestedReasoningEffortFromContext(ctx), &bridge.RequestedEffort)
 	result := &OpenAIForwardResult{Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, RequestID: resp.Header.Get("x-request-id")}
+	// 滚动理解旧图片消耗的用量与本次请求一起计费，包括断流和失败的返回路径。
+	defer func() { addOpenAIUsage(&result.Usage, digestUsage) }()
 	if stream {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")

@@ -55,6 +55,8 @@ func (h *SettingHandler) UpdateCodexRequestStrategyPolicy(c *gin.Context) {
 		"route_failure_cooldown_seconds": updated.RouteFailureCooldownSeconds,
 		"region_mode":                    updated.RegionMode,
 		"time_context_mode":              updated.TimeContextMode,
+		"path_context_mode":              updated.PathContextMode,
+		"path_placeholder":               updated.PathPlaceholder,
 		"compliance_mode":                updated.ComplianceMode,
 	})
 	response.Success(c, updated)

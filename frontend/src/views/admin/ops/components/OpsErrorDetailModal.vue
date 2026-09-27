@@ -29,16 +29,16 @@
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
-            {{ isUpstreamError(detail) ? t('admin.ops.errorDetail.account') : t('admin.ops.errorDetail.user') }}
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.account') }}</div>
+          <div class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white" data-testid="error-detail-account">
+            {{ accountLabel || '—' }}
           </div>
-          <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-            <template v-if="isUpstreamError(detail)">
-              {{ detail.account_name || (detail.account_id != null ? String(detail.account_id) : '—') }}
-            </template>
-            <template v-else>
-              {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
-            </template>
+        </div>
+
+        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.user') }}</div>
+          <div class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">
+            {{ detail.user_email || (detail.user_id != null ? String(detail.user_id) : '—') }}
           </div>
         </div>
 
@@ -190,7 +190,11 @@
               </div>
             </div>
 
-            <div class="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+            <div class="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-3">
+              <div>
+                <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.account') }}:</span>
+                <span class="ml-1 font-medium text-gray-900 dark:text-white">{{ formatAccount(ev.account_name, ev.account_id) || '—' }}</span>
+              </div>
               <div>
                 <span class="text-gray-400">{{ t('admin.ops.errorDetail.upstreamEvent.status') }}:</span>
                 <span class="ml-1 font-mono">{{ ev.status_code ?? '—' }}</span>
@@ -306,11 +310,30 @@ const title = computed(() => {
 
 const emptyText = computed(() => t('admin.ops.errorDetail.noErrorSelected'))
 
-function isUpstreamError(d: OpsErrorDetail | null): boolean {
-  if (!d) return false
-  const phase = String(d.phase || '').toLowerCase()
-  const owner = String(d.error_owner || '').toLowerCase()
-  return phase === 'upstream' && owner === 'provider'
+function formatAccount(name?: string | null, id?: number | null): string {
+  const n = String(name || '').trim()
+  const hasId = id != null && id > 0
+  if (n && hasId) return `${n} (#${id})`
+  if (n) return n
+  return hasId ? `#${id}` : ''
+}
+
+// 顶层 account_id 缺失时（如请求级错误），回退到上游尝试事件里最后一个带账号的记录。
+function lastUpstreamEventAccount(raw?: string | null): string {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  try {
+    const events = JSON.parse(text)
+    if (!Array.isArray(events)) return ''
+    for (let i = events.length - 1; i >= 0; i--) {
+      const ev = events[i]
+      const label = formatAccount(ev?.account_name, typeof ev?.account_id === 'number' ? ev.account_id : null)
+      if (label) return label
+    }
+  } catch {
+    return ''
+  }
+  return ''
 }
 
 function formatRequestTypeLabel(type: number | null | undefined): string {
@@ -342,6 +365,21 @@ const correlatedUpstream = ref<OpsErrorDetail[]>([])
 const correlatedUpstreamLoading = ref(false)
 
 const correlatedUpstreamErrors = computed<OpsErrorDetail[]>(() => correlatedUpstream.value)
+
+const accountLabel = computed(() => {
+  const current = detail.value
+  if (!current) return ''
+  const direct = formatAccount(current.account_name, current.account_id)
+  if (direct) return direct
+  const fromEvents = lastUpstreamEventAccount(current.upstream_errors)
+  if (fromEvents) return fromEvents
+  for (let i = correlatedUpstream.value.length - 1; i >= 0; i--) {
+    const ev = correlatedUpstream.value[i]
+    const label = formatAccount(ev.account_name, ev.account_id)
+    if (label) return label
+  }
+  return ''
+})
 
 const expandedUpstreamDetailIds = ref(new Set<number>())
 

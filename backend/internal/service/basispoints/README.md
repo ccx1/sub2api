@@ -50,6 +50,13 @@ the final response locally. This does not provide upstream constrained decoding.
 - Enforce the existing 20-inline-image and 32 MiB per-request relay limits.
   A relay capacity error and an upstream overload are separate from a tool
   protocol error; HTTP 200 alone does not establish a successful SSE terminal.
+- When image support is enabled and a request carries more than
+  `max_images - 2` inline images (18 by default), describe the oldest images
+  on the same account, model and proxy with a separate structured request, and
+  replace them with text until at most half the window remains as images.
+  Cache descriptions per API key for 24 hours so later turns do not describe
+  them again, bill the description usage with the main request, and fail
+  closed without sending the main request if a description is incomplete.
 
 # Tool transport corrections
 

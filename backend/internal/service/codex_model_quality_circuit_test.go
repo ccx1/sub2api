@@ -197,3 +197,28 @@ func TestCodexModelQualityCircuitPausesAutomaticAndManualHarvest(t *testing.T) {
 		require.Zero(t, repo.writes)
 	}
 }
+
+func TestCodexModelQualityHistoryKeepsRecentFinishedChecks(t *testing.T) {
+	s, repo, job := qualityRuntimeFixture(t)
+	started := time.Now()
+	for i := 0; i < codexModelQualityHistoryLimit+3; i++ {
+		status := qualityStatusForJob(job)
+		status.Status, status.Reason = "inconclusive", "network_error"
+		if i%2 == 0 {
+			status.Status, status.Reason = "passed", "capability_passed"
+		}
+		s.finishCodexModelQuality(job, repo, status, started)
+	}
+	require.Len(t, repo.record.History, codexModelQualityHistoryLimit)
+	last := repo.record.History[0]
+	require.Equal(t, "passed", last.Status)
+	require.Equal(t, "capability_passed", last.Reason)
+	require.Equal(t, "automatic", last.Source)
+	require.NotNil(t, last.CheckedAt)
+	require.Empty(t, repo.record.Status.History, "history is stored once on the record")
+
+	// A running placeholder must not add history or drop existing entries.
+	require.True(t, saveCodexModelQuality(context.Background(), repo, job, qualityStatusForJob(job)))
+	require.Len(t, repo.record.History, codexModelQualityHistoryLimit)
+	require.Equal(t, "running", repo.record.Status.Status)
+}

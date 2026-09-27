@@ -22,8 +22,11 @@ func TestAccountProxyRegionCountry(t *testing.T) {
 		{name: "fallback country", mode: "billing", fallbackCountry: "jp", currency: "USD", want: "JP"},
 		{name: "manual overrides currency", mode: "manual", country: " us ", currency: "JPY", want: "US"},
 		{name: "manual missing", mode: "manual", wantErr: true},
-		{name: "invalid country", mode: "manual", country: "Japan", wantErr: true},
-		{name: "invalid fallback country", mode: "billing", fallbackCountry: "Japan", wantErr: true},
+		{name: "invalid country", mode: "manual", country: "Atlantis", wantErr: true},
+		{name: "invalid fallback country", mode: "billing", fallbackCountry: "Atlantis", wantErr: true},
+		{name: "manual country alias", mode: "manual", country: "Japan", want: "JP"},
+		{name: "fallback country alias", mode: "billing", fallbackCountry: "美国", currency: "USD", want: "US"},
+		{name: "pricing country alias", mode: "billing", priceCountry: " United States ", want: "US"},
 		{name: "invalid mode fails closed", mode: "anything", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,13 +1,20 @@
 import { apiClient } from '../client'
 
+export type TokenGuardActivationMode = 'external' | 'builtin'
+
 export interface TokenGuardReloginAccount {
   email: string
   password: string
   mfa_secret: string
+  // 为 true 时该凭据不参与巡检；expires_at 为过期时刻（UNIX 秒，0/缺省=永不过期）。
+  disabled?: boolean
+  expires_at?: number
 }
 
 export interface TokenGuardConfig {
   enabled: boolean
+  // external=外站授权（调用外部测活/重登接口），builtin=本站授权（进程内 OAuth，走账号绑定的 IP）。
+  activation_mode: TokenGuardActivationMode
   group_ids: number[]
   interval_seconds: number
   probe_endpoint: string

@@ -9,7 +9,7 @@ func registerSharedPoolRoutes(authenticated *gin.RouterGroup, h *handler.SharedP
 	if h == nil {
 		return
 	}
-	p := authenticated.Group("/shared-pool")
+	p := authenticated.Group("/shared-pool", h.RequireUserEntryEnabled)
 	p.GET("/overview", h.Overview)
 	p.GET("/pools", h.Pools)
 	p.GET("/config", h.Config)

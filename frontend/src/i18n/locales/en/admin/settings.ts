@@ -41,7 +41,7 @@ export default {
           storageEntries: 'Stored images per process',
           ttlMinutes: 'Link lifetime (minutes)',
           retentionHint: 'Supports PNG, JPEG, GIF and WebP with a fixed 64-megapixel safety limit. Counts and decoded sizes include all inline images in the request, including history, tool screenshots and repeated items. Saved limits apply to new conversions. Link lifetime starts at the last submission; existing links keep their expiry until resubmitted. Lowering storage limits preserves live images and blocks new conversions while over quota. Anyone with a valid link can read the image.',
-          capacityHint: 'Request admission limits cover OpenAI/Composite Responses, Chat and Messages HTTP requests, including text-only requests. Larger requests allow less concurrency; excess requests receive 503 without being queued in memory. Raising the budget increases memory pressure.',
+          capacityHint: 'Images are relayed only when BPS rejects a request for inline base64 images; text-only and HTTPS image requests bypass the relay. Existing gateway body limits still apply.',
           invalidBaseUrl: 'Enter a valid HTTPS origin without a path, credentials, query or fragment.',
           invalidCapacity: 'Set a body limit of 1–128 MiB, a shared budget of 512–2048 MiB at least eight times the body limit, and 1–512 in-flight requests.',
         },
@@ -129,6 +129,12 @@ export default {
           description: 'Controls whether the plugin management entry appears in the admin sidebar. This switch does not control plugin runtime state.',
           enabled: 'Show Plugin Management',
           enabledHint: 'Turning this off only hides the sidebar entry; loaded or running plugins are not stopped.',
+        },
+        sharedPool: {
+          title: 'Shared Account Pool',
+          description: 'Controls whether the user-facing Shared Account Pool entry and API are open. Admin shared-pool management is unaffected.',
+          enabled: 'Open Shared Account Pool',
+          enabledHint: 'When off, the user menu and page are hidden and users cannot add, import, edit shared accounts or transfer earnings. Shared accounts already assigned to groups keep being scheduled.',
         },
         riskControl: {
           title: 'Risk Control',

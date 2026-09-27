@@ -178,7 +178,6 @@
           <div class="flex justify-end"><button type="submit" class="btn btn-primary" data-testid="save-settings" :disabled="saving || !!validationError">{{ t(saving ? 'codexTicketSettings.saving' : 'codexTicketSettings.save') }}</button></div>
         </footer>
       </form>
-      <CodexModelQuality :models="savedModels" />
     </div>
   </AppLayout>
 </template>
@@ -190,7 +189,6 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
 import CodexTicketIPProtection from '@/components/admin/CodexTicketIPProtection.vue'
-import CodexModelQuality from '@/components/admin/CodexModelQuality.vue'
 import { getCodexTicketSettings, saveCodexTicketSettings, type CodexTicketSettings } from '@/api/admin/codexTicketSettings'
 import { defaultTicketProtection, readTicketProtection, splitTicketList, ticketCookieFields, ticketNumericGroups, ticketProtectionFields, ticketRejectionRetryFields, validateTicketSettings } from '@/components/admin/codexTicketSettingsForm'
 import { readTicketTierSelections, writeTicketTierSelections, ticketTierOptions, ticketModelOptions, type TicketTierRow } from '@/components/admin/codexTicketSelections'

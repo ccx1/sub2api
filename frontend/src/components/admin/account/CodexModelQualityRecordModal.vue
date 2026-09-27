@@ -18,7 +18,7 @@
           {{ item.model }}：{{ reasonText(item.reason) }}
         </li>
       </ul>
-      <p v-else-if="!items.length" class="py-8 text-center text-sm text-gray-500">{{ t('codexModelQuality.noResults') }}</p>
+      <p v-if="!items.length" class="py-8 text-center text-sm text-gray-500">{{ t('codexModelQuality.noResults') }}</p>
       <div v-else class="divide-y divide-gray-200 dark:divide-dark-700">
         <CodexModelQualityResult v-for="item in items" :key="item.model" :item="item" />
       </div>

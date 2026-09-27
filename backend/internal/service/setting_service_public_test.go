@@ -280,6 +280,34 @@ func TestSettingService_GetPublicSettingsForInjection_MirrorsSubscriptionEnabled
 	}
 }
 
+// shared_pool_enabled gates the user-facing shared account pool and is opt-out:
+// only an explicit "false" closes it, and the SSR payload mirrors the value.
+func TestSettingService_SharedPoolEnabledOnlyExplicitFalseDisables(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values map[string]string
+		want   bool
+	}{
+		{name: "missing key defaults to enabled", values: map[string]string{}, want: true},
+		{name: "explicit true", values: map[string]string{SettingKeySharedPoolEnabled: "true"}, want: true},
+		{name: "explicit false disables", values: map[string]string{SettingKeySharedPoolEnabled: "false"}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewSettingService(&settingPublicRepoStub{values: tc.values}, &config.Config{})
+
+			settings, err := svc.GetPublicSettings(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.want, settings.SharedPoolEnabled)
+
+			raw, err := svc.GetPublicSettingsForInjection(context.Background())
+			require.NoError(t, err)
+			payload, ok := raw.(*PublicSettingsInjectionPayload)
+			require.True(t, ok)
+			require.Equal(t, tc.want, payload.SharedPoolEnabled)
+		})
+	}
+}
+
 // payment_balance_disabled is exposed publicly so the user shell can derive the site
 // billing mode (recharge & subscription / recharge only / subscription only) before any
 // authenticated checkout call. Strict true, mirroring the payment-config parser.

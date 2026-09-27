@@ -359,6 +359,9 @@ type UpdateSettingsRequest struct {
 	// Subscription feature switch (user-facing subscription surface; see SettingKeySubscriptionEnabled)
 	SubscriptionEnabled *bool `json:"subscription_enabled"`
 
+	// Shared account pool user entry switch (see SettingKeySharedPoolEnabled)
+	SharedPoolEnabled *bool `json:"shared_pool_enabled"`
+
 	// Model Plaza feature switches + description
 	ModelPlazaEnabled     *bool   `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth *bool   `json:"model_plaza_require_auth"`
@@ -2204,6 +2207,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.SubscriptionEnabled
 		}(),
+		SharedPoolEnabled: func() bool {
+			if req.SharedPoolEnabled != nil {
+				return *req.SharedPoolEnabled
+			}
+			return previousSettings.SharedPoolEnabled
+		}(),
 		ModelPlazaEnabled: func() bool {
 			if req.ModelPlazaEnabled != nil {
 				return *req.ModelPlazaEnabled
@@ -2666,6 +2675,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PelicanShowcaseEnabled:   updatedSettings.PelicanShowcaseEnabled,
 		PelicanShowcase:          updatedSettings.PelicanShowcase,
 		SubscriptionEnabled:      updatedSettings.SubscriptionEnabled,
+		SharedPoolEnabled:        updatedSettings.SharedPoolEnabled,
 
 		ModelPlazaEnabled:       updatedSettings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:   updatedSettings.ModelPlazaRequireAuth,

@@ -199,6 +199,9 @@ func ResolveAccountProxyPoolSelection(ctx context.Context, a *Account, source an
 		return selection, err
 	}
 	selection.CountryCode = country
+	if fallback := a.ProxyRegionFallbackCountry(); country != "" && fallback != country {
+		selection.FallbackCountryCode = fallback
+	}
 	switch a.RandomProxyPoolScope() {
 	case RandomProxyPoolSelected:
 		selection.Restricted, selection.IDs = true, a.RandomProxyPoolIDs()

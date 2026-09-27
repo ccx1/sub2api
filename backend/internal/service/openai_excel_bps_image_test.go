@@ -97,6 +97,24 @@ func TestExcelBPSImageRelayValidationDoesNotCallUpstream(t *testing.T) {
 	}
 }
 
+func TestExcelBPSTextRequestSkipsImageRelay(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	gin.SetMode(gin.TestMode)
+	wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_text\",\"status\":\"completed\",\"model\":\"gpt-6-astra\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}}
+	svc := openAIClientToolsTestService(upstream)
+	t.Cleanup(func() { require.NoError(t, svc.CloseExcelBPSImages()) })
+	svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: "https://images.example"}}, svc.cfg)
+	body := []byte(`{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"https://images.example/photo.png"}]}]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	_, err := svc.Forward(context.Background(), c, excelAccount(), body)
+	require.NoError(t, err)
+	require.Contains(t, string(upstream.lastBody), "https://images.example/photo.png")
+	require.Nil(t, svc.excelBPSImages, "requests without inline images must not touch the relay")
+}
+
 func TestExcelBPSImageCapabilityRedactedFromUpstreamError(t *testing.T) {
 	raw := `{"error":{"message":"Cannot fetch https://images.example/api/bps-images/PRIVATE_CAPABILITY_123"}}`
 	out := excelBPSSanitizeErrorBody(raw, "test-token", excelAccount())

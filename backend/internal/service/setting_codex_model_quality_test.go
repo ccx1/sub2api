@@ -85,7 +85,7 @@ func TestCodexModelQualityPolicyBudgetBoundaries(t *testing.T) {
 		{"retry interval", 60, 3600, func(p *CodexModelQualityPolicy, n int) { p.RetryIntervalSeconds = n }},
 		{"low quality threshold", 1, 100, func(p *CodexModelQualityPolicy, n int) { p.LowQualityConsecutiveThreshold = n }},
 		{"low quality cooldown", 60, 86400, func(p *CodexModelQualityPolicy, n int) { p.LowQualityCooldownSeconds = n }},
-		{"replacement check delay", 60, 86400, func(p *CodexModelQualityPolicy, n int) { p.ReplacementCheckDelaySeconds = n }},
+		{"replacement check delay", 0, 86400, func(p *CodexModelQualityPolicy, n int) { p.ReplacementCheckDelaySeconds = n }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

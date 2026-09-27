@@ -28,11 +28,7 @@ var proxyBillingCurrencyCountries = map[string]string{
 }
 
 func normalizeProxyRegionCountry(raw string) string {
-	value := strings.ToUpper(strings.TrimSpace(raw))
-	if len(value) != 2 || value[0] < 'A' || value[0] > 'Z' || value[1] < 'A' || value[1] > 'Z' {
-		return ""
-	}
-	return value
+	return CanonicalProxyCountry(raw)
 }
 
 func ValidateProxyRegionExtra(extra map[string]any) error {
@@ -96,14 +92,36 @@ func (a *Account) ProxyRegionCountry() (string, error) {
 	}
 }
 
+// ProxyRegionFallbackCountry 返回账号地区没有可用代理时优先尝试的默认代理地区；
+// 手动指定或关闭地区时不参与选路。
+func (a *Account) ProxyRegionFallbackCountry() string {
+	if a == nil {
+		return ""
+	}
+	mode, _ := a.Extra[ProxyRegionModeExtraKey].(string)
+	if mode = strings.TrimSpace(mode); mode == "manual" || mode == "off" {
+		return ""
+	}
+	fallback, _ := a.Extra[ProxyRegionFallbackCountryExtraKey].(string)
+	return normalizeProxyRegionCountry(fallback)
+}
+
 func normalizeProxyRegionExtra(extra map[string]any) {
 	if mode, ok := extra[ProxyRegionModeExtraKey].(string); ok {
 		extra[ProxyRegionModeExtraKey] = strings.TrimSpace(mode)
 	}
 	if country, ok := extra[ProxyRegionCountryExtraKey].(string); ok {
-		extra[ProxyRegionCountryExtraKey] = strings.ToUpper(strings.TrimSpace(country))
+		extra[ProxyRegionCountryExtraKey] = canonicalProxyRegionExtraCountry(country)
 	}
 	if fallback, ok := extra[ProxyRegionFallbackCountryExtraKey].(string); ok {
-		extra[ProxyRegionFallbackCountryExtraKey] = strings.ToUpper(strings.TrimSpace(fallback))
+		extra[ProxyRegionFallbackCountryExtraKey] = canonicalProxyRegionExtraCountry(fallback)
 	}
+}
+
+// 可识别的别名存为两位代码；无法识别的值原样保留，交给校验返回明确错误。
+func canonicalProxyRegionExtraCountry(raw string) string {
+	if country := normalizeProxyRegionCountry(raw); country != "" {
+		return country
+	}
+	return strings.ToUpper(strings.TrimSpace(raw))
 }

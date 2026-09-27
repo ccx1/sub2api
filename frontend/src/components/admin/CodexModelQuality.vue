@@ -1,7 +1,7 @@
 <template>
   <section class="card min-w-0 space-y-5 p-5" aria-labelledby="codex-model-quality-title">
     <header>
-      <h2 id="codex-model-quality-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexModelQuality.title') }}</h2>
+      <h2 id="codex-model-quality-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexModelQuality.policyTitle') }}</h2>
       <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('codexModelQuality.description') }}</p>
     </header>
     <p v-if="loading" role="status" class="text-sm text-gray-500">{{ t('codexModelQuality.loading') }}</p>

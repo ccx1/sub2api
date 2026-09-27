@@ -372,18 +372,20 @@ describe('BulkEditAccountModal', () => {
       })
     })
 
-    it('submits normalized selected models and cache creation billing', async () => {
+    it('submits normalized selected models, cache creation billing and 403 auto-disable', async () => {
       const wrapper = mountModal(oauthProps)
       await enableBPS(wrapper)
       wrapper.get('[data-testid="bulk-excel-bps-model-selection"]')
         .getComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', [' gpt-6-sol ', 'gpt-6-astra', 'gpt-6-sol', ' '])
       await wrapper.get('[data-testid="bulk-excel-bps-cache-creation-as-input"]').setValue(true)
+      await wrapper.get('[data-testid="bulk-excel-bps-auto-disable-on-403"]').setValue(true)
       await submit(wrapper)
       expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
         extra: {
           ...defaultExtra,
           openai_excel_bps_models: ['gpt-6-sol', 'gpt-6-astra'],
-          openai_excel_bps_cache_creation_as_input: true
+          openai_excel_bps_cache_creation_as_input: true,
+          openai_excel_bps_auto_disable_on_403: true
         }
       })
     })
@@ -398,7 +400,9 @@ describe('BulkEditAccountModal', () => {
       expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
         extra: {
           ...defaultExtra,
-          openai_excel_bps_models: allModels ? null : []
+          openai_excel_bps_models: allModels ? null : [],
+          // 全模型 BPS 与打票互斥，批量开启时同时关闭打票。
+          ...(allModels ? { codex_ticket_enabled: false } : {})
         }
       })
     })

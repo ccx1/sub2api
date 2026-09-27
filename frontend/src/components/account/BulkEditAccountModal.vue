@@ -2204,6 +2204,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.openai_excel_bps_403_target_group_id = excelBPSEnabled.value && excelBPSAutoMoveOn403.value
       ? Number(excelBPS403TargetGroupID.value)
       : null
+    // 全模型 BPS 与打票互斥；关闭 BPS 不自动恢复打票。
+    if (excelBPSEnabled.value && excelBPSAllModels.value) {
+      extra.codex_ticket_enabled = false
+    }
   }
 
   if (enableOpenAIPassthrough.value) {

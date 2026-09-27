@@ -2,6 +2,7 @@ package basispoints
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -51,6 +52,9 @@ func TestUnsupportedImageFormsReturnActionableErrors(t *testing.T) {
 			}
 			if name == "base64" && (!strings.Contains(err.Error(), "HTTPS image URL") || !strings.Contains(err.Error(), "disable Basispoints")) {
 				t.Fatalf("base64 rejection lacks a remedy: %v", err)
+			}
+			if errors.Is(err, ErrInlineImage) != (name == "base64") {
+				t.Fatalf("only base64 images may be routed to the relay: %v", err)
 			}
 		})
 	}

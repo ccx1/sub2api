@@ -210,16 +210,61 @@ func TestCodexModelQualitySnapshotWaitsForNewTicketInsteadOfReusingResult(t *tes
 	next := *ticket
 	next.CapturedAt = time.Now()
 	ready := next.CapturedAt.Add(time.Duration(policy.ReplacementCheckDelaySeconds) * time.Second)
+	score := 91.0
+	record.Status.CapabilityScore = &score
 	for _, previousStatus := range []string{"passed", "suspect", "quarantined", "inconclusive"} {
-		record.Status.Status = previousStatus
+		record.Status.Status, record.Status.Reason = previousStatus, "capability_failed"
 		displayed := codexModelQualityDisplayStatus(record, repo.account, &next, job.config, policy)
-		require.Equal(t, "pending", displayed.Status, previousStatus)
-		require.Equal(t, "not_checked", displayed.Reason, previousStatus)
+		// The last conclusion stays visible but is marked as belonging to the
+		// replaced ticket, so it can no longer gate the replacement ticket.
+		require.Equal(t, previousStatus, displayed.Status, previousStatus)
+		require.True(t, displayed.TicketReplaced, previousStatus)
+		require.Equal(t, &score, displayed.CapabilityScore, previousStatus)
+		require.False(t, CodexModelQualityFailure(displayed), previousStatus)
 		require.False(t, displayed.BaselineReused)
 		require.Equal(t, &ready, displayed.NextCheckAt)
 	}
+	record.Status.Status = "running"
+	displayed := codexModelQualityDisplayStatus(record, repo.account, &next, job.config, policy)
+	require.Equal(t, "pending", displayed.Status)
+	require.Equal(t, "not_checked", displayed.Reason)
+	require.False(t, displayed.TicketReplaced)
+	require.Nil(t, displayed.CapabilityScore)
+
+	record.Status.Status = "inconclusive"
 	backoff := ready.Add(time.Minute)
 	record.Status.NextCheckAt = &backoff
-	displayed := codexModelQualityDisplayStatus(record, repo.account, &next, job.config, policy)
-	require.Equal(t, &backoff, displayed.NextCheckAt)
+	displayed = codexModelQualityDisplayStatus(record, repo.account, &next, job.config, policy)
+	require.Equal(t, &ready, displayed.NextCheckAt, "the old ticket's retry backoff does not delay its replacement")
+}
+
+func TestCodexModelQualitySchedulingKnobsDoNotInvalidateResults(t *testing.T) {
+	svc, repo, policy, ticket := codexQualitySnapshotFixture(t, false)
+	job, reason := svc.prepareCodexModelQuality(context.Background(), repo.account, ticket.Model, policy)
+	require.NotNil(t, job, reason)
+	status := qualityStatusForJob(job)
+	status.Status, status.Reason = "passed", "capability_passed"
+	record := &CodexModelQualityRecord{Status: status, Scope: job.scope, Policy: job.policyHash}
+
+	tuned := policy
+	tuned.Concurrency, tuned.AccountConcurrency = 50, 2
+	tuned.ModelPriorities = map[string]int{ticket.Model: 9}
+	tuned.RetryIntervalSeconds, tuned.ReplacementCheckDelaySeconds, tuned.IntervalSeconds = 60, 0, 600
+	require.Equal(t, codexModelQualityPolicyHash(policy), codexModelQualityPolicyHash(tuned))
+	displayed := codexModelQualityDisplayStatus(record, repo.account, ticket, job.config, tuned)
+	require.Equal(t, "passed", displayed.Status)
+
+	// Records written before scheduling knobs were excluded stay valid while
+	// those knobs are unchanged.
+	record.Policy = codexModelQualityLegacyPolicyHash(policy)
+	require.Equal(t, "passed", codexModelQualityDisplayStatus(record, repo.account, ticket, job.config, policy).Status)
+	record.Policy = codexModelQualityConcurrencyFreePolicyHash(policy)
+	require.Equal(t, "passed", codexModelQualityDisplayStatus(record, repo.account, ticket, job.config, policy).Status)
+
+	judged := policy
+	judged.ReasoningEffort = "high"
+	record.Policy = job.policyHash
+	displayed = codexModelQualityDisplayStatus(record, repo.account, ticket, job.config, judged)
+	require.Equal(t, "stale", displayed.Status)
+	require.Equal(t, "passed", displayed.PreviousStatus)
 }

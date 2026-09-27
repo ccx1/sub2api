@@ -10,6 +10,7 @@ import { i18n } from '@/i18n'
 import {
   checkUpdates as checkUpdatesAPI,
   type VersionInfo,
+  type VersionSourceInfo,
   type ReleaseInfo
 } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
@@ -43,6 +44,9 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  const ranxiVersionInfo = ref<VersionSourceInfo | null>(null)
+  const versionWarning = ref('')
+  const versionCached = ref(false)
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -249,6 +253,8 @@ export const useAppStore = defineStore('app', () => {
         has_update: hasUpdate.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
+        ranxi: ranxiVersionInfo.value || undefined,
+        warning: versionWarning.value || undefined,
         cached: true
       }
     }
@@ -266,10 +272,20 @@ export const useAppStore = defineStore('app', () => {
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
-      versionLoaded.value = true
+      ranxiVersionInfo.value = data.ranxi || null
+      versionWarning.value = data.warning || ''
+      versionCached.value = data.cached
+      versionLoaded.value = !data.warning && !data.ranxi?.warning
       return data
     } catch (error) {
       console.error('Failed to fetch version:', error)
+      versionWarning.value = i18n.global.t('version.checkFailed')
+      versionCached.value = !!latestVersion.value
+      if (ranxiVersionInfo.value) {
+        ranxiVersionInfo.value = { ...ranxiVersionInfo.value,
+          cached: !!ranxiVersionInfo.value.latest_version, warning: versionWarning.value }
+      }
+      versionLoaded.value = false
       return null
     } finally {
       versionLoading.value = false
@@ -282,6 +298,9 @@ export const useAppStore = defineStore('app', () => {
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    ranxiVersionInfo.value = null
+    versionWarning.value = ''
+    versionCached.value = false
   }
 
   // ==================== Public Settings Management ====================
@@ -372,6 +391,7 @@ export const useAppStore = defineStore('app', () => {
         channel_monitor_default_interval_seconds: 60,
         available_channels_enabled: false,
         subscription_enabled: true,
+        shared_pool_enabled: true,
         payment_balance_disabled: false,
         model_plaza_enabled: false,
         model_plaza_require_auth: false,
@@ -456,6 +476,9 @@ export const useAppStore = defineStore('app', () => {
     cachedPublicSettings,
 
     // Version state
+    ranxiVersionInfo,
+    versionWarning,
+    versionCached,
     versionLoaded,
     versionLoading,
     currentVersion,

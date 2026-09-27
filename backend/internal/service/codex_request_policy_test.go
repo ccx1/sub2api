@@ -132,6 +132,103 @@ func TestStripCodexRequestBodyPolicyRemovesInstructionReminder(t *testing.T) {
 	}
 }
 
+func TestApplyCodexRequestBodyPolicyPathPlaceholder(t *testing.T) {
+	// cwd carries an absolute path that leaks the OS username; placeholder mode
+	// must replace it while leaving sibling elements intact.
+	body := []byte(`{"input":[{"type":"message","content":"<environment_context> <cwd>/home/zhangsan/secret-project</cwd> <shell>bash</shell></environment_context>"}]}`)
+
+	policy := DefaultCodexRequestStrategyPolicy()
+	policy.RegionMode = CodexRequestRegionPreserve
+	policy.TimeContextMode = CodexRequestTimeContextPreserve
+	policy.PathContextMode = CodexRequestPathContextPlaceholder
+	policy.PathPlaceholder = "/workspace"
+
+	rewritten, changed, err := ApplyCodexRequestBodyPolicy(body, policy)
+	if err != nil || !changed {
+		t.Fatalf("placeholder mode did not rewrite cwd: changed=%v err=%v", changed, err)
+	}
+	got := string(rewritten)
+	if strings.Contains(got, "zhangsan") || strings.Contains(got, "secret-project") {
+		t.Fatalf("cwd path leaked after placeholder rewrite: %s", got)
+	}
+	if !strings.Contains(got, "<cwd>/workspace</cwd>") {
+		t.Fatalf("placeholder not applied: %s", got)
+	}
+	if !strings.Contains(got, "<shell>bash</shell>") {
+		t.Fatalf("placeholder rewrite corrupted sibling elements: %s", got)
+	}
+}
+
+func TestApplyCodexRequestBodyPolicyPathPlaceholderMultipleEnvironments(t *testing.T) {
+	// Two environment_context blocks; both cwd values must be replaced.
+	body := []byte(`{"input":[{"type":"message","content":"<environment_context><cwd>/home/alice/one</cwd></environment_context><environment_context><cwd>/srv/bob/two</cwd></environment_context>"}]}`)
+	policy := DefaultCodexRequestStrategyPolicy()
+	policy.RegionMode = CodexRequestRegionPreserve
+	policy.TimeContextMode = CodexRequestTimeContextPreserve
+	policy.PathContextMode = CodexRequestPathContextPlaceholder
+	policy.PathPlaceholder = "/workspace"
+	rewritten, changed, err := ApplyCodexRequestBodyPolicy(body, policy)
+	if err != nil || !changed {
+		t.Fatalf("multi-env placeholder did not change: changed=%v err=%v", changed, err)
+	}
+	got := string(rewritten)
+	if containsAnyCodex(got, "alice", "bob", "one", "two") {
+		t.Fatalf("a cwd path leaked: %s", got)
+	}
+	if strings.Count(got, "<cwd>/workspace</cwd>") != 2 {
+		t.Fatalf("expected 2 placeholder cwds: %s", got)
+	}
+}
+
+func TestApplyCodexRequestBodyPolicyPathPlaceholderPreservesOrdinaryText(t *testing.T) {
+	// A <cwd> tag in ordinary user prose (outside environment_context) must not
+	// be rewritten: only Codex environment blocks are targeted.
+	body := []byte(`{"input":"Here is an example: <cwd>/home/zhangsan/notes</cwd> keep it."}`)
+	policy := DefaultCodexRequestStrategyPolicy()
+	policy.RegionMode = CodexRequestRegionPreserve
+	policy.TimeContextMode = CodexRequestTimeContextPreserve
+	policy.PathContextMode = CodexRequestPathContextPlaceholder
+	policy.PathPlaceholder = "/workspace"
+	rewritten, changed, err := ApplyCodexRequestBodyPolicy(body, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed || string(rewritten) != string(body) {
+		t.Fatalf("ordinary user text with cwd tag was rewritten: changed=%v body=%s", changed, rewritten)
+	}
+}
+
+func TestApplyCodexRequestBodyPolicyPathPreserveByDefault(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","content":"<environment_context><cwd>/home/zhangsan/x</cwd></environment_context>"}]}`)
+	policy := DefaultCodexRequestStrategyPolicy()
+	policy.RegionMode = CodexRequestRegionPreserve
+	policy.TimeContextMode = CodexRequestTimeContextPreserve
+	rewritten, changed, err := ApplyCodexRequestBodyPolicy(body, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed || !strings.Contains(string(rewritten), "<cwd>/home/zhangsan/x</cwd>") {
+		t.Fatalf("default path mode must preserve cwd: changed=%v body=%s", changed, rewritten)
+	}
+}
+
+func TestValidateCodexRequestStrategyPolicyRejectsBadPathPlaceholder(t *testing.T) {
+	policy := DefaultCodexRequestStrategyPolicy()
+	policy.PathContextMode = CodexRequestPathContextPlaceholder
+	policy.PathPlaceholder = "<bad>"
+	if err := ValidateCodexRequestStrategyPolicy(policy); err == nil {
+		t.Fatal("expected rejection of placeholder containing markup")
+	}
+	policy.PathPlaceholder = ""
+	norm := normalizeCodexRequestStrategyPolicy(policy)
+	if norm.PathPlaceholder != CodexRequestPathDefaultPlaceholder {
+		t.Fatalf("empty placeholder should normalize to default, got %q", norm.PathPlaceholder)
+	}
+	if err := ValidateCodexRequestStrategyPolicy(norm); err != nil {
+		t.Fatalf("normalized default placeholder should validate: %v", err)
+	}
+}
+
 func TestValidateCodexRequestStrategyPolicyRejectsUnsafeOverrides(t *testing.T) {
 	policy := DefaultCodexRequestStrategyPolicy()
 	policy.RegionMode = CodexRequestRegionOverride

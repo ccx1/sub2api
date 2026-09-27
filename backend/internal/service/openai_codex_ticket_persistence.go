@@ -166,6 +166,7 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		return false
 	}
 	s.openaiCodexTickets.Store(key, replacement)
+	s.kickCodexModelQualityForNewTicket(account, copyTicket.Model)
 	return true
 }
 

@@ -62,7 +62,7 @@ describe('CodexModelQuality policy', () => {
   it.each([
     ['low_quality_consecutive_threshold', 0], ['low_quality_consecutive_threshold', 101],
     ['low_quality_consecutive_threshold', 2.5], ['low_quality_cooldown_seconds', 59],
-    ['low_quality_cooldown_seconds', 86401], ['replacement_check_delay_seconds', 59],
+    ['low_quality_cooldown_seconds', 86401], ['replacement_check_delay_seconds', -1],
     ['replacement_check_delay_seconds', 86401]
   ])('blocks an invalid recovery policy value %s=%s', async (key, value) => {
     const page = render()
@@ -151,5 +151,26 @@ describe('CodexModelQuality policy', () => {
     finish(policy())
     await flushPromises()
     expect(page.get<HTMLButtonElement>('[data-testid="quality-save"]').element.disabled).toBe(false)
+  })
+})
+
+describe('CodexModelQuality canary fast mode', () => {
+  it('saves exact matching and canary-only mode, and drops them when unchecked', async () => {
+    mocks.load.mockResolvedValue({ ...policy(), canary_enabled: true, canary_prompt: 'candy', canary_expected: ['21'] })
+    const page = render()
+    await flushPromises()
+    await page.get('[data-testid="quality-canary-exact"]').setValue(true)
+    await page.get('[data-testid="quality-canary-only"]').setValue(true)
+    await page.get('[data-testid="quality-replacement_check_delay_seconds"]').setValue(0)
+    await page.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({ canary_match: 'exact', canary_only: true, replacement_check_delay_seconds: 0 }))
+    await page.get('[data-testid="quality-canary-exact"]').setValue(false)
+    await page.get('[data-testid="quality-canary-only"]').setValue(false)
+    await page.get('form').trigger('submit')
+    await flushPromises()
+    const saved = mocks.save.mock.lastCall![0] as CodexModelQualityPolicy
+    expect(saved.canary_match).toBeUndefined()
+    expect(saved.canary_only).toBeUndefined()
   })
 })

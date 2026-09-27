@@ -147,6 +147,9 @@ func RegisterAdminRoutes(
 		// 异常消耗冻结
 		registerSpendGuardRoutes(admin, h)
 
+		// 代理池质量巡检
+		registerProxyQualityRoutes(admin, h)
+
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
@@ -163,6 +166,18 @@ func registerSpendGuardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		spendGuard.PUT("/settings", h.Admin.SpendGuard.UpdateSettings)
 		spendGuard.GET("/events", h.Admin.SpendGuard.Events)
 		spendGuard.POST("/keys/:id/unfreeze", h.Admin.SpendGuard.Unfreeze)
+	}
+}
+
+func registerProxyQualityRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	proxyQuality := admin.Group("/proxy-quality")
+	{
+		proxyQuality.GET("", h.Admin.ProxyQuality.Overview)
+		proxyQuality.GET("/settings", h.Admin.ProxyQuality.GetSettings)
+		proxyQuality.PUT("/settings", h.Admin.ProxyQuality.UpdateSettings)
+		proxyQuality.GET("/events", h.Admin.ProxyQuality.Events)
+		proxyQuality.POST("/run", h.Admin.ProxyQuality.RunNow)
+		proxyQuality.POST("/proxies/:id/reset", h.Admin.ProxyQuality.Reset)
 	}
 }
 

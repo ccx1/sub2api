@@ -80,6 +80,10 @@ const (
 var (
 	codexRequestEnvironmentContextPattern = regexp.MustCompile(`(?si)<environment_context\b[^>]*>.*?</environment_context>`)
 	codexRequestTimeContextElementPattern = regexp.MustCompile(`(?si)<(?:timezone|current_date|current_time_reminder)\b[^>]*>.*?</(?:timezone|current_date|current_time_reminder)>`)
+	// Codex renders one <cwd>ABS_PATH</cwd> per environment inside the
+	// environment_context block; capture the open/close tags and swap only the
+	// inner absolute path so multi-environment turns are all covered.
+	codexRequestCwdElementPattern = regexp.MustCompile(`(?si)(<cwd\b[^>]*>).*?(</cwd>)`)
 )
 
 // ApplyCodexRequestHeaderPolicy applies region and compliance policy to an
@@ -161,16 +165,97 @@ func ApplyCodexRequestBodyPolicy(body []byte, policy CodexRequestStrategyPolicy)
 		changed = regionChanged
 	}
 	switch policy.TimeContextMode {
-	case CodexRequestTimeContextPreserve:
-		return body, changed, nil
 	case CodexRequestTimeContextOverride:
 		rewritten, timeChanged, err := RewriteOpenAIRequestTimezone(body, policy.Timezone)
-		return rewritten, changed || timeChanged, err
+		if err != nil {
+			return nil, false, err
+		}
+		body, changed = rewritten, changed || timeChanged
 	case CodexRequestTimeContextStrip:
 		stripped, timeChanged, err := stripCodexRequestTimezone(body)
-		return stripped, changed || timeChanged, err
+		if err != nil {
+			return nil, false, err
+		}
+		body, changed = stripped, changed || timeChanged
+	}
+	if policy.PathContextMode == CodexRequestPathContextPlaceholder {
+		rewritten, pathChanged, err := rewriteCodexRequestCwd(body, policy.PathPlaceholder)
+		if err != nil {
+			return nil, false, err
+		}
+		body, changed = rewritten, changed || pathChanged
+	}
+	return body, changed, nil
+}
+
+// rewriteCodexRequestCwd replaces the absolute path inside every <cwd> element
+// of the Codex environment_context with a fixed placeholder. It mirrors the
+// timezone rewrite: it only touches known prompt-carrying channels and never
+// invents a <cwd> element where none exists.
+func rewriteCodexRequestCwd(body []byte, placeholder string) ([]byte, bool, error) {
+	placeholder = strings.TrimSpace(placeholder)
+	if placeholder == "" {
+		placeholder = CodexRequestPathDefaultPlaceholder
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return body, false, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return body, false, nil
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return body, false, nil
+	}
+	if changed := rewriteCodexRequestCwdValue(&value, nil, placeholder); !changed {
+		return body, false, nil
+	}
+	rewritten, err := json.Marshal(value)
+	if err != nil {
+		return nil, false, err
+	}
+	return rewritten, true, nil
+}
+
+func rewriteCodexRequestCwdValue(value *any, path []string, placeholder string) bool {
+	switch typed := (*value).(type) {
+	case string:
+		if !isOpenAIRequestTimezoneTextPath(path) {
+			return false
+		}
+		rewritten := codexRequestEnvironmentContextPattern.ReplaceAllStringFunc(typed, func(block string) string {
+			return codexRequestCwdElementPattern.ReplaceAllString(block, "${1}"+placeholder+"${2}")
+		})
+		if rewritten == typed {
+			return false
+		}
+		*value = rewritten
+		return true
+	case []any:
+		changed := false
+		for i := range typed {
+			item := any(typed[i])
+			if rewriteCodexRequestCwdValue(&item, path, placeholder) {
+				typed[i] = item
+				changed = true
+			}
+		}
+		return changed
+	case map[string]any:
+		changed := false
+		for key, item := range typed {
+			nextPath := append(append([]string(nil), path...), key)
+			if rewriteCodexRequestCwdValue(&item, nextPath, placeholder) {
+				typed[key] = item
+				changed = true
+			}
+		}
+		return changed
 	default:
-		return body, changed, nil
+		return false
 	}
 }
 

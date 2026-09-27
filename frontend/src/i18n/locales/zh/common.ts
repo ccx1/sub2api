@@ -185,6 +185,8 @@ export default {
     accounts: '账号管理',
     plugins: '插件管理',
     proxies: 'IP管理',
+    proxyPool: '代理池管理',
+    proxyQuality: '质量管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
     promoCodes: '优惠码',
@@ -217,6 +219,7 @@ export default {
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
     spendGuard: '异常消耗冻结',
+    strategyManagement: '策略管理',
   },
 
   userGuide: {

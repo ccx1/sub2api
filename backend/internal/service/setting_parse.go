@@ -209,6 +209,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// Subscription feature (default enabled; opt-out)
 		SettingKeySubscriptionEnabled: "true",
 
+		// Shared account pool user entry (default enabled; opt-out)
+		SettingKeySharedPoolEnabled: "true",
+
 		// Model plaza feature (default disabled; opt-in, public unless require_auth)
 		SettingKeyModelPlazaEnabled:       "false",
 		SettingKeyModelPlazaRequireAuth:   "false",
@@ -860,6 +863,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Subscription feature (default: enabled; only an explicit false disables)
 	result.SubscriptionEnabled = !isFalseSettingValue(settings[SettingKeySubscriptionEnabled])
+
+	// Shared account pool user entry (default: enabled; only an explicit false disables)
+	result.SharedPoolEnabled = !isFalseSettingValue(settings[SettingKeySharedPoolEnabled])
 
 	// Model plaza feature (default: disabled; strict true)
 	result.ModelPlazaEnabled = settings[SettingKeyModelPlazaEnabled] == "true"

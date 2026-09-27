@@ -282,6 +282,8 @@ export interface PublicSettings {
   pelican_showcase_enabled?: boolean
   /** When false, the whole user-facing subscription surface is hidden. Default true. */
   subscription_enabled: boolean
+  /** When false, the user-facing shared account pool entry and API are closed. Default true. */
+  shared_pool_enabled: boolean
   /** Mirrors payment config BALANCE_PAYMENT_DISABLED; true = balance top-up closed (subscription-only site). */
   payment_balance_disabled: boolean
   model_plaza_enabled: boolean
@@ -802,6 +804,89 @@ export interface SpendGuardEvent {
   reason: string
 }
 
+export type ProxyQualityGuardCheckMode = 'basic' | 'full'
+export type ProxyQualityGuardPreUse = 'off' | 'prefer' | 'strict'
+export type ProxyQualityGuardState = 'active' | 'disabled' | 'deleted'
+
+export interface ProxyQualityGuardSettings {
+  enabled: boolean
+  interval_seconds: number
+  check_interval_minutes: number
+  check_mode: ProxyQualityGuardCheckMode
+  min_score: number
+  fail_on_challenge: boolean
+  failure_threshold: number
+  runtime_failure_threshold: number
+  disable_minutes: number
+  max_rounds: number
+  auto_delete: boolean
+  pre_use_check: ProxyQualityGuardPreUse
+  include_fixed_bound: boolean
+  stable_reset_hours: number
+  max_checks_per_run: number
+  concurrency: number
+}
+
+export interface ProxyQualityGuardItem {
+  proxy_id: number
+  name: string
+  protocol: string
+  host: string
+  port: number
+  group_name?: string
+  proxy_status: string
+  state: ProxyQualityGuardState
+  rounds: number
+  consecutive_failures: number
+  disabled_until?: string | null
+  last_checked_at?: string | null
+  last_success_at?: string | null
+  last_error: string
+  quality_score?: number | null
+  quality_grade: string
+  quality_status: string
+  latency_ms?: number | null
+  ip_address?: string
+  country_code?: string
+  fixed_bound_count: number
+  dynamic_bound_count: number
+  pre_use_ready: boolean
+  managed: boolean
+}
+
+export interface ProxyQualityGuardSummary {
+  total: number
+  healthy: number
+  pending: number
+  failing: number
+  disabled: number
+}
+
+export interface ProxyQualityGuardOverview {
+  settings: ProxyQualityGuardSettings
+  summary: ProxyQualityGuardSummary
+  items: ProxyQualityGuardItem[]
+  last_run?: string | null
+}
+
+export interface ProxyQualityGuardEvent {
+  id: number
+  proxy_id: number
+  proxy_name: string
+  action: 'check_failed' | 'disabled' | 'restored' | 'deleted' | 'delete_skipped' | 'reset'
+  round: number
+  reason: string
+  created_at: string
+}
+
+export interface ProxyQualityGuardRunResult {
+  checked: number
+  failed: number
+  disabled: number
+  restored: number
+  deleted: number
+}
+
 export interface CreateApiKeyRequest {
   name: string
   group_id?: number | null
@@ -1316,9 +1401,17 @@ export interface Account {
     route_affinity_status?: 'off' | 'unknown' | 'available' | 'unavailable'
     route_expires_at?: string
     route_affinity_connections?: number
+    route_node?: string
+    route_node_country?: string
+    route_node_region?: string
+    route_macro_region?: 'NA' | 'SA' | 'EU' | 'APAC' | string
+    route_egress_country?: string
+    route_cross_region?: boolean
     quality_status?: 'pending' | 'running' | 'passed' | 'suspect' | 'inconclusive' | 'quarantined' | 'skipped' | 'stale'
     quality_reason?: string
     quality_checked_at?: string
+    quality_next_check_at?: string
+    quality_ticket_replaced?: boolean
     quality_paused?: boolean
   }>
   codex_ticket_global_enabled?: boolean

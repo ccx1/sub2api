@@ -34,7 +34,8 @@ func TestAdminServiceBulkUpdateAccounts_ExcelBPSSettings(t *testing.T) {
 		{
 			name:  "all models",
 			extra: map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": nil},
-			want:  map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": nil},
+			// 全模型 BPS 与打票互斥。
+			want: map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": nil, OpenAICodexTicketEnabledExtraKey: false},
 		},
 		{
 			name:  "empty model list",

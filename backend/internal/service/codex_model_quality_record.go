@@ -15,12 +15,35 @@ func codexModelQualityBaseRecord(ctx context.Context, store CodexModelQualitySto
 	if previous != nil {
 		*record = *previous
 	}
+	status.History, status.TicketReplaced, status.PreviousStatus = nil, false, ""
 	record.Status, record.Scope, record.Policy = status, job.scope, job.policyHash
 	return record
 }
 
+// appendCodexModelQualityHistory records a finished check, newest first.
+// Running placeholders are not history; they are replaced by the final result.
+func appendCodexModelQualityHistory(record *CodexModelQualityRecord, status CodexModelQualityStatus) {
+	if record == nil || status.Status == "running" || status.CheckedAt == nil {
+		return
+	}
+	entry := CodexModelQualityHistoryEntry{Status: status.Status, Reason: status.Reason, Source: status.Source,
+		CheckedAt: status.CheckedAt, DurationMS: status.DurationMS, CapabilityScore: status.CapabilityScore,
+		ModelIdentity: status.ModelIdentity, TicketCapturedAt: status.TicketCapturedAt}
+	history := make([]CodexModelQualityHistoryEntry, 0, min(len(record.History)+1, codexModelQualityHistoryLimit))
+	history = append(history, entry)
+	for _, item := range record.History {
+		if len(history) >= codexModelQualityHistoryLimit {
+			break
+		}
+		history = append(history, item)
+	}
+	record.History = history
+}
+
 func saveCodexModelQuality(ctx context.Context, store CodexModelQualityStore, job *codexModelQualityJob, status CodexModelQualityStatus) bool {
-	return saveCodexModelQualityRecord(ctx, store, job, codexModelQualityBaseRecord(ctx, store, job, status))
+	record := codexModelQualityBaseRecord(ctx, store, job, status)
+	appendCodexModelQualityHistory(record, status)
+	return saveCodexModelQualityRecord(ctx, store, job, record)
 }
 
 func saveCodexModelQualityRecord(ctx context.Context, store CodexModelQualityStore, job *codexModelQualityJob, record *CodexModelQualityRecord) bool {
@@ -43,6 +66,7 @@ func saveCodexModelQualityRecord(ctx context.Context, store CodexModelQualitySto
 
 func (s *OpenAIGatewayService) codexModelQualityRecord(ctx context.Context, store CodexModelQualityStore, job *codexModelQualityJob, status CodexModelQualityStatus, now time.Time) *CodexModelQualityRecord {
 	record := codexModelQualityBaseRecord(ctx, store, job, status)
+	appendCodexModelQualityHistory(record, status)
 	if record == nil || job.diagnostic {
 		return record
 	}

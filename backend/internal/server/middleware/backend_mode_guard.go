@@ -10,6 +10,8 @@ import (
 )
 
 // BackendModeUserGuard blocks non-admin users from accessing user routes when backend mode is enabled.
+// Observers may log in during backend mode, so they are let through only for the explicit
+// allowlist below; every other user route stays admin-only.
 // Must be placed AFTER JWT auth middleware so that the user role is available in context.
 func BackendModeUserGuard(settingService *service.SettingService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -18,7 +20,7 @@ func BackendModeUserGuard(settingService *service.SettingService) gin.HandlerFun
 			return
 		}
 		role, _ := GetUserRoleFromContext(c)
-		if role == service.RoleAdmin || (role == service.RoleObserver && observerOwnUsageRoute(c)) {
+		if role == service.RoleAdmin || (role == service.RoleObserver && (observerOwnUsageRoute(c) || backendModeObserverRouteAllowed(c.Request.Method, c.FullPath()))) {
 			c.Next()
 			return
 		}
@@ -38,6 +40,18 @@ func observerOwnUsageRoute(c *gin.Context) bool {
 	default:
 		return false
 	}
+}
+
+// backendModeObserverRouteAllowed mirrors ObserverAccountRouteAllowed: an explicit
+// capability allowlist keyed by method and registered route. Observers only need to
+// load their own profile after login; self-service features stay administrator-only.
+func backendModeObserverRouteAllowed(method, route string) bool {
+	_, ok := backendModeObserverRoutes[method+" "+route]
+	return ok
+}
+
+var backendModeObserverRoutes = map[string]struct{}{
+	"GET /api/v1/auth/me": {},
 }
 
 func backendModeAllowsAuthPath(path string) bool {

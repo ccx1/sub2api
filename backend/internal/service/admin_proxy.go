@@ -293,17 +293,23 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		return nil, err
 	}
 	probe := *proxy
+	result, exitInfo := runProxyQualityCheck(ctx, s.proxyProber, &probe)
+	s.saveProxyQualitySnapshot(ctx, &probe, result, exitInfo)
+	return result, nil
+}
 
+// runProxyQualityCheck 执行基础连通性与各上游目标检测，不写入缓存，供后台巡检复用。
+func runProxyQualityCheck(ctx context.Context, prober ProxyExitInfoProber, proxy *Proxy) (*ProxyQualityCheckResult, *ProxyExitInfo) {
 	result := &ProxyQualityCheckResult{
-		ProxyID:   id,
+		ProxyID:   proxy.ID,
 		Score:     100,
 		Grade:     "A",
 		CheckedAt: time.Now().Unix(),
-		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1),
+		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+2),
 	}
 
 	proxyURL := proxy.URL()
-	if s.proxyProber == nil {
+	if prober == nil {
 		result.Items = append(result.Items, ProxyQualityCheckItem{
 			Target:  "base_connectivity",
 			Status:  "fail",
@@ -311,11 +317,10 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		s.saveProxyQualitySnapshot(ctx, &probe, result, nil)
 		return result, nil
 	}
 
-	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
+	exitInfo, latencyMs, err := prober.ProbeProxy(ctx, proxyURL)
 	if err != nil {
 		result.Items = append(result.Items, ProxyQualityCheckItem{
 			Target:    "base_connectivity",
@@ -325,7 +330,6 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		s.saveProxyQualitySnapshot(ctx, &probe, result, nil)
 		return result, nil
 	}
 
@@ -354,12 +358,15 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		s.saveProxyQualitySnapshot(ctx, &probe, result, exitInfo)
-		return result, nil
+		return result, exitInfo
 	}
 
+	items := make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1)
+	items = append(items, runProxyQualityIPFMLocation(ctx, client, exitInfo.IP))
 	for _, target := range proxyQualityTargets {
-		item := runProxyQualityTarget(ctx, client, target)
+		items = append(items, runProxyQualityTarget(ctx, client, target))
+	}
+	for _, item := range items {
 		result.Items = append(result.Items, item)
 		switch item.Status {
 		case "pass":
@@ -374,8 +381,7 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	}
 
 	finalizeProxyQualityResult(result)
-	s.saveProxyQualitySnapshot(ctx, &probe, result, exitInfo)
-	return result, nil
+	return result, exitInfo
 }
 
 func runProxyQualityTarget(ctx context.Context, client *http.Client, target proxyQualityTarget) ProxyQualityCheckItem {
@@ -526,6 +532,10 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxy *
 	if result == nil {
 		return
 	}
+	s.saveProxyLatency(ctx, proxy.ID, buildProxyQualitySnapshot(proxy, result, exitInfo))
+}
+
+func buildProxyQualitySnapshot(proxy *Proxy, result *ProxyQualityCheckResult, exitInfo *ProxyExitInfo) *ProxyLatencyInfo {
 	score := result.Score
 	checkedAt := result.CheckedAt
 	info := &ProxyLatencyInfo{
@@ -551,7 +561,7 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxy *
 		info.Region = exitInfo.Region
 		info.City = exitInfo.City
 	}
-	s.saveProxyLatency(ctx, proxy.ID, info)
+	return info
 }
 
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {
@@ -630,12 +640,17 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 }
 
 func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) {
-	if s.proxyLatencyCache == nil || info == nil {
+	storeProxyLatency(ctx, s.proxyLatencyCache, proxyID, info)
+}
+
+// storeProxyLatency 在出口身份未变时保留上次质量检测结论，避免连通性探测覆盖质量分。
+func storeProxyLatency(ctx context.Context, cache ProxyLatencyCache, proxyID int64, info *ProxyLatencyInfo) {
+	if cache == nil || info == nil {
 		return
 	}
 
 	merged := *info
-	if latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID}); err == nil {
+	if latencies, err := cache.GetProxyLatencies(ctx, []int64{proxyID}); err == nil {
 		if existing := latencies[proxyID]; existing != nil && existing.ProxyIdentity == merged.ProxyIdentity {
 			if merged.QualityCheckedAt == nil &&
 				merged.QualityScore == nil &&
@@ -653,7 +668,7 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 		}
 	}
 
-	if err := s.proxyLatencyCache.SetProxyLatency(ctx, proxyID, &merged); err != nil {
+	if err := cache.SetProxyLatency(ctx, proxyID, &merged); err != nil {
 		logger.LegacyPrintf("service.admin", "Warning: store proxy latency cache failed: %v", err)
 	}
 }

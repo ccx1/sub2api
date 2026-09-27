@@ -185,6 +185,8 @@ export default {
     accounts: 'Accounts',
     plugins: 'Plugins',
     proxies: 'Proxies',
+    proxyPool: 'Proxy Pool',
+    proxyQuality: 'Quality Management',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',
@@ -217,6 +219,7 @@ export default {
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
     spendGuard: 'Spend Guard',
+    strategyManagement: 'Strategies',
   },
 
   userGuide: {

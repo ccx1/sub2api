@@ -19,6 +19,10 @@ export interface CodexModelQualityPolicy {
   canary_enabled?: boolean
   canary_prompt?: string
   canary_expected?: string[]
+  /** contains: 回答包含期望答案即通过；exact: 最终答案必须等于期望答案。 */
+  canary_match?: 'contains' | 'exact'
+  /** 只做金丝雀题，跳过能力题和指纹。 */
+  canary_only?: boolean
 }
 
 export const qualityCanaryLimits = { promptBytes: 4000, expectedCount: 5, expectedBytes: 200 }
@@ -44,6 +48,22 @@ export interface ModelQualityStatus {
   baseline_reused?: boolean
   consecutive_low_quality?: number
   quality_paused_until?: string
+  /** The shown conclusion belongs to a replaced ticket; the new ticket is waiting for its check. */
+  ticket_replaced?: boolean
+  /** Last finished status when the result was downgraded to stale. */
+  previous_status?: ModelQualityStatus['status']
+  history?: ModelQualityHistoryEntry[]
+}
+
+export interface ModelQualityHistoryEntry {
+  status: ModelQualityStatus['status']
+  reason: string
+  source: ModelQualityStatus['source']
+  checked_at?: string
+  duration_ms?: number
+  capability_score?: number
+  model_identity?: ModelQualityStatus['model_identity']
+  ticket_captured_at?: string
 }
 
 export interface CodexModelQualityDiagnosticItem {
@@ -67,7 +87,7 @@ export const qualityNumericFields = [
   { key: 'retry_interval_seconds', min: 60, max: 3600 },
   { key: 'low_quality_consecutive_threshold', min: 1, max: 100 },
   { key: 'low_quality_cooldown_seconds', min: 60, max: 86400 },
-  { key: 'replacement_check_delay_seconds', min: 60, max: 86400 }
+  { key: 'replacement_check_delay_seconds', min: 0, max: 86400 }
 ] as const
 
 export const modelPriorityRange = { min: 0, max: 100 } as const

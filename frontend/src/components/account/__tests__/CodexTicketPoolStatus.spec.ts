@@ -86,6 +86,34 @@ describe('CodexTicketPoolStatus', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['inconclusive', '模型质量检测：未完成'],
+    ['stale', '模型质量检测：结果已过期'],
+    ['pending', '模型质量检测：排队中'],
+    ['running', '模型质量检测：检测中']
+  ] as const)('distinguishes unfinished quality states (%s)', (quality_status, label) => {
+    const wrapper = render([ticket({ quality_status })])
+    const text = wrapper.get('[data-testid="ticket-quality-status"]').text()
+    expect(text).toContain(label)
+    expect(text).not.toContain('待确认')
+    wrapper.unmount()
+  })
+
+  it('shows when a queued check is expected to start', () => {
+    const next = new Date(Date.now() + 4 * 60000 + 10000).toISOString()
+    const wrapper = render([ticket({ quality_status: 'pending', quality_next_check_at: next })])
+    expect(wrapper.get('[data-testid="ticket-quality-status"]').text()).toContain('排队中，约 5 分钟后检测')
+    wrapper.unmount()
+  })
+
+  it('keeps the previous conclusion and marks a replaced ticket', () => {
+    const wrapper = render([ticket({ quality_status: 'quarantined', quality_reason: 'capability_failed', quality_ticket_replaced: true })])
+    const text = wrapper.get('[data-testid="ticket-quality-status"]').text()
+    expect(text).toContain('模型质量检测：不通过')
+    expect(wrapper.get('[data-testid="ticket-quality-replaced"]').text()).toContain('已换新票，待复测')
+    wrapper.unmount()
+  })
+
   it.each([undefined, null, -1, 1.5, NaN, Infinity])('does not invent inventory for an invalid or absent count %s', available_count => {
     const wrapper = render([{ model: 'gpt-6-astra', ready: true, blocked: false, remaining_seconds: 2520, using_standby: false, standby_ready: true, available_count } as TicketStatus])
     expect(wrapper.text()).toContain('主票')
@@ -118,6 +146,28 @@ describe('CodexTicketPoolStatus', () => {
   it.each([undefined, 'off'] as const)('hides route affinity for legacy or disabled settings (%s)', route_affinity_status => {
     const wrapper = render([ticket({ route_affinity_status, route_affinity_connections: 0 })])
     expect(wrapper.find('[data-testid="ticket-route-affinity"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['zh', 'DE', false, '采集出口 DE'],
+    ['zh', 'US', true, '采集出口 US'],
+    ['en', 'GB', false, 'Harvest egress GB'],
+    ['en', 'JP', true, 'Harvest egress JP'],
+  ] as const)('shows the compute node and flags only cross macro-region routes (%s, %s)', (locale, route_egress_country, route_cross_region, egress) => {
+    const wrapper = render([ticket({ route_node: 'unified-39', route_node_country: 'ES', route_node_region: 'Madrid',
+      route_macro_region: 'EU', route_egress_country, route_cross_region })], locale)
+    const row = wrapper.get('[data-testid="ticket-route-node"]')
+    expect(row.text()).toContain('unified-39')
+    expect(row.text()).toContain('ES Madrid · EU')
+    expect(row.get('[data-testid="route-egress-country"]').text()).toBe(egress)
+    expect(row.find('[data-testid="route-cross-region"]').exists()).toBe(route_cross_region)
+    wrapper.unmount()
+  })
+
+  it('hides the compute node row when __oailb carries no node', () => {
+    const wrapper = render([ticket({ route_affinity_status: 'available' })])
+    expect(wrapper.find('[data-testid="ticket-route-node"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

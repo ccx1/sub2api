@@ -84,4 +84,27 @@ describe('CodexModelQualityRecordModal', () => {
     await flushPromises()
     expect(page.get('[data-testid="codex-model-quality-diagnosis-reasons"]').text()).toContain('no_ticket')
   })
+
+  it('keeps the result list visible when only some models could not be scheduled', async () => {
+    const astra = status()
+    const sol = status({ model: 'gpt-5.6-sol', status: 'inconclusive', reason: 'network_error' })
+    mocks.load.mockResolvedValue([astra, sol])
+    mocks.diagnose.mockResolvedValue({
+      account_id: 41,
+      items: [
+        { model: astra.model, scheduled: true, reason: 'following', current: astra },
+        { model: sol.model, scheduled: false, reason: 'no_ticket', current: sol }
+      ]
+    })
+    const page = render()
+    await flushPromises()
+    await page.get('[data-testid="codex-model-quality-diagnose"]').trigger('click')
+    await flushPromises()
+    expect(page.get('[data-testid="codex-model-quality-diagnosis-reasons"]').text()).toContain('gpt-5.6-sol')
+    const results = page.findAll('[data-testid="quality-result"]')
+    expect(results).toHaveLength(2)
+    expect(results[0].text()).toContain('running:checking')
+    expect(results[1].text()).toContain('inconclusive:network_error')
+    page.unmount()
+  })
 })

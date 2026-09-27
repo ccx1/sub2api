@@ -1539,13 +1539,24 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 	return nil
 }
 
+// SetError 将账号标记为错误并停止调度。
+// 已被手动暂停调度（status=active 且 schedulable=false）的账号只记录错误信息，
+// 保持"暂停"状态，避免自动流程（token 刷新、账号测试等）把暂停账号改成"错误"。
 func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg string) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetStatus(service.StatusError).
-		SetErrorMessage(errorMsg).
-		SetSchedulable(false).
-		Save(ctx)
+	client := clientFromContext(ctx, r.client)
+	_, err := client.ExecContext(
+		ctx,
+		`UPDATE accounts SET
+			status = CASE WHEN status = $1 AND schedulable IS FALSE THEN status ELSE $2 END,
+			error_message = $3,
+			schedulable = FALSE,
+			updated_at = NOW()
+		WHERE id = $4 AND deleted_at IS NULL`,
+		service.StatusActive,
+		service.StatusError,
+		errorMsg,
+		id,
+	)
 	if err != nil {
 		return err
 	}

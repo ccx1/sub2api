@@ -46,6 +46,7 @@ func (s *OpenAIGatewayService) codexModelQualityStatuses(ctx context.Context, ac
 			status = record.Status
 			status.ConsecutiveLowQuality = record.ConsecutiveLowQuality
 			status.QualityPausedUntil = record.QualityPausedUntil
+			status.TicketReplaced, status.PreviousStatus = false, ""
 		}
 		ticket := s.lookupOpenAICodexTicketForConfig(account, model, cfg)
 		if !policy.Enabled {
@@ -59,9 +60,15 @@ func (s *OpenAIGatewayService) codexModelQualityStatuses(ctx context.Context, ac
 		} else if record != nil {
 			status = codexModelQualityDisplayStatus(record, account, ticket, cfg, policy)
 		}
+		if record != nil {
+			status.History = record.History
+		}
 		if policy.Enabled && schedule {
 			job, reason := s.prepareCodexModelQuality(ctx, account, model, policy)
 			if job == nil && !(status.Status == "quarantined" && reason == "no_ticket") {
+				if record != nil && status.PreviousStatus == "" && status.Status != "stale" && status.Status != "pending" && status.Status != "running" {
+					status.PreviousStatus = status.Status
+				}
 				status.Status, status.Reason, status.BaselineReused = "skipped", reason, false
 				if record != nil {
 					status.Status = "stale"

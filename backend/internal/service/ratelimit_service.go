@@ -573,6 +573,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		} else if statusCode >= 500 {
 			// 未启用自定义错误码时：仅记录5xx错误
 			slog.Warn("account_upstream_error", "account_id", account.ID, "status_code", statusCode)
+			// API Key 账号的单模型 503：只冷却 (账号, 模型)，由后台复检决定恢复或删除该模型。
+			if len(requestedModel) > 0 {
+				s.HandleUpstreamModelUnavailable(ctx, account, requestedModel[0], statusCode, responseBody)
+			}
 			shouldDisable = false
 		}
 	}

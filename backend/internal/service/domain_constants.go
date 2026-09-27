@@ -554,6 +554,13 @@ const (
 	// admin "site billing mode" selector. Defaults to true (opt-out feature).
 	SettingKeySubscriptionEnabled = "subscription_enabled"
 
+	// SettingKeySharedPoolEnabled is a DB-backed soft switch for the user-facing
+	// shared account pool: sidebar entry, /shared-pool route and the user
+	// /api/v1/shared-pool/* endpoints (403 when off). Accounts that are already
+	// assigned keep being scheduled and admin shared-pool management is unaffected.
+	// Defaults to true (opt-out feature).
+	SettingKeySharedPoolEnabled = "shared_pool_enabled"
+
 	// SettingKeyModelPlazaEnabled is a DB-backed soft switch for the Model Plaza page
 	// (public group/model pricing showcase). When false: the plaza endpoint returns 404
 	// and the header entry is hidden. Defaults to false (opt-in feature).
