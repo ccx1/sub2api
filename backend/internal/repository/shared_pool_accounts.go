@@ -6,8 +6,6 @@ import (
 	"errors"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -66,11 +64,8 @@ func (r *sharedPoolRepository) CreateSharedAccount(ctx context.Context, a *servi
 		return err
 	}
 	defer tx.Rollback()
-	for _, id := range a.GroupIDs {
-		g, e := tx.Group.Query().Where(dbgroup.IDEQ(id), dbgroup.DeletedAtIsNil()).ForShare().Only(ctx)
-		if e != nil || !sharedAccountDefaultGroupAllowed(groupEntityToService(g), a.Platform, a.Type, service.SharedPoolDispatchConsented(a)) {
-			return infraerrors.BadRequest("INVALID_SHARED_GROUP", "默认共享分组不可用或与账号不兼容")
-		}
+	if err = validateSharedInitialGroups(ctx, tx.Client(), a); err != nil {
+		return err
 	}
 	if err = createAccountRecord(ctx, tx.Client(), a); err != nil {
 		return err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -77,8 +78,9 @@ func (r *sharedPoolRepository) SetSharedAccountState(ctx context.Context, id int
 		}
 	}
 	if groups != nil {
-		manualAssignment := state.OwnerID == 0 && state.GroupIDs != nil
-		if err = assignSharedGroups(ctx, tx, id, *groups, consented, manualAssignment); err != nil {
+		assignment := sharedGroupAssignment{ids: *groups, consented: consented,
+			manual: state.OwnerID == 0 && state.GroupIDs != nil, tierOverride: state.SubscriptionTier}
+		if err = assignSharedGroups(ctx, tx, id, assignment); err != nil {
 			return err
 		}
 	}
@@ -134,7 +136,8 @@ func sharedAccountGroupIDs(ctx context.Context, tx *sql.Tx, id int64) ([]int64, 
 	return ids, rows.Err()
 }
 
-func assignSharedGroups(ctx context.Context, tx *sql.Tx, id int64, ids []int64, consented, manual bool) error {
+func assignSharedGroups(ctx context.Context, tx *sql.Tx, id int64, assignment sharedGroupAssignment) error {
+	ids, consented, manual := assignment.ids, assignment.consented, assignment.manual
 	if len(ids) > 50 {
 		return infraerrors.BadRequest("TOO_MANY_GROUPS", "最多关联50个分组")
 	}
@@ -149,7 +152,16 @@ func assignSharedGroups(ctx context.Context, tx *sql.Tx, id int64, ids []int64, 
                 ELSE subscription_type='standard' AND NOT is_exclusive END)
             AND (NOT require_oauth_only OR $3='oauth')
             FROM groups WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, groupID, platform, kind, consented, manual).Scan(&valid)
-		if err != nil || !valid {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && !valid && consented && !manual {
+			valid, err = sharedAutomaticTierGroupAllowed(ctx, tx, id, groupID, assignment)
+			if err != nil {
+				return err
+			}
+		}
+		if !valid {
 			return infraerrors.BadRequest("INVALID_SHARED_GROUP", "分组不存在、与账号不兼容或账号尚未授权参与普通分组调度")
 		}
 	}

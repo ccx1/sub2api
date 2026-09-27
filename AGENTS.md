@@ -287,6 +287,20 @@ Get-FileHash -Algorithm SHA256 -LiteralPath ".\$out"
 
 部署更新时默认保留运行时 `DATA_DIR`，不要覆盖 `config.yaml` 和 `.installed`，只替换二进制并重启服务。
 
+## 共享账号池导入回归门禁
+
+- 触发信号：修改共享池 JSON 导入、套餐分组配置、调度授权、首次启用或对应仓储校验，以及包含这些改动的合并和打包。
+- 根因与约束：服务层允许套餐专属分组，而创建/首次启用仓储仍执行默认非专属组规则，会出现“配置和选组成功、实际入库失败”。分组配置、服务选组与事务内校验必须保持一致，不能用放宽全部默认组或伪装管理员手工分配修复。
+- 必测原始场景：使用脱敏的 `sub2api-data` v1 JSON，`platform=openai`、`type=oauth`、`plan_type=prolite`、无 `group_ids`；已授权且套餐配置指向同平台已启用的标准计费专属组时，必须成功导入。
+- 创建回归必须执行真实 `CreateSharedAccount` 仓储方法，核验账号、共享归属、分组关联、outbox 与事务提交；只模拟仓储成功，或在账号 INSERT 人为报错之前通过，均不能替代成功路径回归。写入/关联/outbox 失败必须验证事务回滚。
+- 同步覆盖用户首次授权启用、管理员首次启用、同次覆盖/清空套餐档位；默认组仍不可专属。未授权、API Key、未知档位、跨平台、停用/删除分组、未配置目标及订阅计费分组不得借套餐例外绕过限制；数据库异常不能伪装为分组不兼容。
+- 管理员账号导入 `/admin/accounts/data` 与用户共享池导入必须分别回归；普通账号创建不得读取共享池套餐分组规则或获得共享池归属。测试必须包含 `TestSharedImport`，不能仅匹配 `TestSharedPool` 而遗漏导入入口。
+- 验证方式：在 `backend` 目录执行下列定向门禁；现有 CI 的 `make test-unit` 同时收录新增单元回归。记录实际结果，明确 SQL mock、真实 PostgreSQL、并发及浏览器验证各自的覆盖范围；没有隔离测试库时不连接业务库，也不宣称完整端到端覆盖。
+
+```powershell
+go test -tags unit -p 1 -count=1 ./internal/handler ./internal/handler/admin ./internal/service ./internal/repository -run 'Test(Shared|ImportData|AccountImport|AdminCreateAccountImport)'
+```
+
 ## 参考项目目录
 
 - 从 GitHub 或其它远程来源下载、克隆、抽取的参考项目统一放在仓库根目录 `remoteTemp/`。
