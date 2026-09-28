@@ -12,12 +12,12 @@ type guardBatchBudgetRepo struct {
 	contexts []context.Context
 }
 
-func (r *guardBatchBudgetRepo) UpsertState(ctx context.Context, state AccountTokenGuardState) error {
+func (r *guardBatchBudgetRepo) UpsertStateIfUnchanged(ctx context.Context, state AccountTokenGuardState) (time.Time, error) {
 	r.contexts = append(r.contexts, ctx)
 	if state.AccountID == 1 {
-		return errors.New("test state write failure")
+		return time.Time{}, errors.New("test state write failure")
 	}
-	return r.guardMemoryRepo.UpsertState(ctx, state)
+	return r.guardMemoryRepo.UpsertStateIfUnchanged(ctx, state)
 }
 
 func (r *guardBatchBudgetRepo) PruneEvents(ctx context.Context, _ time.Time) error {

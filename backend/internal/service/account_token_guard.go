@@ -107,20 +107,21 @@ type AccountTokenGuardConfig struct {
 
 // AccountTokenGuardState 是一个账号最近一次巡检的展示状态。
 type AccountTokenGuardState struct {
-	AccountID     int64      `json:"account_id"`
-	AccountName   string     `json:"account_name"`
-	AccountStatus string     `json:"account_status"`
-	Schedulable   bool       `json:"schedulable"`
-	ProbeState    string     `json:"probe_state"`
-	ProbeDetail   string     `json:"probe_detail"`
-	LatencyMS     int        `json:"latency_ms"`
-	FailStreak    int        `json:"fail_streak"`
-	LastProbeAt   *time.Time `json:"last_probe_at"`
-	LastFixAt     *time.Time `json:"last_fix_at"`
-	LastFixAction string     `json:"last_fix_action"`
-	LastFixResult string     `json:"last_fix_result"`
-	NeedsRelogin  bool       `json:"needs_relogin"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	AccountID      int64      `json:"account_id"`
+	AccountName    string     `json:"account_name"`
+	AccountStatus  string     `json:"account_status"`
+	Schedulable    bool       `json:"schedulable"`
+	ProbeState     string     `json:"probe_state"`
+	ProbeDetail    string     `json:"probe_detail"`
+	LatencyMS      int        `json:"latency_ms"`
+	FailStreak     int        `json:"fail_streak"`
+	LastProbeAt    *time.Time `json:"last_probe_at"`
+	LastFixAt      *time.Time `json:"last_fix_at"`
+	LastFixAction  string     `json:"last_fix_action"`
+	LastFixResult  string     `json:"last_fix_result"`
+	NeedsRelogin   bool       `json:"needs_relogin"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	AccountVersion *Account   `json:"-"`
 }
 
 // AccountTokenGuardEvent 是一条巡检 / 修复日志。
@@ -231,15 +232,16 @@ type AccountTokenGuardService struct {
 
 	config atomic.Value
 
-	runMu     sync.Mutex
-	stateMu   sync.Mutex
-	lifecycle sync.Mutex
-	cancel    context.CancelFunc
-	stopped   bool
-	wg        sync.WaitGroup
-	jobMu     sync.Mutex
-	job       *AccountTokenGuardJob
-	rootCtx   context.Context
+	runMu       sync.Mutex
+	stateMu     sync.Mutex
+	lifecycle   sync.Mutex
+	cancel      context.CancelFunc
+	stopped     bool
+	wg          sync.WaitGroup
+	jobMu       sync.Mutex
+	job         *AccountTokenGuardJob
+	rootCtx     context.Context
+	accountRuns sync.Map
 
 	lastRun     time.Time
 	lastMessage string
@@ -614,6 +616,7 @@ func (s *AccountTokenGuardService) Stop() {
 		}
 	}
 	s.jobMu.Unlock()
+	s.accountRuns.Range(func(_, value any) bool { value.(context.CancelFunc)(); return true })
 	s.wg.Wait()
 }
 
@@ -725,6 +728,17 @@ func (s *AccountTokenGuardService) runCycle(ctx context.Context, manual bool, jo
 	}
 	s.updateJobTotal(jobID, len(accounts))
 	results := make([]AccountTokenGuardProbeResult, len(accounts))
+	progressStates := make([]AccountTokenGuardState, len(accounts))
+	accountContexts := make([]context.Context, len(accounts))
+	finishAccounts := make([]func(), len(accounts))
+	superseded := make([]bool, len(accounts))
+	defer func() {
+		for _, finish := range finishAccounts {
+			if finish != nil {
+				finish()
+			}
+		}
+	}()
 	semaphore := make(chan struct{}, waveSize)
 	var wg sync.WaitGroup
 	var completed, progressErrors atomic.Int64
@@ -745,7 +759,20 @@ dispatch:
 			if cycleCtx.Err() != nil {
 				return
 			}
-			result := s.probeAccount(cycleCtx, cfg, &accounts[position])
+			accountCtx, finish, err := s.beginGuardAccount(cycleCtx, accounts[position].ID)
+			if err != nil {
+				superseded[position] = true
+				return
+			}
+			accountContexts[position], finishAccounts[position] = accountCtx, finish
+			snapshot := guardAccountSnapshot(&accounts[position])
+			if snapshot == nil {
+				superseded[position] = true
+				progressErrors.Add(1)
+				return
+			}
+			accounts[position] = *snapshot
+			result := s.probeAccount(accountCtx, cfg, &accounts[position])
 			result.Detail = withGuardJobID(result.Detail, jobID)
 			results[position] = result
 			completed.Add(1)
@@ -757,9 +784,14 @@ dispatch:
 			account := &accounts[position]
 			state := guardProbeState(account, existing[account.ID], result)
 			storeCtx, storeCancel := newGuardStoreContext()
-			if err := s.repo.UpsertState(storeCtx, state); err != nil {
-				progressErrors.Add(1)
+			if err := s.storeGuardState(storeCtx, &state); err != nil {
+				if isGuardSuperseded(err) {
+					superseded[position] = true
+				} else {
+					progressErrors.Add(1)
+				}
 			}
+			progressStates[position] = state
 			storeCancel()
 		}(index)
 	}
@@ -779,8 +811,12 @@ process:
 			break
 		}
 		account := &accounts[index]
+		if superseded[index] || accountContexts[index] == nil {
+			continue
+		}
+		accountCtx := accountContexts[index]
 		result := results[index]
-		state := guardProbeState(account, existing[account.ID], result)
+		state := guardProbeState(account, progressStates[index], result)
 		now := time.Now()
 
 		switch result.State {
@@ -788,25 +824,32 @@ process:
 			stats.Healthy++
 			state.FailStreak = 0
 			if account.Status == StatusError {
-				fixed := s.recoverState(cycleCtx, account, cfg)
-				if cycleCtx.Err() != nil {
+				fixed, fixErr := s.recoverState(accountCtx, account, cfg)
+				if isGuardSuperseded(fixErr) {
+					continue
+				}
+				if fixErr != nil && cycleCtx.Err() != nil {
 					states = append(states, state)
 					break process
 				}
 				if fixed {
+					guardStateUsesAccount(&state, account)
 					stats.StateFixed++
 					state.LastFixAt = &now
 					state.LastFixAction = "状态自愈"
-					state.LastFixResult = "清除错误态并恢复调度"
-					s.recordEvent(cycleCtx, account, AccountTokenGuardEventStateFixed, "探活正常但账号处于 error 态，已清除错误并恢复调度", result.LatencyMS)
-					s.notify(cfg, "凭证守护：已恢复账号调度", fmt.Sprintf("%s(#%d) 令牌有效但被禁用，已自动恢复调度", account.Name, account.ID), cfg.NotifyOnFix)
+					state.LastFixResult = "清除错误态（保留调度与限流设置）"
+					s.recordEvent(cycleCtx, account, AccountTokenGuardEventStateFixed, state.LastFixResult, result.LatencyMS)
+					s.notify(cfg, "凭证守护：已清除账号错误态", fmt.Sprintf("%s(#%d) 令牌有效，保留原有调度和限流设置", account.Name, account.ID), cfg.NotifyOnFix)
 				} else {
-					stats.Failed++
 					state.LastFixAt = &now
 					state.LastFixAction = "状态自愈"
 					state.LastFixResult = "恢复失败"
+					if !s.storeGuardFailure(&state, &stats) {
+						continue
+					}
 					s.recordEvent(cycleCtx, account, AccountTokenGuardEventStateFail, "探活正常但账号 error 态恢复失败", result.LatencyMS)
 					s.notify(cfg, "凭证守护：状态恢复失败", fmt.Sprintf("%s(#%d) 错误态恢复失败，请检查日志", account.Name, account.ID), cfg.NotifyOnFail)
+					continue
 				}
 			}
 		case AccountTokenGuardProbeAuth:
@@ -814,26 +857,33 @@ process:
 			state.FailStreak++
 			s.recordEvent(cycleCtx, account, AccountTokenGuardEventProbeAuth, result.Detail, result.LatencyMS)
 			if state.FailStreak >= cfg.FailStreakThreshold && cfg.AutoRelogin {
-				action, fixErr := s.reloginAccount(cycleCtx, cfg, account)
-				if cycleCtx.Err() != nil {
+				action, fixErr := s.reloginGuardAccount(accountCtx, cfg, account)
+				if isGuardSuperseded(fixErr) {
+					continue
+				}
+				if fixErr != nil && cycleCtx.Err() != nil {
 					states = append(states, state)
 					break process
 				}
 				if fixErr != nil {
-					stats.Failed++
 					state.LastFixAt = &now
 					state.LastFixAction = "自动重登"
 					state.LastFixResult = "失败: " + fixErr.Error()
+					if !s.storeGuardFailure(&state, &stats) {
+						continue
+					}
 					s.recordEvent(cycleCtx, account, AccountTokenGuardEventReloginFail, fixErr.Error(), 0)
 					s.notify(cfg, "凭证守护：自动重登失败", fmt.Sprintf("%s(#%d) 重登失败：%s", account.Name, account.ID, truncateGuardText(fixErr.Error(), 120)), cfg.NotifyOnFail)
+					continue
 				} else {
 					stats.Repaired++
+					guardStateUsesAccount(&state, account)
 					state.FailStreak = 0
 					state.LastFixAt = &now
 					state.LastFixAction = "自动重登"
 					state.LastFixResult = action
 					s.recordEvent(cycleCtx, account, AccountTokenGuardEventReloginOK, action, 0)
-					s.notify(cfg, "凭证守护：已自动重登", fmt.Sprintf("%s(#%d) 已重登并恢复调度", account.Name, account.ID), cfg.NotifyOnFix)
+					s.notify(cfg, "凭证守护：已自动重登", fmt.Sprintf("%s(#%d) 已重登，保留原有调度和限流设置", account.Name, account.ID), cfg.NotifyOnFix)
 				}
 			}
 		default:
@@ -865,10 +915,9 @@ process:
 
 func guardProbeState(account *Account, previous AccountTokenGuardState, result AccountTokenGuardProbeResult) AccountTokenGuardState {
 	now := time.Now()
-	previous.AccountID, previous.AccountName = account.ID, account.Name
-	previous.AccountStatus, previous.Schedulable = account.Status, account.Schedulable
+	guardStateUsesAccount(&previous, account)
 	previous.ProbeState, previous.ProbeDetail = result.State, result.Detail
-	previous.LatencyMS, previous.LastProbeAt, previous.UpdatedAt = result.LatencyMS, &now, now
+	previous.LatencyMS, previous.LastProbeAt = result.LatencyMS, &now
 	return previous
 }
 
@@ -914,7 +963,7 @@ func (s *AccountTokenGuardService) listAccounts(ctx context.Context, cfg Account
 	now := time.Now().Unix()
 	skipped := 0
 	appendAccount := func(account Account) {
-		if seen[account.ID] || !account.IsOAuth() || account.Platform != PlatformOpenAI || account.IsShadow() {
+		if seen[account.ID] || !guardAccountEligible(&account) {
 			return
 		}
 		seen[account.ID] = true
@@ -925,24 +974,16 @@ func (s *AccountTokenGuardService) listAccounts(ctx context.Context, cfg Account
 		}
 		out = append(out, account)
 	}
-	if len(cfg.GroupIDs) > 0 {
-		for _, groupID := range cfg.GroupIDs {
-			items, err := s.accounts.ListByGroup(ctx, groupID)
-			if err != nil {
-				return nil, err
-			}
-			for _, account := range items {
-				appendAccount(account)
-			}
-		}
-	} else {
-		items, err := s.accounts.ListByPlatform(ctx, PlatformOpenAI)
-		if err != nil {
-			return nil, err
-		}
-		for _, account := range items {
-			appendAccount(account)
-		}
+	store, err := s.guardAccountStore()
+	if err != nil {
+		return nil, err
+	}
+	items, err := store.ListTokenGuardCandidates(ctx, cfg.GroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range items {
+		appendAccount(account)
 	}
 	states, err := s.statesMap(ctx)
 	if err != nil {
@@ -1008,7 +1049,7 @@ func (s *AccountTokenGuardService) persistStates(states []AccountTokenGuardState
 			slog.Warn("account_token_guard_state_batch_expired", "remaining", len(states)-index, "error", err)
 			return failures + len(states) - index + 1
 		}
-		if err := s.repo.UpsertState(storeCtx, state); err != nil {
+		if err := s.storeGuardState(storeCtx, &state); err != nil && !isGuardSuperseded(err) {
 			slog.Warn("account_token_guard_state_upsert_failed", "account_id", state.AccountID, "error", err)
 			failures++
 		}
@@ -1045,58 +1086,80 @@ func newGuardStoreContext() (context.Context, context.CancelFunc) {
 
 // ReloginAccount 供页面手动触发单个账号重登。
 func (s *AccountTokenGuardService) ReloginAccount(ctx context.Context, accountID int64) (string, error) {
+	ctx, finish, err := s.beginGuardAccount(ctx, accountID)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
 	cfg := s.currentConfig()
 	account, err := s.accounts.GetByID(ctx, accountID)
 	if err != nil || account == nil {
 		return "", errors.New("账号不存在")
 	}
+	account = guardAccountSnapshot(account)
+	if !guardAccountEligible(account) {
+		return "", ErrAccountTokenGuardStale
+	}
 	state, err := s.loadState(ctx, account)
 	if err != nil {
 		return "", err
 	}
-	action, fixErr := s.reloginAccount(ctx, cfg, account)
+	action, fixErr := s.reloginGuardAccount(ctx, cfg, account)
+	if fixErr != nil && ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if isGuardSuperseded(fixErr) {
+		return "", fixErr
+	}
 	now := time.Now()
-	state.AccountID = account.ID
-	state.AccountName = account.Name
-	state.AccountStatus = account.Status
-	state.Schedulable = account.Schedulable
+	guardStateUsesAccount(&state, account)
 	state.LastFixAt = &now
 	state.LastFixAction = "手动重登"
 	if fixErr != nil {
 		state.LastFixResult = "失败: " + fixErr.Error()
+		if err := s.storeGuardState(ctx, &state); err != nil {
+			return "", err
+		}
 		s.recordEvent(ctx, account, AccountTokenGuardEventReloginFail, "手动重登失败: "+fixErr.Error(), 0)
-		_ = s.repo.UpsertState(ctx, state)
 		return "", fixErr
 	}
 	state.FailStreak = 0
 	state.ProbeState = AccountTokenGuardProbeOK
 	state.ProbeDetail = "手动重登成功"
 	state.LastFixResult = action
-	_ = s.repo.UpsertState(ctx, state)
+	storeCtx, cancelStore := newGuardStoreContext()
+	defer cancelStore()
+	if err := s.storeGuardState(storeCtx, &state); err != nil {
+		return "", err
+	}
 	s.recordEvent(ctx, account, AccountTokenGuardEventReloginOK, "手动重登: "+action, 0)
-	return action, nil
+	return action, ctx.Err()
 }
 
-func (s *AccountTokenGuardService) recoverState(ctx context.Context, account *Account, cfg AccountTokenGuardConfig) bool {
-	if _, err := s.admin.ClearAccountError(ctx, account.ID); err != nil {
-		slog.Warn("account_token_guard_clear_error_failed", "account_id", account.ID, "error", err)
-		return false
-	}
-	if cfg.RestoreSchedulable {
-		if _, err := s.admin.SetAccountSchedulable(ctx, account.ID, true); err != nil {
-			slog.Warn("account_token_guard_set_schedulable_failed", "account_id", account.ID, "error", err)
-			return false
-		}
-	}
-	if s.invalidator != nil {
-		if err := s.invalidator.InvalidateToken(ctx, account); err != nil {
-			slog.Warn("account_token_guard_invalidate_token_failed", "account_id", account.ID, "error", err)
-		}
-	}
-	return true
+func (s *AccountTokenGuardService) recoverState(ctx context.Context, account *Account, _ AccountTokenGuardConfig) (bool, error) {
+	err := s.applyGuardRepair(ctx, account, nil)
+	return err == nil, err
 }
 
 func (s *AccountTokenGuardService) reloginAccount(ctx context.Context, cfg AccountTokenGuardConfig, account *Account) (string, error) {
+	if !guardAccountEligible(account) {
+		return "", ErrAccountTokenGuardStale
+	}
+	ctx, finish, err := s.beginGuardAccount(ctx, account.ID)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
+	return s.reloginGuardAccount(ctx, cfg, account)
+}
+
+func (s *AccountTokenGuardService) reloginGuardAccount(ctx context.Context, cfg AccountTokenGuardConfig, account *Account) (string, error) {
+	if !guardAccountEligible(account) {
+		return "", ErrAccountTokenGuardStale
+	}
+	if _, err := s.guardAccountStore(); err != nil {
+		return "", err
+	}
 	entry, ok := findGuardReloginAccount(cfg, account.Name)
 	if !ok {
 		return "自动重登", errors.New("缺少该账号的重登凭据，请在凭证守护页面补充")
@@ -1118,29 +1181,10 @@ func (s *AccountTokenGuardService) reloginAccount(ctx context.Context, cfg Accou
 	for key, value := range credential {
 		payload[key] = value
 	}
-	if _, err := s.admin.UpdateAccount(ctx, account.ID, &UpdateAccountInput{Credentials: payload}); err != nil {
+	if err := s.applyGuardRepair(ctx, account, payload); err != nil {
 		return "自动重登", fmt.Errorf("写回凭据失败: %w", err)
 	}
-	action := "重登并写回新凭据"
-	refreshed, err := s.accounts.GetByID(ctx, account.ID)
-	if err != nil || refreshed == nil {
-		refreshed = account
-	}
-	if _, err := s.admin.ClearAccountError(ctx, account.ID); err != nil {
-		return action, fmt.Errorf("清除错误态失败: %w", err)
-	}
-	if cfg.RestoreSchedulable {
-		if _, err := s.admin.SetAccountSchedulable(ctx, account.ID, true); err != nil {
-			return action, fmt.Errorf("恢复调度失败: %w", err)
-		}
-		action += "、恢复调度"
-	}
-	if s.invalidator != nil {
-		if err := s.invalidator.InvalidateToken(ctx, refreshed); err != nil {
-			slog.Warn("account_token_guard_relogin_invalidate_failed", "account_id", account.ID, "error", err)
-		}
-	}
-	return action, nil
+	return "重登并写回新凭据（保留调度与限流设置）", nil
 }
 
 func findGuardReloginAccount(cfg AccountTokenGuardConfig, accountName string) (AccountTokenGuardReloginAccount, bool) {
@@ -1281,11 +1325,7 @@ func (s *AccountTokenGuardService) relogin(ctx context.Context, cfg AccountToken
 		return credential, nil
 	}
 	if errorValue, ok := result["error"].(map[string]any); ok {
-		code := strings.ToLower(guardText(errorValue["code"]))
-		if code == "" {
-			code = "relogin_rejected"
-		}
-		return nil, errors.New(code)
+		return nil, newGuardReloginProtocolError(errorValue["code"])
 	}
 	return nil, errors.New("重登未返回凭据")
 }

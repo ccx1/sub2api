@@ -6,7 +6,17 @@
 
 ## 托管工具与原生回退
 
-继续使用本地 NativeFallbackReason 判断：需要原生托管工具的请求在发送前回到 Codex 通道。BPS 独立冷却仅影响实际走 BPS 的请求，不得拦截同模型的原生回退请求；不引入强制 BPS 或省略工具开关。
+默认继续使用本地 `NativeFallbackReason` 判断：声明实时联网搜索、高搜索上下文或图片生成等需要原生能力的请求，在发送前回到 Codex 通道。
+
+管理员可以在 **账号管理 → 编辑 OpenAI OAuth 账号 → Excel / BPS 协议** 开启 **忽略不支持的托管工具**，也支持批量编辑。对应账号字段为 `extra.openai_excel_bps_omit_unsupported_tools: true`，默认关闭，仅接受显式布尔 `true`，并遵守账号的 BPS 模型范围。
+
+- 开启后保持该账号的 BPS 路由，复用协议适配层省略已知不支持的托管工具声明，同时向模型说明这些能力不可用。不会获得搜索、图片生成或远程 MCP 执行能力，也不能声称已使用被省略的工具。未知工具类型仍按原校验拒绝。
+- 普通 `function`、`custom`、`namespace` 和 Lite `additional_tools` 按既有目录和历史配对规则处理，不按工具名称猜测类型，也不递归删除工具参数或调用历史。
+- 该开关只控制声明与路由，不能转换旧原生会话中的 `web_search_call`、`image_generation_call`、`mcp_call` 等托管工具历史；这类历史仍可能被 BPS 拒绝，需要使用原生通道或新的兼容会话。
+- 普通 `/v1/responses` 实际走 BPS 时，仅支持缺省/null、`tool_choice=auto` 或 `none`；`required`、强制 function/custom/hosted 工具及 `allowed_tools` 对象返回 400，且不向上游发请求。`none` 本轮禁用全部工具，不触发工具回退。`/v1/responses/compact` 沿用既有固定 `tool_choice=none` 的压缩语义。
+- BPS 独立冷却与能力判断按每个候选账号的实际路由执行：开启省略且实际走 BPS 时遵守冷却；未开启且走原生回退时不受该冷却影响。混合池原生候选、管理员优先级、会话粘性及原生 Chat/Messages/WS 入口保持原有语义。
+- 省略开关不覆盖 compact 的 `force_off` 配置或已知不支持的探测状态，不会借由能力适配绕过这些限制。
+- 保存代码不会自动开启已有账号。关闭省略选项后恢复默认回退；关闭 BPS 后该选项不生效，编辑页面会清除它。
 
 ## BPS 403 自动调整分组
 

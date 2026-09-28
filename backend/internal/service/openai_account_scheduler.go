@@ -2510,7 +2510,7 @@ func accountSupportsOpenAICapabilities(account *Account, requiredCapability Open
 }
 
 func accountSupportsOpenAICapabilitiesForRequest(ctx context.Context, account *Account, requestedModel string, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
-	if ctx != nil && ctx.Value(excelBPSRoutingContextKey{}) == true && account != nil &&
+	if isOpenAIExcelBPSRouting(ctx, account) &&
 		requiredImageCapability == "" && account.IsExcelBPSEnabledForModel(requestedModel) {
 		switch requiredCapability {
 		case OpenAIEndpointCapabilityResponses, OpenAIEndpointCapabilityResponsesCompact:

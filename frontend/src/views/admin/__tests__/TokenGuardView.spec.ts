@@ -146,6 +146,22 @@ describe('token guard background jobs', () => {
 })
 
 describe('token guard local configuration', () => {
+  it.each([true, false])('shows a read-only scheduling policy and preserves the legacy flag %s when saving', async restoreSchedulable => {
+    const snapshot = status(); snapshot.config.restore_schedulable = restoreSchedulable
+    vi.mocked(guard.getTokenGuardStatus).mockResolvedValue(snapshot)
+    const vm = await mountView()
+    const policy = wrapper.get('[data-testid="guard-scheduling-policy"]')
+    expect(policy.text()).toContain('tokenGuard.schedulingPolicyHint')
+    expect(policy.find('input, select, textarea, button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('tokenGuard.restoreSchedulable')
+    expect(wrapper.findAll('.settings-form input[type="checkbox"]')).toHaveLength(4)
+    vm.draft.interval_seconds = 120
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(guard.saveTokenGuardConfig).toHaveBeenCalledWith(expect.objectContaining({
+      interval_seconds: 120, restore_schedulable: restoreSchedulable
+    }))
+  })
+
   it('preserves dirty drafts, unknown selected groups and credential lifecycle fields', async () => {
     vi.mocked(groupsAPI.getAll).mockRejectedValue(new Error('group lookup failed'))
     const vm = await mountView()

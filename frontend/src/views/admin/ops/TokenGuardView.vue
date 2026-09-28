@@ -86,7 +86,7 @@
                 <textarea v-model="reloginHeadersText" rows="3" class="input w-full" placeholder="Header-Name: value"></textarea>
                 <p class="field-hint">{{ t('tokenGuard.headersHint') }}</p>
               </template>
-              <label class="kind-option"><input v-model="draft.restore_schedulable" type="checkbox" /><span><strong>{{ t('tokenGuard.restoreSchedulable') }}</strong><small>{{ t('tokenGuard.scopeNote') }}</small></span></label>
+              <div class="kind-option" data-testid="guard-scheduling-policy"><span><strong>{{ t('tokenGuard.schedulingPolicy') }}</strong><small>{{ t('tokenGuard.schedulingPolicyHint') }}</small><small>{{ t('tokenGuard.scopeNote') }}</small></span></div>
 
               <label class="field-label">{{ t('tokenGuard.reloginAccounts') }}</label>
               <button type="button" class="creds-open" @click="openCredsModal">

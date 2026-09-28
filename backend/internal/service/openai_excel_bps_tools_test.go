@@ -63,11 +63,18 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 					c.Header("X-Codex2API-Basispoints-Bypass", "stale-attempt")
 					c.Header("X-Codex2API-Upstream", "codex")
 					_, err = svc.Forward(ctx, c, account, body)
+					choice, _ := tc.choice.(string)
+					if omit && tc.choice != nil && choice != "auto" && choice != "none" {
+						require.Error(t, err)
+						require.Equal(t, http.StatusBadRequest, rec.Code)
+						require.Empty(t, upstream.requests, "forced tools must fail before any upstream request")
+						require.Contains(t, rec.Body.String(), "tool_choice auto or none")
+						return
+					}
 					require.NoError(t, err)
 					require.Equal(t, http.StatusOK, rec.Code)
 					require.Len(t, upstream.requests, 1)
-					choice, _ := tc.choice.(string)
-					if tc.nativeReason != "" {
+					if tc.nativeReason != "" && !omit {
 						require.Equal(t, "/backend-api/codex/responses", upstream.lastReq.URL.Path)
 						require.Equal(t, "codex", rec.Header().Get("X-Codex2API-Upstream"))
 						require.Equal(t, tc.nativeReason, rec.Header().Get("X-Codex2API-Basispoints-Bypass"))

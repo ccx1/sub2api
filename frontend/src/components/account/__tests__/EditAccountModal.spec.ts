@@ -946,6 +946,84 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
+  it('saves and clears BPS hosted-tool omission independently of other extra fields', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_ignore_encrypted_content: true, unrelated: 'preserve' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const selector = '[data-testid="excel-bps-omit-unsupported-tools"]'
+    expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
+    await wrapper.get(selector).setValue(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const savedExtra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(savedExtra).toMatchObject({
+      openai_excel_bps_omit_unsupported_tools: true,
+      openai_excel_bps_ignore_encrypted_content: true,
+      unrelated: 'preserve'
+    })
+    await wrapper.setProps({ account: { ...account, extra: savedExtra } })
+    expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(true)
+    await wrapper.get(selector).setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const clearedExtra = updateAccountMock.mock.calls[1]?.[1]?.extra
+    expect(clearedExtra).not.toHaveProperty('openai_excel_bps_omit_unsupported_tools')
+    expect(clearedExtra).toMatchObject({ openai_excel_bps_ignore_encrypted_content: true, unrelated: 'preserve' })
+    wrapper.unmount()
+  })
+
+  it.each([undefined, false, 'true', 1])('resets hosted-tool omission for an account with legacy value %s', async value => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_omit_unsupported_tools: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const selector = '[data-testid="excel-bps-omit-unsupported-tools"]'
+    expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(true)
+    await wrapper.setProps({ account: { ...account, id: 2, extra: {
+      openai_excel_bps: true, openai_excel_bps_omit_unsupported_tools: value, unrelated: 'keep'
+    } } })
+    expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_excel_bps_omit_unsupported_tools')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.unrelated).toBe('keep')
+    wrapper.unmount()
+  })
+
+  it('removes hosted-tool omission when BPS is disabled', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { openai_excel_bps: true, openai_excel_bps_omit_unsupported_tools: true, unrelated: 'keep' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="excel-bps-omit-unsupported-tools"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).not.toHaveProperty('openai_excel_bps')
+    expect(extra).not.toHaveProperty('openai_excel_bps_omit_unsupported_tools')
+    expect(extra?.unrelated).toBe('keep')
+    wrapper.unmount()
+  })
+
+  it('hides hosted-tool omission for incompatible accounts with stale extra', () => {
+    const setupToken = { ...buildAccount(), type: 'setup-token' as const }
+    const anthropic = { ...buildAccount(), platform: 'anthropic' as const, type: 'oauth' as const }
+    for (const account of [buildAccount(), setupToken, anthropic, buildOpenAISparkShadowAccount()]) {
+      account.extra = { openai_excel_bps: true, openai_excel_bps_omit_unsupported_tools: true }
+      const wrapper = mountModal(account)
+      expect(wrapper.find('[data-testid="excel-bps-omit-unsupported-tools"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
   it('saves, restores and clears the BPS encrypted-content option', async () => {
     const account = buildAccount()
     account.type = 'oauth'

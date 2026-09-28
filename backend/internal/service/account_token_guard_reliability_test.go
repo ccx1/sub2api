@@ -129,8 +129,7 @@ func TestRunCycleIgnoresCallerCancellationAfterAcceptance(t *testing.T) {
 	defer server.Close()
 
 	repo := &guardMemoryRepo{}
-	accounts := &guardMemoryAccounts{items: []Account{{ID: 1, Name: "test@example.com", Type: AccountTypeOAuth, Platform: PlatformOpenAI,
-		Credentials: map[string]any{"access_token": "token"}}}}
+	accounts := &guardMemoryAccounts{items: []Account{guardTestAccount(1)}}
 	svc := NewAccountTokenGuardService(nil, repo, accounts, nil, nil, nil)
 	cfg := defaultAccountTokenGuardConfig()
 	cfg.ProbeEndpoint = server.URL
@@ -158,8 +157,7 @@ func TestStartRunDeduplicatesAndCanCancel(t *testing.T) {
 	defer server.Close()
 
 	repo := &guardMemoryRepo{}
-	accounts := &guardMemoryAccounts{items: []Account{{ID: 1, Name: "test@example.com", Type: AccountTypeOAuth, Platform: PlatformOpenAI,
-		Credentials: map[string]any{"access_token": "token"}}}}
+	accounts := &guardMemoryAccounts{items: []Account{guardTestAccount(1)}}
 	svc := NewAccountTokenGuardService(nil, repo, accounts, nil, nil, nil)
 	cfg := defaultAccountTokenGuardConfig()
 	cfg.ProbeEndpoint = server.URL
@@ -198,8 +196,7 @@ func TestRunCycleReportsPersistenceErrors(t *testing.T) {
 	defer server.Close()
 
 	repo := &guardMemoryRepo{upsertErr: errors.New("store unavailable")}
-	accounts := &guardMemoryAccounts{items: []Account{{ID: 1, Name: "test@example.com", Type: AccountTypeOAuth, Platform: PlatformOpenAI,
-		Credentials: map[string]any{"access_token": "token"}}}}
+	accounts := &guardMemoryAccounts{items: []Account{guardTestAccount(1)}}
 	svc := NewAccountTokenGuardService(nil, repo, accounts, nil, nil, nil)
 	cfg := defaultAccountTokenGuardConfig()
 	cfg.ProbeEndpoint = server.URL
@@ -253,11 +250,16 @@ type guardMemoryRepo struct {
 	listErrAfter int
 	listCalls    int
 	deleteCalls  int
+	accounts     *guardMemoryAccounts
 }
 
 func (r *guardMemoryRepo) UpsertState(_ context.Context, state AccountTokenGuardState) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.upsertLocked(state)
+}
+
+func (r *guardMemoryRepo) upsertLocked(state AccountTokenGuardState) error {
 	r.upserts++
 	if r.upsertErr != nil {
 		return r.upsertErr
@@ -298,12 +300,17 @@ func (r *guardMemoryRepo) ListStates(context.Context) ([]AccountTokenGuardState,
 }
 func (r *guardMemoryRepo) PruneEvents(context.Context, time.Time) error { return nil }
 
-type guardMemoryAccounts struct{ items []Account }
+type guardMemoryAccounts struct {
+	mu    sync.Mutex
+	items []Account
+}
 
 func (a *guardMemoryAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	for _, account := range a.items {
 		if account.ID == id {
-			return &account, nil
+			return guardAccountSnapshot(&account), nil
 		}
 	}
 	return nil, errors.New("account not found")

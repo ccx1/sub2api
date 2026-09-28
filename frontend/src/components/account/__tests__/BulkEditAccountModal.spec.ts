@@ -327,6 +327,7 @@ describe('BulkEditAccountModal', () => {
       openai_excel_bps_cache_creation_as_input: false,
       openai_excel_bps_ignore_images: false,
       openai_excel_bps_ignore_encrypted_content: false,
+      openai_excel_bps_omit_unsupported_tools: false,
       openai_excel_bps_auto_disable_on_403: false,
       openai_excel_bps_auto_move_on_403: false,
       openai_excel_bps_403_target_group_id: null
@@ -397,10 +398,42 @@ describe('BulkEditAccountModal', () => {
       })
     })
 
-    it.each(['images', 'encrypted-content'])('resets BPS %s omission when the bulk modal is reopened', async field => {
+    it('applies hosted-tool omission only with the selected BPS edit and clears it when disabled', async () => {
       const wrapper = mountModal(oauthProps)
       await enableBPS(wrapper)
-      const selector = '[data-testid="bulk-excel-bps-ignore-' + field + '"]'
+      const selector = '[data-testid="bulk-excel-bps-omit-unsupported-tools"]'
+      expect(wrapper.get<HTMLInputElement>(selector).element.checked).toBe(false)
+      await wrapper.get(selector).setValue(true)
+      await wrapper.get('[data-testid="bulk-excel-bps-ignore-encrypted-content"]').setValue(true)
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+        extra: { ...defaultExtra, openai_excel_bps_omit_unsupported_tools: true, openai_excel_bps_ignore_encrypted_content: true }
+      })
+      await wrapper.get(selector).setValue(false)
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+        extra: { ...defaultExtra, openai_excel_bps_ignore_encrypted_content: true }
+      })
+      await wrapper.get(selector).setValue(true)
+      await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(false)
+      await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { status: 'active' })
+      await wrapper.get('#bulk-edit-status-enabled').setValue(false)
+      await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(true)
+      await wrapper.get('[data-testid="bulk-excel-bps-toggle"]').trigger('click')
+      expect(wrapper.find(selector).exists()).toBe(false)
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+        extra: { ...defaultExtra, openai_excel_bps: false, openai_excel_bps_models: null }
+      })
+      wrapper.unmount()
+    })
+
+    it.each(['ignore-images', 'ignore-encrypted-content', 'omit-unsupported-tools'])('resets BPS %s omission when the bulk modal is reopened', async field => {
+      const wrapper = mountModal(oauthProps)
+      await enableBPS(wrapper)
+      const selector = '[data-testid="bulk-excel-bps-' + field + '"]'
       await wrapper.get(selector).setValue(true)
       await wrapper.setProps({ show: false })
       await wrapper.setProps({ show: true })

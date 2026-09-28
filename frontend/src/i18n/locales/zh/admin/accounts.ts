@@ -1031,6 +1031,8 @@ export default {
         excelBPS403BadgeMoved: '{time} 移入分组「{group}」，调整分组后解除',
         excelBPS403BadgeLeftGroups: '{time} 退出所有分组，调整分组后解除',
         excelBPSIgnoreEncryptedContent: '忽略历史中的加密消息内容',
+        excelBPSOmitUnsupportedTools: '忽略不支持的托管工具',
+        excelBPSOmitUnsupportedToolsDesc: '默认关闭。开启后，当前账号在所选模型范围内保持 BPS，省略已知不支持的托管工具声明，并向模型说明能力不可用；不会获得联网搜索或图片生成能力。普通 function、custom 和 namespace 工具保留。仅支持自动选择或禁用工具，强制选择仍返回 400。关闭后保留原生回退，不改变其他账号的调度。',
         excelBPSIgnoreEncryptedContentDesc: '默认关闭。用过多代理协作的旧 Codex 会话里，子代理的中间消息是只有原生 Codex 能读取的密文，BPS 无法转发，整个会话每轮都会报 encrypted_content 错误。勾选后，转发前把消息和工具结果中的加密内容替换为固定的已省略提示，保留其余文本、消息顺序和工具调用关系，使旧会话可以继续。模型看不到被省略的内容；明文消息（如子代理的最终结论）和推理记录不受影响。',
         excelBPSCacheCreationAsInputDesc: '默认关闭. 勾选后, BPS 缓存创建 token 计入普通输入并按输入价格计费, 返回下游的缓存创建用量同步归零. 总输入和缓存读取不变, 不影响上游实际缓存.',
         excelBPSDesc: '使用本账号已有的 ChatGPT OAuth 凭据，经 Excel 接口转发 Responses 请求。无需 GitHub 登录或 sidecar；关闭后恢复原 Codex 路径。',

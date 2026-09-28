@@ -116,18 +116,18 @@ func TestAccountTokenGuardCancelDuringReloginStaysCanceled(t *testing.T) {
 	}
 }
 
-type guardBlockingRecoveryAdmin struct {
-	AdminService
+type guardBlockingRecoveryAccounts struct {
+	*guardMemoryAccounts
 	entered chan struct{}
 }
 
-func (a *guardBlockingRecoveryAdmin) ClearAccountError(ctx context.Context, _ int64) (*Account, error) {
+func (a *guardBlockingRecoveryAccounts) ApplyTokenGuardRepair(ctx context.Context, _ *Account, _ map[string]any) (time.Time, error) {
 	select {
 	case a.entered <- struct{}{}:
 	default:
 	}
 	<-ctx.Done()
-	return nil, ctx.Err()
+	return time.Time{}, ctx.Err()
 }
 
 func TestAccountTokenGuardCancelDuringRecoveryStaysCanceled(t *testing.T) {
@@ -139,13 +139,13 @@ func TestAccountTokenGuardCancelDuringRecoveryStaysCanceled(t *testing.T) {
 	account.Status = StatusError
 	svc := newGuardTestService(&guardMemoryRepo{}, &guardMemoryAccounts{items: []Account{account}}, server.URL)
 	defer svc.Stop()
-	admin := &guardBlockingRecoveryAdmin{entered: make(chan struct{}, 1)}
-	svc.admin = admin
+	accounts := &guardBlockingRecoveryAccounts{guardMemoryAccounts: svc.accounts.(*guardMemoryAccounts), entered: make(chan struct{}, 1)}
+	svc.accounts = accounts
 	job, err := svc.StartRun(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	awaitGuardSignal(t, admin.entered)
+	awaitGuardSignal(t, accounts.entered)
 	if _, err := svc.CancelRun(job.ID); err != nil {
 		t.Fatal(err)
 	}

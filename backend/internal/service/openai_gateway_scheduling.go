@@ -438,7 +438,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	if requestedModel != "" && !account.IsModelAllowedInGroup(groupID, requestedModel) {
 		return "model_not_allowed_in_group"
 	}
-	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+	if !accountSupportsOpenAICapabilitiesForRequest(ctx, account, requestedModel, requiredCapability, "") {
 		if account.IsGrok() && requiredCapability == OpenAIEndpointCapabilityGrokMediaGeneration {
 			_, reason := account.GrokMediaGenerationEligibility()
 			slog.Debug("grok_media_account_ineligible", "account_id", account.ID, "reason", reason)

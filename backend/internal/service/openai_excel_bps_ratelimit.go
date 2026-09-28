@@ -34,13 +34,31 @@ const excelBPSRateLimitedFilterReason = "excel_bps_rate_limited"
 
 type excelBPSRoutingContextKey struct{}
 
+type excelBPSRoutingIntent struct {
+	responsesIngress bool
+	nativeFallback   bool
+}
+
 // WithOpenAIExcelBPSRouting keeps scheduling aligned with the Responses body.
 // A nil body identifies ingress paths that never forward through the BPS bridge.
 func WithOpenAIExcelBPSRouting(ctx context.Context, body []byte) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, excelBPSRoutingContextKey{}, body != nil && basispoints.NativeFallbackReason(body) == "")
+	return context.WithValue(ctx, excelBPSRoutingContextKey{}, excelBPSRoutingIntent{
+		responsesIngress: body != nil,
+		nativeFallback:   body != nil && basispoints.NativeFallbackReason(body) != "",
+	})
+}
+
+// 账号级开关必须在选择候选后判断，不能把托管工具提前固化为原生路由。
+func isOpenAIExcelBPSRouting(ctx context.Context, account *Account) bool {
+	if ctx == nil || account == nil {
+		return false
+	}
+	intent, ok := ctx.Value(excelBPSRoutingContextKey{}).(excelBPSRoutingIntent)
+	return ok && intent.responsesIngress &&
+		(!intent.nativeFallback || account.IsExcelBPSOmitUnsupportedToolsEnabled())
 }
 
 // BPS throttles its own endpoint independently of the account's Codex quota.
@@ -137,7 +155,7 @@ func (s *OpenAIGatewayService) isExcelBPSCoolingDownContext(ctx context.Context,
 	if s == nil || account == nil {
 		return false
 	}
-	if ctx != nil && ctx.Value(excelBPSRoutingContextKey{}) == false {
+	if ctx != nil && ctx.Value(excelBPSRoutingContextKey{}) != nil && !isOpenAIExcelBPSRouting(ctx, account) {
 		return false
 	}
 	value, ok := s.excelBPSCooldownUntil.Load(account.ID)

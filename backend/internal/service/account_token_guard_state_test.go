@@ -17,10 +17,17 @@ import (
 func guardTestAccount(id int64) Account {
 	return Account{ID: id, Name: fmt.Sprintf("guard%d@example.com", id),
 		Type: AccountTypeOAuth, Platform: PlatformOpenAI, Status: StatusActive,
+		Schedulable: true, UpdatedAt: time.Now().Truncate(time.Microsecond),
 		Credentials: map[string]any{"access_token": fmt.Sprintf("token-%d", id)}}
 }
 
 func newGuardTestService(repo *guardMemoryRepo, accounts *guardMemoryAccounts, endpoint string) *AccountTokenGuardService {
+	repo.accounts = accounts
+	for i := range repo.states {
+		if repo.states[i].UpdatedAt.IsZero() {
+			repo.states[i].UpdatedAt = time.Now().Truncate(time.Microsecond)
+		}
+	}
 	svc := NewAccountTokenGuardService(nil, repo, accounts, nil, nil, nil)
 	cfg := defaultAccountTokenGuardConfig()
 	cfg.ProbeEndpoint, cfg.ReloginEndpoint = endpoint+"/probe", endpoint+"/relogin"
