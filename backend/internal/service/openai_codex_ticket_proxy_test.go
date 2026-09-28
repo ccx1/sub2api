@@ -73,20 +73,30 @@ func TestCodexTicketFixedModeKeepsConfiguredProxy(t *testing.T) {
 }
 
 func TestCodexTicketPoolHonorsAccountAffinityConfiguration(t *testing.T) {
-	account := ticketTestAccount(42)
-	account.Extra = map[string]any{}
-	account.Extra[ProxyModeExtraKey] = ProxyModeRandom
-	account.Extra[RandomProxyPoolScopeExtraKey] = RandomProxyPoolSelected
-	account.Extra[RandomProxyPoolIDsExtraKey] = []int64{7, 9}
-	account.Extra[RandomProxyMaxReuseMinutesExtraKey] = 30
-	repo := &balancedAccountProxyStub{pluginDirectoryProxyRepo: pluginDirectoryProxyRepo{
-		proxy: &Proxy{ID: 7, Status: StatusActive, Protocol: "http", Host: "pool.example", Port: 8080},
-	}}
-	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &ticketPoolUpstream{})
-	svc.accountRepo = repo
-	_, err := svc.selectOpenAICodexTicketProxy(context.Background(), account)
-	require.NoError(t, err)
-	require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 9}, Restricted: true, MaxReuseDuration: 30 * time.Minute}}, repo.selections)
+	for _, tc := range []struct {
+		name, fallback string
+		wantFallback   bool
+	}{{"default", "", true}, {"explicit_none", RandomProxyRegionFallbackNone, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := ticketTestAccount(42)
+			account.Extra = map[string]any{}
+			account.Extra[ProxyModeExtraKey] = ProxyModeRandom
+			account.Extra[RandomProxyPoolScopeExtraKey] = RandomProxyPoolSelected
+			account.Extra[RandomProxyPoolIDsExtraKey] = []int64{7, 9}
+			account.Extra[RandomProxyMaxReuseMinutesExtraKey] = 30
+			if tc.fallback != "" {
+				account.Extra[RandomProxyRegionFallbackExtraKey] = tc.fallback
+			}
+			repo := &balancedAccountProxyStub{pluginDirectoryProxyRepo: pluginDirectoryProxyRepo{
+				proxy: &Proxy{ID: 7, Status: StatusActive, Protocol: "http", Host: "pool.example", Port: 8080},
+			}}
+			svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, &ticketPoolUpstream{})
+			svc.accountRepo = repo
+			_, err := svc.selectOpenAICodexTicketProxy(context.Background(), account)
+			require.NoError(t, err)
+			require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 9}, Restricted: true, AllowCountryFallback: tc.wantFallback, MaxReuseDuration: 30 * time.Minute}}, repo.selections)
+		})
+	}
 }
 
 func TestCodexTicketGlobalRandomAndInheritKeepDifferentPoolScopes(t *testing.T) {

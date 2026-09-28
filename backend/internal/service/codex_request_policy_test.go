@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -147,7 +148,11 @@ func TestApplyCodexRequestBodyPolicyPathPlaceholder(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("placeholder mode did not rewrite cwd: changed=%v err=%v", changed, err)
 	}
-	got := string(rewritten)
+	var decoded struct{ Input []struct{ Content string } }
+	if err := json.Unmarshal(rewritten, &decoded); err != nil || len(decoded.Input) != 1 {
+		t.Fatalf("invalid rewritten request: err=%v body=%s", err, rewritten)
+	}
+	got := decoded.Input[0].Content
 	if strings.Contains(got, "zhangsan") || strings.Contains(got, "secret-project") {
 		t.Fatalf("cwd path leaked after placeholder rewrite: %s", got)
 	}
@@ -171,7 +176,11 @@ func TestApplyCodexRequestBodyPolicyPathPlaceholderMultipleEnvironments(t *testi
 	if err != nil || !changed {
 		t.Fatalf("multi-env placeholder did not change: changed=%v err=%v", changed, err)
 	}
-	got := string(rewritten)
+	var decoded struct{ Input []struct{ Content string } }
+	if err := json.Unmarshal(rewritten, &decoded); err != nil || len(decoded.Input) != 1 {
+		t.Fatalf("invalid rewritten request: err=%v body=%s", err, rewritten)
+	}
+	got := decoded.Input[0].Content
 	if containsAnyCodex(got, "alice", "bob", "one", "two") {
 		t.Fatalf("a cwd path leaked: %s", got)
 	}

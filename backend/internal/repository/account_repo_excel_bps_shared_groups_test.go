@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -170,6 +171,7 @@ func expectBPS403GroupMove(mock sqlmock.Sqlmock, target int64, shared bool) {
 	if target > 0 {
 		mock.ExpectExec("INSERT INTO account_groups").WithArgs(int64(27), target).WillReturnResult(sqlmock.NewResult(0, 1))
 	}
-	mock.ExpectExec("UPDATE accounts SET updated_at").WithArgs(int64(27)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object('openai_excel_bps_403_moved_at', $2::text, 'openai_excel_bps_403_moved_group_id', $3::bigint), updated_at = NOW() WHERE id = $1")).
+		WithArgs(int64(27), recentUTCTimestampArg{}, target).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO scheduler_outbox").WillReturnResult(sqlmock.NewResult(0, 1))
 }

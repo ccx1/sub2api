@@ -371,7 +371,19 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 	if !req.PoolMode {
 		usableGate = nil
 	}
+	var regionPending []proxyPoolCandidate
+	if req.PoolMode {
+		for _, item := range items {
+			if item.proxy != nil && codexSchedulerRegionPending(item.proxy, health[item.proxy.ID], req.Selection.CountryCode) {
+				regionPending = append(regionPending, item)
+			}
+		}
+	}
 	items, tier := selectProxyPoolRegion(items, health, req.Selection, proxyPoolUsable(health, usableGate))
+	if tier == proxyPoolTierRegion {
+		// 地区筛选会丢弃失败探测中的国家信息；保留等待候选，避免空池策略误放直连。
+		items = codexSchedulerPreserveRegionPending(items, regionPending)
+	}
 	regionFallback := tier != proxyPoolTierRegion
 	if regionFallback && req.PoolMode {
 		accountID := req.Selection.AccountID
@@ -405,6 +417,29 @@ func (a *ProxyPoolAllocator) codexSchedulerCandidates(ctx context.Context, req s
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, proxies, nil
+}
+
+func codexSchedulerPreserveRegionPending(selected, pending []proxyPoolCandidate) []proxyPoolCandidate {
+	if len(pending) == 0 {
+		return selected
+	}
+	seen := make(map[int64]struct{}, len(selected)+len(pending))
+	for _, item := range selected {
+		if item.proxy != nil {
+			seen[item.proxy.ID] = struct{}{}
+		}
+	}
+	for _, item := range pending {
+		if item.proxy == nil {
+			continue
+		}
+		if _, exists := seen[item.proxy.ID]; exists {
+			continue
+		}
+		selected = append(selected, item)
+		seen[item.proxy.ID] = struct{}{}
+	}
+	return selected
 }
 
 // 地区元数据仍有效但本次健康探测失败时保留等待候选，避免误判空池而直连。

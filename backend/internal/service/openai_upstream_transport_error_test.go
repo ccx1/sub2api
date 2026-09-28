@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 )
@@ -54,6 +55,14 @@ func TestClassifyUpstreamTransportError(t *testing.T) {
 		{"ECONNREFUSED bare", syscall.ECONNREFUSED, true},
 		{"EHOSTUNREACH bare", syscall.EHOSTUNREACH, true},
 		{"ENETUNREACH bare", syscall.ENETUNREACH, true},
+		{"Windows WSAECONNREFUSED bare", syscall.Errno(10061), runtime.GOOS == "windows"},
+		{
+			"Windows WSAECONNREFUSED wrapped",
+			&net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connectex", Err: syscall.Errno(10061)}},
+			runtime.GOOS == "windows",
+		},
+		{"Windows WSAETIMEDOUT stays transient", syscall.Errno(10060), false},
+		{"Windows WSAECONNRESET stays transient", syscall.Errno(10054), false},
 
 		// *net.DNSError with IsNotFound — permanent DNS lookup failure.
 		{

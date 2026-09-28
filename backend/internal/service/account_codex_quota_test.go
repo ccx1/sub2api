@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -26,7 +27,10 @@ func TestAccountCodexQuotaExhaustionBoundaries(t *testing.T) {
 		{"missing sample and reset", "5h", 100, "", "", false},
 		{"invalid sample without reset", "5h", 100, "invalid", "", false},
 		{"future sample without reset", "5h", 100, now.Add(time.Hour).Format(time.RFC3339), "", false},
-		{"stale sample despite future reset", "7d", 100, now.Add(-2 * time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339), false},
+		{"stale exhausted sample with future reset", "7d", 100, now.Add(-2 * time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339), true},
+		{"stale sample without reset", "5h", 100, now.Add(-2 * time.Hour).Format(time.RFC3339), "", false},
+		{"stale sample with invalid reset", "7d", 100, now.Add(-2 * time.Hour).Format(time.RFC3339), "invalid", false},
+		{"stale sample after reset", "7d", 100, now.Add(-2 * time.Hour).Format(time.RFC3339), now.Add(-time.Minute).Format(time.RFC3339), false},
 		{"reset reached", "5h", 100, now.Add(-time.Minute).Format(time.RFC3339), now.Format(time.RFC3339), false},
 		{"nonfinite percentage", "5h", math.NaN(), now.Format(time.RFC3339), "", false},
 		{"infinite percentage", "7d", math.Inf(1), now.Format(time.RFC3339), "", false},
@@ -43,6 +47,34 @@ func TestAccountCodexQuotaExhaustionBoundaries(t *testing.T) {
 			require.Equal(t, tt.blocked, account.IsOpenAICodexQuotaExhausted(now))
 			require.Equal(t, !tt.blocked, account.isSchedulableAt(now))
 		})
+	}
+}
+
+func TestAccountCodexQuotaExhaustionStaleSampleRecoversAtKnownReset(t *testing.T) {
+	now := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
+	resetAt := now.Add(time.Hour)
+	for _, window := range []string{"5h", "7d"} {
+		for _, relative := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/relative=%t", window, relative), func(t *testing.T) {
+				extra := map[string]any{
+					"codex_" + window + "_used_percent": 100.0,
+					"codex_usage_updated_at":            now.Add(-3 * time.Hour).Format(time.RFC3339),
+				}
+				if relative {
+					extra["codex_"+window+"_reset_after_seconds"] = 4 * 3600
+				} else {
+					extra["codex_"+window+"_reset_at"] = resetAt.Format(time.RFC3339)
+				}
+				account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Status: StatusActive, Schedulable: true, Extra: extra}
+				require.True(t, account.IsOpenAICodexQuotaExhausted(now))
+				require.False(t, account.isSchedulableAt(resetAt.Add(-time.Second)))
+				require.True(t, account.IsCredentialUsableForShadow())
+				require.False(t, account.IsOpenAICodexQuotaExhausted(resetAt))
+				require.True(t, account.isSchedulableAt(resetAt))
+				require.True(t, account.isSchedulableAt(resetAt.Add(time.Hour)))
+			})
+		}
 	}
 }
 

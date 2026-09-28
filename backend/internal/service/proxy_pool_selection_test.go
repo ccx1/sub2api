@@ -26,7 +26,7 @@ func TestBalancedProxySelectionUsesAccountAndPool(t *testing.T) {
 		proxy: &Proxy{ID: 7, Status: StatusActive},
 	}}
 	require.NoError(t, ResolveRandomProxy(context.Background(), account, repo))
-	require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 9}, Restricted: true}}, repo.selections)
+	require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 9}, Restricted: true, AllowCountryFallback: true}}, repo.selections)
 	require.Zero(t, repo.globalCalls)
 	require.Empty(t, repo.selectedIDs)
 	repo.proxy.ID = 99
@@ -73,6 +73,6 @@ func TestBalancedProxyReuseResolvesCurrentAccountPool(t *testing.T) {
 	bound := *account
 	bound.ProxyID, bound.Proxy = &proxy.ID, proxy
 	require.NoError(t, ValidateRandomProxyForReuse(context.Background(), &bound, repo))
-	require.Equal(t, []ProxyPoolSelection{{AccountID: 42}}, repo.selections)
+	require.Equal(t, []ProxyPoolSelection{{AccountID: 42, AllowCountryFallback: true}}, repo.selections)
 	require.Nil(t, account.ProxyID)
 }

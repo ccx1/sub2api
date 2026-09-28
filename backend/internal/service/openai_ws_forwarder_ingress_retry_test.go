@@ -309,6 +309,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_TurnRetryForcesF
 	staleConnB := newOpenAIWSConn(pool.nextConnID(account.ID), account.ID, staleB, nil)
 	staleConnB.handshakeCompatibility = openAIWSAcquireCompatibility(*lastAcquire)
 	staleConnB.routingAffinity = normalizeOpenAIWSRoutingAffinity(lastAcquire.Headers)
+	// 手工入池也要建立真实握手的准入绑定，否则选中 B 时会在首读前被拒绝。
+	require.NotNil(t, lastAcquire.BindHandshake)
+	staleConnB.turnBinding = lastAcquire.BindHandshake(lastAcquire.Headers)
 	ap.mu.Lock()
 	ap.conns[staleConnB.id] = staleConnB
 	idleConns := len(ap.conns)

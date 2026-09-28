@@ -129,21 +129,31 @@ func TestValidateRandomProxyReuseShadowRejectsUnusableParent(t *testing.T) {
 }
 
 func TestValidateRandomProxyReuseUsesCurrentPoolAndPeriod(t *testing.T) {
-	current := pluginDirectoryAccount(RandomProxyEmptyPoolPolicyReject)
-	current.Extra[RandomProxyPoolScopeExtraKey] = RandomProxyPoolSelected
-	current.Extra[RandomProxyPoolIDsExtraKey] = []int64{7, 8}
-	current.Extra[RandomProxyMaxReuseMinutesExtraKey] = 30
-	proxy := &Proxy{ID: 7, Status: StatusActive}
-	bound := *current
-	bound.ProxyID, bound.Proxy = &proxy.ID, proxy
-	repo := &balancedAccountProxyStub{pluginDirectoryProxyRepo: pluginDirectoryProxyRepo{account: current, proxy: proxy}}
-	require.NoError(t, ValidateRandomProxyForReuse(context.Background(), &bound, repo))
-	require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 8}, Restricted: true, MaxReuseDuration: 30 * time.Minute}}, repo.selections)
-	newProxy := *proxy
-	newProxy.ID = 8
-	repo.proxy = &newProxy
-	require.ErrorIs(t, ValidateRandomProxyForReuse(context.Background(), &bound, repo), ErrRandomProxyChanged)
-	require.Equal(t, []int64{7, 8}, repo.selections[1].IDs)
+	for _, tc := range []struct {
+		name, fallback string
+		wantFallback   bool
+	}{{"default", "", true}, {"explicit_none", RandomProxyRegionFallbackNone, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := pluginDirectoryAccount(RandomProxyEmptyPoolPolicyReject)
+			current.Extra[RandomProxyPoolScopeExtraKey] = RandomProxyPoolSelected
+			current.Extra[RandomProxyPoolIDsExtraKey] = []int64{7, 8}
+			current.Extra[RandomProxyMaxReuseMinutesExtraKey] = 30
+			if tc.fallback != "" {
+				current.Extra[RandomProxyRegionFallbackExtraKey] = tc.fallback
+			}
+			proxy := &Proxy{ID: 7, Status: StatusActive}
+			bound := *current
+			bound.ProxyID, bound.Proxy = &proxy.ID, proxy
+			repo := &balancedAccountProxyStub{pluginDirectoryProxyRepo: pluginDirectoryProxyRepo{account: current, proxy: proxy}}
+			require.NoError(t, ValidateRandomProxyForReuse(context.Background(), &bound, repo))
+			require.Equal(t, []ProxyPoolSelection{{AccountID: 42, IDs: []int64{7, 8}, Restricted: true, AllowCountryFallback: tc.wantFallback, MaxReuseDuration: 30 * time.Minute}}, repo.selections)
+			newProxy := *proxy
+			newProxy.ID = 8
+			repo.proxy = &newProxy
+			require.ErrorIs(t, ValidateRandomProxyForReuse(context.Background(), &bound, repo), ErrRandomProxyChanged)
+			require.Equal(t, []int64{7, 8}, repo.selections[1].IDs)
+		})
+	}
 }
 
 func TestValidateRandomProxyReuseEmptyPoolPolicies(t *testing.T) {
