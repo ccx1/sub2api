@@ -18,8 +18,13 @@ func TestOpenAIBPSSchedulerFallsBackBeforeWaiting(t *testing.T) {
 		wantAccount          int64
 		wantWait             bool
 		subscriptionPriority bool
+		routingBody          []byte
+		hasRoutingIntent     bool
 	}{
 		{name: "native subscription does not bypass available BPS", subscriptionPriority: true, bpsAcquired: true, nativeAcquired: true, wantAccount: 1},
+		{name: "confirmed BPS ingress takes precedence", hasRoutingIntent: true, routingBody: []byte(`{"input":"plain response"}`), bpsAcquired: true, nativeAcquired: true, wantAccount: 1},
+		{name: "native ingress keeps administrator priority", hasRoutingIntent: true, bpsAcquired: true, nativeAcquired: true, wantAccount: 2},
+		{name: "hosted tools keep native priority", hasRoutingIntent: true, routingBody: []byte(`{"tools":[{"type":"web_search","external_web_access":true}]}`), bpsAcquired: true, nativeAcquired: true, wantAccount: 2},
 		{name: "native subscription can absorb full BPS", subscriptionPriority: true, bpsLoad: 100, nativeAcquired: true, wantAccount: 2},
 		{name: "BPS stays preferred when both are idle", bpsAcquired: true, nativeAcquired: true, wantAccount: 1},
 		{name: "full BPS falls back to idle native", bpsLoad: 100, nativeAcquired: true, wantAccount: 2},
@@ -57,7 +62,11 @@ func TestOpenAIBPSSchedulerFallsBackBeforeWaiting(t *testing.T) {
 			if tc.nativeExcluded {
 				req.ExcludedIDs = map[int64]struct{}{2: {}}
 			}
-			selection, _, err := scheduler.Select(context.Background(), req)
+			ctx := context.Background()
+			if tc.hasRoutingIntent {
+				ctx = WithOpenAIExcelBPSRouting(ctx, tc.routingBody)
+			}
+			selection, _, err := scheduler.Select(ctx, req)
 			require.NoError(t, err)
 			require.NotNil(t, selection)
 			require.Equal(t, tc.wantAccount, selection.Account.ID)

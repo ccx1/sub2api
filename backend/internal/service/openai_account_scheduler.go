@@ -1499,11 +1499,46 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 	}
 
+	var bpsAttempt *openAIAccountLoadSelectionAttempt
+	if req.Platform == PlatformOpenAI {
+		bpsAccounts := make([]*Account, 0, len(filtered))
+		nativeAccounts := make([]*Account, 0, len(filtered))
+		for _, account := range filtered {
+			if account.IsExcelBPSEnabledForModel(req.RequestedModel) &&
+				(ctx.Value(excelBPSRoutingContextKey{}) == nil || isOpenAIExcelBPSRouting(ctx, account)) {
+				bpsAccounts = append(bpsAccounts, account)
+			} else {
+				nativeAccounts = append(nativeAccounts, account)
+			}
+		}
+		if len(bpsAccounts) > 0 && len(nativeAccounts) > 0 {
+			attempt := s.trySelectByLoadBalancePool(ctx, req, bpsAccounts, loadMap, budget)
+			if attempt.err != nil && !attempt.noCompactCandidates {
+				return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, attempt.err
+			}
+			if attempt.result != nil {
+				return attempt.result, attempt.candidateCount, attempt.topK, attempt.loadSkew, nil
+			}
+			if !attempt.noCompactCandidates {
+				bpsAttempt = &attempt
+			}
+			filtered = nativeAccounts
+		}
+	}
+	finishBPSWait := func() (*AccountSelectionResult, int, int, float64, error) {
+		return s.finishLoadBalanceSelectionFallback(ctx, req, *bpsAttempt, budget, filterStats)
+	}
+
 	if req.SubscriptionPriority {
 		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionAccounts(filtered)
 		if len(subscriptionAccounts) > 0 {
 			attempt := s.trySelectByLoadBalancePool(ctx, req, subscriptionAccounts, loadMap, budget)
 			if attempt.err != nil && (!attempt.noCompactCandidates || len(regularAccounts) <= 0) {
+				if bpsAttempt != nil && attempt.noCompactCandidates {
+					if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+						return result, count, topK, skew, nil
+					}
+				}
 				return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, attempt.err
 			}
 			if attempt.result != nil {
@@ -1516,6 +1551,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				}
 				if regularAttempt.result != nil {
 					return regularAttempt.result, regularAttempt.candidateCount, regularAttempt.topK, regularAttempt.loadSkew, nil
+				}
+				if bpsAttempt != nil {
+					if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+						return result, count, topK, skew, nil
+					}
 				}
 				var result *AccountSelectionResult
 				candidateCount, topK, loadSkew := regularAttempt.candidateCount, regularAttempt.topK, regularAttempt.loadSkew
@@ -1535,6 +1575,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				}
 				return result, candidateCount, topK, loadSkew, fallbackErr
 			}
+			if bpsAttempt != nil {
+				if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+					return result, count, topK, skew, nil
+				}
+			}
 			return s.finishLoadBalanceSelectionFallback(ctx, req, attempt, budget, filterStats)
 		}
 	}
@@ -1545,6 +1590,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 	if attempt.result != nil {
 		return attempt.result, attempt.candidateCount, attempt.topK, attempt.loadSkew, nil
+	}
+	if bpsAttempt != nil {
+		if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+			return result, count, topK, skew, nil
+		}
 	}
 	return s.finishLoadBalanceSelectionFallback(ctx, req, attempt, budget, filterStats)
 }

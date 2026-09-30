@@ -3,8 +3,8 @@
 ## Sources
 
 - Baseline before integration: `dcda8558019ce7e8a855d61f6251e357472c5059`
-- Official `old-origin/main`: `a60a29549f488a854966aaec9541abbe006cac22`
-- Ranxi `ranxi/production`: `7124114c22c7cb786a62d5e3ee64713ca87ebdfc`
+- Official `old-origin/main`: `a0f41f95a07ee6ca0b1300d3c96ce4b62e24724b`
+- Ranxi `ranxi/production`: `a53a7ff163d9337a094e7537df3aac2b31f308b7`
 
 ## Directly absorbed
 
@@ -18,6 +18,9 @@
 - Typed local egress failures survive the Responses and native-attachment `Forward` error wrappers as allowlisted sentinels, without exposing raw transport errors; the scheduler excludes them from account-health penalties and success recovery. BPS semantic failures are classified by `basispoints.UpstreamFailure` rather than matching arbitrary error text.
 - Initial HTTP admission keeps the local bounded retry behavior and excludes continuation requests, committed responses, cancellation, exhausted budget, and the previous account.
 - WebSocket/SSE acceleration is opt-in and limited to ordinary OAuth requests without continuation, passthrough, or plugin paths; typed handshake failures are preserved.
+- The official Claude Code fallback fix is adapted for both OpenAI-compatible endpoints: a configured fallback group is eligible for selection, and channel mapping follows that group while billing remains with the API key group.
+- Shared-pool JSON import now applies explicit exported BPS values ahead of form and global defaults; invalid values and privileged 403 group actions are rejected. Missing fields retain their previous default behavior.
+- Mixed BPS/native scheduling tries eligible BPS capacity first, falls back to native capacity when BPS is full, and preserves explicit native ingress priority.
 
 ## Kept local
 
@@ -28,12 +31,12 @@
 
 - Mihomo warm/recovery/acquisition and the associated image-policy, image-capacity, compaction, and generated-image API chain are deferred pending a complete dependency and runtime review.
 - Deferred files include `openai_excel_bps_image_policy.go`, `openai_excel_bps_images.go`, `openai_excel_bps_recovery.go`, `openai_excel_bps_warm.go`, and their tests.
-- The temporary merge tree still contains Ranxi `openai_oauth_reauth.go`, which imports the deferred `internal/mihomo` package. The service package cannot compile until that dependency is either fully adopted or the reauth path is deferred/ adapted by the integration owner.
+- Ranxi's later BPS/native capacity rebalancing depends on the deferred priority scheduling configuration, sticky selection, and shared scheduler. It is deferred together with that chain; ordinary requests keep the local BPS-first behavior.
 
 ## Verification evidence
 
 - Passed: `go test -count=1 ./internal/service/basispoints`.
 - Passed: no Go conflict markers under `backend` (`rg -n '^<<<<<<<|^=======|^>>>>>>>$' backend --glob '*.go'`).
 - Passed: `git diff --check` for the BPS files touched in this pass.
-- Added but not yet executed: `TestExcelBPSLocalEgressFailureReachesAccountScheduler` covers Responses and native-attachment failures, safe error text, and scheduler non-penalty for both random-proxy sentinels.
-- Blocked: `go test -count=1 ./internal/service -run 'TestExcelBPSLocalEgressFailureReachesAccountScheduler|TestExcelBPSNativeUploadFailureStopsWithoutQuotaWrite|TestOpenAIAccountSchedulingIgnoresLocalEgressAndBPSInBandAuth'` with `GOARCH=amd64` stops at syntax errors in `account_test_service.go` and `openai_account_runtime_block_fastpath.go` from the still-unresolved merge. An earlier attempt also encountered missing `internal/mihomo` from the deferred Ranxi chain. The host Go default is `GOARCH=386`, which separately overflows constants in `internal/pkg/openaiauth`.
+- Final-SHA BPS service, mixed-pool scheduler, gateway fallback, shared import, routes, and API-contract targeted tests passed. Shared import creation assertions use an in-memory repository stub, not PostgreSQL; gateway fallback tests stop at an upstream 400 before usage persistence.
+- The host Go default is `GOARCH=386`, which overflows constants in `internal/pkg/openaiauth`; final Go checks explicitly set `GOARCH=amd64` and limit parallel compilation.

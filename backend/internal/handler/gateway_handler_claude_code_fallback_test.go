@@ -5,18 +5,40 @@ package handler
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+type fallbackMappingUpstream struct {
+	service.HTTPUpstream
+	body []byte
+}
+
+func (u *fallbackMappingUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	var err error
+	u.body, err = io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"test upstream rejection"}}`)),
+	}, nil
+}
 
 // groupScopedSchedulerCache 按桶的分组只返回该分组的成员账号，并记录被查询过的分组。
 type groupScopedSchedulerCache struct {
@@ -73,11 +95,11 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 		fallbackAccountID = int64(9311)
 	)
 
-	// 账号不带 api_key：转发在取令牌时失败，请求不会触达上游，断言只看选号结果。
 	newAccount := func(id, groupID int64) *service.Account {
 		return &service.Account{
 			ID: id, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
 			Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+			Credentials:   map[string]any{"api_key": "test-key"},
 			AccountGroups: []service.AccountGroup{{AccountID: id, GroupID: groupID}},
 		}
 	}
@@ -126,15 +148,30 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 					newAccount(primaryAccountID, primaryGroupID),
 					newAccount(fallbackAccountID, fallbackGroupID),
 				}}}
+				channelService := service.NewChannelService(&openAIWSUsageHandlerChannelRepoStub{
+					channels: []service.Channel{
+						{ID: 9340, Status: service.StatusActive, GroupIDs: []int64{primaryGroupID}, ModelMapping: map[string]map[string]string{
+							service.PlatformAnthropic: {"claude-sonnet-4-5": "claude-haiku-4-5"},
+						}},
+						{ID: 9341, Status: service.StatusActive, GroupIDs: []int64{fallbackGroupID}, ModelMapping: map[string]map[string]string{
+							service.PlatformAnthropic: {"claude-sonnet-4-5": "claude-opus-4-5"},
+						}},
+					},
+					groupPlatforms: map[int64]string{
+						primaryGroupID: service.PlatformAnthropic, fallbackGroupID: service.PlatformAnthropic,
+					},
+				}, nil, nil, nil, nil)
+				upstream := &fallbackMappingUpstream{}
+				cfg := &config.Config{RunMode: config.RunModeSimple}
 				gatewayService := service.NewGatewayService(
 					nil, &groupMapRepo{fakeGroupRepo: &fakeGroupRepo{}, groups: map[int64]*service.Group{
 						primaryGroupID:  primary,
 						fallbackGroupID: fallback,
-					}}, nil, nil, nil, nil, nil, nil, nil,
+					}}, nil, nil, nil, nil, nil, nil, cfg,
 					service.NewSchedulerSnapshotService(schedulerCache, nil, nil, nil, nil),
-					nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+					nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, channelService,
+					nil, nil, nil, nil,
 				)
-				cfg := &config.Config{RunMode: config.RunModeSimple}
 				billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 				t.Cleanup(billingCacheService.Stop)
 				h := &GatewayHandler{
@@ -167,6 +204,7 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 					require.Contains(t, recorder.Body.String(), "This group is restricted to Claude Code clients")
 					require.False(t, reachedSelection, "a Claude Code only group without fallback must be rejected before account selection")
 					require.Empty(t, schedulerCache.queriedGroupIDs())
+					require.Empty(t, upstream.body)
 					return
 				}
 				require.NotContains(t, recorder.Body.String(), "restricted to Claude Code clients")
@@ -175,6 +213,10 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 				queried := schedulerCache.queriedGroupIDs()
 				require.Contains(t, queried, fallbackGroupID)
 				require.NotContains(t, queried, primaryGroupID)
+				require.Equal(t, "claude-opus-4-5", gjson.GetBytes(upstream.body, "model").String(),
+					"the forwarded model must use the fallback group's mapping")
+				require.Equal(t, primaryGroupID, *apiKey.GroupID, "billing retains the API key's original group")
+				require.Same(t, primary, apiKey.Group)
 			})
 		}
 	}

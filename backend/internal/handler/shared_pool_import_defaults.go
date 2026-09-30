@@ -65,7 +65,7 @@ func applySharedAccountImportDefaults(input *service.SharedPoolAccountInput, def
 	input.CodexTicketEnabled = new(defaults.CodexTicketEnabled)
 	account := &service.Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
 	// 与后台导入一致：显式填写任一 BPS 字段时，整个配置族使用当次提交值。
-	if choices.ExcelBPSEnabled != nil || choices.ExcelBPSOptions != nil || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() ||
+	if input.ExcelBPSEnabled != nil || input.ExcelBPSOptions != nil || choices.ExcelBPSEnabled != nil || choices.ExcelBPSOptions != nil || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() ||
 		!(&service.Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: map[string]any{"openai_excel_bps": true}}).IsExcelBPSEnabled() {
 		return
 	}
