@@ -452,6 +452,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/codex-ticket/diagnostic", h.Admin.Account.DiagnoseCodexModelQuality)
 		accounts.POST("/:id/codex-ticket/request-preview", h.Admin.Account.PreviewCodexTicketRequest)
 		accounts.POST("/:id/codex-ticket/retry", h.Admin.Account.RetryCodexTicket)
+		// Node capture returns raw cookies and credentials; apply the configured step-up policy.
+		accounts.GET("/:id/codex-ticket/nodes", gin.HandlerFunc(stepUpAuth), h.Admin.Account.GetCodexTicketNodes)
+		accounts.POST("/:id/codex-ticket/node-probe", gin.HandlerFunc(stepUpAuth), h.Admin.Account.ProbeCodexTicketNodes)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)
 		accounts.PUT("/:id/upstream-billing-probe", h.Admin.Account.SetUpstreamBillingProbeEnabled)

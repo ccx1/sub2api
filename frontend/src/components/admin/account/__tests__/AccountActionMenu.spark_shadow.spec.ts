@@ -173,4 +173,28 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
 
     wrapper.unmount()
   })
+
+  it('节点采集入口仅在 showCodexTicketNodes 时显示，点击触发 codex-ticket-nodes 事件', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'oauth', parent_account_id: null })
+    const hidden = mount(AccountActionMenu, {
+      props: { show: true, account, anchorRect },
+      attachTo: document.body,
+    })
+    expect(getBodyText()).not.toContain('admin.accounts.codexTicketNodes.menu')
+    hidden.unmount()
+
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, anchorRect, showCodexTicketNodes: true },
+      attachTo: document.body,
+    })
+    const nodesBtn = getBodyButtons().find(b => b.textContent?.includes('admin.accounts.codexTicketNodes.menu'))
+    expect(nodesBtn).toBeDefined()
+
+    nodesBtn!.click()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('codex-ticket-nodes')![0][0]).toMatchObject({ id: account.id })
+    expect(wrapper.emitted('close')).toBeTruthy()
+    wrapper.unmount()
+  })
 })

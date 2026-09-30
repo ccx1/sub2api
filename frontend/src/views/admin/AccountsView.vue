@@ -522,9 +522,10 @@
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <CodexTicketHistoryModal :show="showCodexTicketHistory" :account="codexTicketHistoryAcc" @close="closeCodexTicketHistory" />
     <CodexModelQualityRecordModal :show="showCodexModelQuality" :account="codexModelQualityAcc" @close="closeCodexModelQuality" />
+    <CodexTicketNodesModal :show="showCodexTicketNodes" :account="codexTicketNodesAcc" @close="closeCodexTicketNodes" />
     <IQTestModal :show="showIQTest" :account="iqTestingAcc" :accounts="accounts" @close="closeIQTestModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="!!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" :show-codex-model-quality="!!menu.acc && isCodexTicketAccount(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @codex-model-quality="handleViewCodexModelQuality" @schedule="handleSchedule" @iq-test="handleIQTest" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="!!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" :show-codex-model-quality="!!menu.acc && isCodexTicketAccount(menu.acc)" :show-codex-ticket-nodes="!!menu.acc && isCodexTicketAccount(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @codex-model-quality="handleViewCodexModelQuality" @codex-ticket-nodes="handleViewCodexTicketNodes" @schedule="handleSchedule" @iq-test="handleIQTest" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal v-if="authStore.isAdmin" :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" :settings-open="showImportSettings" @close="showImportData = false" @settings="openImportSettings" @imported="handleDataImported" @imported-and-edit="handleDataImportedAndEdit" />
     <AccountImportSettingsModal v-if="authStore.isAdmin" :show="showImportSettings" @close="showImportSettings = false" />
@@ -585,6 +586,7 @@ import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import CodexTicketHistoryModal from '@/components/account/CodexTicketHistoryModal.vue'
 import CodexModelQualityRecordModal from '@/components/admin/account/CodexModelQualityRecordModal.vue'
+import CodexTicketNodesModal from '@/components/admin/account/CodexTicketNodesModal.vue'
 import CodexTicketAlerts from '@/components/account/CodexTicketAlerts.vue'
 import IQTestModal from '@/components/admin/account/IQTestModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
@@ -749,6 +751,7 @@ const showTest = ref(false)
 const showStats = ref(false)
 const showCodexTicketHistory = ref(false)
 const showCodexModelQuality = ref(false)
+const showCodexTicketNodes = ref(false)
 const showIQTest = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
@@ -761,6 +764,7 @@ const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
 const codexTicketHistoryAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const codexModelQualityAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
+const codexTicketNodesAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const iqTestingAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
@@ -1574,6 +1578,7 @@ const isAnyModalOpen = computed(() => {
     showStats.value ||
     showCodexTicketHistory.value ||
     showCodexModelQuality.value ||
+    showCodexTicketNodes.value ||
     showIQTest.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
@@ -2660,6 +2665,15 @@ const handleViewCodexModelQuality = (account: AccountListItem) => {
   if (!isCodexTicketAccount(account)) return
   codexModelQualityAcc.value = { id: account.id, name: account.name }
   showCodexModelQuality.value = true
+}
+const closeCodexTicketNodes = () => {
+  showCodexTicketNodes.value = false
+  codexTicketNodesAcc.value = null
+}
+const handleViewCodexTicketNodes = (account: AccountListItem) => {
+  if (!isCodexTicketAccount(account)) return
+  codexTicketNodesAcc.value = { id: account.id, name: account.name }
+  showCodexTicketNodes.value = true
 }
 const handleSchedule = async (a: Account) => {
   scheduleAcc.value = a
