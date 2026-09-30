@@ -471,6 +471,7 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 		return
 	}
 	if result != nil && result.NewBalance != nil && deps.billingCacheService.balanceBelowEligibilityThreshold(*result.NewBalance) {
+		InflightReservationFromContext(ctx).RetainUntilExpiry()
 		if err := deps.billingCacheService.InvalidateUserBalance(ctx, p.User.ID); err != nil {
 			slog.Warn("invalidate balance cache after exhausted deduction failed",
 				"user_id", p.User.ID,
@@ -489,7 +490,15 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 		if err == nil {
 			return
 		}
-		logger.LegacyPrintf("service.gateway", "Warning: sync deduct balance cache failed for user %d, falling back to queue: %v", p.User.ID, err)
+		// A timeout may mean Redis already applied the deduction. Never retry an
+		// additive update or release the reservation against an unchanged cache.
+		InflightReservationFromContext(ctx).RetainUntilExpiry()
+		if invalidateErr := deps.billingCacheService.InvalidateUserBalance(ctx, p.User.ID); invalidateErr != nil {
+			logger.LegacyPrintf("service.gateway", "ALERT: sync deduct and invalidate balance cache failed for user %d: deduct=%v invalidate=%v", p.User.ID, err, invalidateErr)
+		} else {
+			logger.LegacyPrintf("service.gateway", "Warning: sync deduct balance cache failed for user %d; invalidated cache: %v", p.User.ID, err)
+		}
+		return
 	}
 	deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
 }

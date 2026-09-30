@@ -692,6 +692,7 @@ type AccountBulkEditTarget =
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
       selectedPlanTypes: string[]
+      selectedExcelBPSEligible: boolean
     }
   | {
       mode: 'filtered'
@@ -709,6 +710,7 @@ type AccountBulkEditTarget =
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
       selectedPlanTypes: string[]
+      selectedExcelBPSEligible: boolean
     }
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
@@ -2320,7 +2322,18 @@ const collectSelectionMetadata = (rows: Account[]) => {
     const plan = (account.credentials as Record<string, unknown> | undefined)?.plan_type
     return typeof plan === 'string' ? plan.trim() : ''
   }).filter(Boolean)))
-  return { selectedPlatforms, selectedTypes, selectedPlanTypes }
+  const selectedExcelBPSEligible = rows.length > 0 && rows.every(account => {
+    if (account.platform !== 'openai' || account.type !== 'oauth' || account.parent_account_id != null) return false
+    const credentials = account.credentials
+    if (!credentials) return false
+    const authMode = credentials.auth_mode
+    const legacyAuthMode = credentials.openai_auth_mode
+    if (typeof authMode === 'string' && authMode.trim().toLowerCase() === 'agentidentity') return false
+    return ![authMode, legacyAuthMode].some(mode =>
+      typeof mode === 'string' && ['personalaccesstoken', 'personal_access_token'].includes(mode.trim().toLowerCase())
+    )
+  })
+  return { selectedPlatforms, selectedTypes, selectedPlanTypes, selectedExcelBPSEligible }
 }
 
 const selectionMetadataLoading = ref(false)
@@ -2388,12 +2401,11 @@ const handleDataImportedAndEdit = async (accountIds: number[]) => {
   handleDataImported()
   const ids = [...new Set(accountIds)].filter(id => Number.isSafeInteger(id) && id > 0)
   if (ids.length === 0) return
+  const requestVersion = ++bulkMetadataRequest
+  selectionMetadataLoading.value = true
   try {
-    const importedAccounts: Account[] = []
-    for (let offset = 0; offset < ids.length; offset += 8) {
-      const batch = await Promise.all(ids.slice(offset, offset + 8).map(id => adminAPI.accounts.getById(id)))
-      importedAccounts.push(...batch)
-    }
+    const importedAccounts = await loadAccountsForMetadata(ids)
+    if (requestVersion !== bulkMetadataRequest) return
     if (importedAccounts.length === 1) {
       edAcc.value = importedAccounts[0]!
       showEdit.value = true
@@ -2406,7 +2418,9 @@ const handleDataImportedAndEdit = async (accountIds: number[]) => {
     }
     showBulkEdit.value = true
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+    if (requestVersion === bulkMetadataRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  } finally {
+    if (requestVersion === bulkMetadataRequest) selectionMetadataLoading.value = false
   }
 }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'

@@ -144,7 +144,10 @@ func TestWrapUsageRecordTaskContext_HandsReservationToBillingTask(t *testing.T) 
 	require.Equal(t, 1, cache.count())
 
 	ran := false
-	task, abandon := wrapUsageRecordTaskContext(c.Request.Context(), func(context.Context) { ran = true })
+	task, abandon := wrapUsageRecordTaskContext(c.Request.Context(), func(ctx context.Context) {
+		ran = true
+		require.NotNil(t, service.InflightReservationFromContext(ctx), "billing must see the reservation on cache failure")
+	})
 	done() // handler returns; billing still pending
 	require.Equal(t, 1, cache.count(), "reservation held until the billing task finishes")
 	task(context.Background())

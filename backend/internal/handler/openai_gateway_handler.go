@@ -350,6 +350,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
+	base = service.WithInflightReservation(base, service.InflightReservationFromContext(parent))
 	return requesttiming.With(base, requesttiming.From(parent))
 }
 
@@ -2730,8 +2731,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
-	// 余额模式在途预留（会话级）：按首帧估算一次，会话期间续期；每轮计费任务接管引用，
-	// 会话结束且所有轮次扣减落地后释放。
+	// 首轮预留在握手时建立；后续 turn 使用各自的请求估算和预留。
 	inflightCtx, inflightDone, inflightErr := reserveInflightBalanceCtx(ctx, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, firstMessage))
 	if inflightErr != nil {
 		reqLog.Info("openai.websocket_inflight_reservation_rejected", zap.Error(inflightErr))
@@ -3013,6 +3013,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// turn 级定价：首轮回退到 TurnStarted 的所属 turn 时刻；后续 turn 由
 		// BeforeTurn 重新冻结 pricingAt 并按最新门复核当前账号。
 		var turnPricing openAIWSTurnPricing
+		type turnInflightState struct {
+			ctx  context.Context
+			done func()
+		}
+		var turnInflightMu sync.Mutex
+		turnEstimates := make(map[int]service.InflightEstimateRequest)
+		turnInflight := make(map[int]turnInflightState)
+		defer func() {
+			turnInflightMu.Lock()
+			defer turnInflightMu.Unlock()
+			for _, state := range turnInflight {
+				state.done()
+			}
+		}()
 		var wsCodexQuotaBlockedUntil atomic.Int64
 		var turnSettlement atomic.Pointer[service.SharedPoolSettlementTerms]
 		turnSettlement.Store(account.SharedPoolSettlement)
@@ -3088,6 +3102,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}
+				turnInflightMu.Lock()
+				turnEstimates[turn] = tokenInflightEstimate(model, payload)
+				turnInflightMu.Unlock()
 				return nil
 			},
 			MapRequestModel: func(turn int, originalModel string) (string, error) {
@@ -3202,9 +3219,49 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-				return checkSimpleModeTurnBilling()
+				if err := checkSimpleModeTurnBilling(); err != nil {
+					releaseTurnSlots()
+					return err
+				}
+				if h.cfg == nil || h.cfg.RunMode != config.RunModeSimple {
+					if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(ctx, apiKey)); err != nil {
+						releaseTurnSlots()
+						return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", err)
+					}
+				}
+				turnInflightMu.Lock()
+				estimate, found := turnEstimates[turn]
+				delete(turnEstimates, turn)
+				turnInflightMu.Unlock()
+				if !found && h.billingCacheService.InflightReservationEnabled() {
+					releaseTurnSlots()
+					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", errors.New("missing turn reservation estimate"))
+				}
+				turnCtx, done, err := reserveInflightBalanceCtx(ctx, h.billingCacheService, h.gatewayService, apiKey, subscription, estimate)
+				if err != nil {
+					releaseTurnSlots()
+					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", err)
+				}
+				turnInflightMu.Lock()
+				if prior, ok := turnInflight[turn]; ok {
+					prior.done()
+				}
+				turnInflight[turn] = turnInflightState{ctx: turnCtx, done: done}
+				turnInflightMu.Unlock()
+				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				turnBillingCtx := ctx
+				if turn > 1 {
+					turnInflightMu.Lock()
+					state, ok := turnInflight[turn]
+					delete(turnInflight, turn)
+					turnInflightMu.Unlock()
+					if ok {
+						turnBillingCtx = state.ctx
+						defer state.done()
+					}
+				}
 				// 保留实际出站代理，异步记账只捕获当前 turn 的结算条件。
 				billingSnapshot := *account
 				billingSnapshot.SharedPoolSettlement = turnSettlement.Load()
@@ -3296,7 +3353,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				sessionID := service.ExtractOpenAIClientSessionID(c, cyberBlockBody)
 				turnRecordPricingAt := turnPricing.currentOr(turnStart)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
+				h.submitOpenAIUsageRecordTask(turnBillingCtx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 						Result:             result,
 						APIKey:             apiKey,

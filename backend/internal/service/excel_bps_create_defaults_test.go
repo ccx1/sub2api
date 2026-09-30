@@ -41,6 +41,10 @@ func TestAccountImportDefaultsExcelBPSOnlyForEligibleOAuthAndSkipsTicketDefaults
 			in.Type = AccountTypeOAuth
 			in.Credentials = map[string]any{"access_token": "test-token", "auth_mode": OpenAIAuthModeAgentIdentity}
 		},
+		"free": func(in *CreateAccountInput) {
+			in.Type = AccountTypeOAuth
+			in.Credentials = map[string]any{"access_token": "test-token", "plan_type": " Free "}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc, _ := accountImportDefaultTestService(t, excelBPSImportSettings())
@@ -51,6 +55,20 @@ func TestAccountImportDefaultsExcelBPSOnlyForEligibleOAuthAndSkipsTicketDefaults
 			require.NotContains(t, account.Extra, excelBPSExtraKey)
 		})
 	}
+}
+
+func TestAccountImportDefaultsFreeOAuthPreservesExplicitBPSFalse(t *testing.T) {
+	svc, _ := accountImportDefaultTestService(t, excelBPSImportSettings())
+	input := accountImportDefaultTestInput()
+	input.Type = AccountTypeOAuth
+	input.Credentials["plan_type"] = "free"
+	input.Extra = map[string]any{excelBPSExtraKey: false}
+
+	account, err := svc.CreateAccount(context.Background(), input)
+	require.NoError(t, err)
+	require.Equal(t, false, account.Extra[excelBPSExtraKey])
+	require.False(t, account.IsExcelBPSEnabled())
+	require.Equal(t, false, input.Extra[excelBPSExtraKey])
 }
 
 func TestAccountImportDefaultsExcelBPSKeepsExplicitValueAndDisabledSetting(t *testing.T) {

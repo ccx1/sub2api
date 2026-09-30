@@ -61,6 +61,7 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
       accountIds: [1, 2],
       selectedPlatforms: ['antigravity'],
       selectedTypes: ['apikey'],
+      target: { mode: 'selected', selectedExcelBPSEligible: true },
       proxies: [],
       groups: [],
       ...extraProps
@@ -364,6 +365,24 @@ describe('BulkEditAccountModal', () => {
       expect(mountModal(props).find('#bulk-edit-excel-bps-enabled').exists()).toBe(false)
     })
 
+    it('hides BPS when any selected OAuth account has an incompatible subtype', () => {
+      const wrapper = mountModal({
+        ...oauthProps,
+        target: { mode: 'selected', selectedExcelBPSEligible: false }
+      })
+      expect(wrapper.find('#bulk-edit-excel-bps-enabled').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('does not submit BPS after target eligibility changes', async () => {
+      const wrapper = mountModal(oauthProps)
+      await enableBPS(wrapper)
+      await wrapper.setProps({ target: { mode: 'selected', selectedExcelBPSEligible: false } })
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
     it('leaves existing BPS settings untouched unless the apply checkbox is selected', async () => {
       const wrapper = mountModal(oauthProps)
       expect(wrapper.get('#bulk-edit-excel-bps-body').attributes('disabled')).toBeDefined()
@@ -561,7 +580,7 @@ describe('BulkEditAccountModal', () => {
       const filters = { platform: 'openai', type: 'oauth', status: 'active' }
       const wrapper = mountModal({
         accountIds: [],
-        target: { mode: 'filtered', filters, previewCount: 20, ...oauthProps }
+        target: { mode: 'filtered', filters, previewCount: 20, selectedExcelBPSEligible: true, ...oauthProps }
       })
       await enableBPS(wrapper)
       await wrapper.get('[data-testid="bulk-excel-bps-auto-disable-on-403"]').setValue(true)

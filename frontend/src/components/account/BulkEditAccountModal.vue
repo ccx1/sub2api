@@ -32,7 +32,7 @@
       </div>
 
       <!-- Excel / BPS protocol (ChatGPT OAuth only) -->
-      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIExcelBPSEligible" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label id="bulk-edit-excel-bps-label" class="input-label mb-0" for="bulk-edit-excel-bps-enabled">
@@ -1716,6 +1716,7 @@ interface Props {
     selectedPlatforms?: AccountPlatform[]
     selectedTypes?: AccountType[]
     selectedPlanTypes?: string[]
+    selectedExcelBPSEligible?: boolean
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
@@ -1773,6 +1774,9 @@ const allOpenAIOAuthOnly = computed(() => {
     targetSelectedTypes.value.every(t => t === 'oauth')
   )
 })
+const allOpenAIExcelBPSEligible = computed(() =>
+  allOpenAIOAuthOnly.value && props.target?.selectedExcelBPSEligible === true
+)
 
 const allOpenAIAPIKey = computed(() => {
   return (
@@ -2227,7 +2231,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
-  if (enableExcelBPS.value && allOpenAIOAuthOnly.value) {
+  if (enableExcelBPS.value && allOpenAIExcelBPSEligible.value) {
     const extra = ensureExtra()
     extra.openai_excel_bps = excelBPSEnabled.value
     // null explicitly removes an existing model scope; [] selects no BPS models.
@@ -2509,7 +2513,7 @@ const handleSubmit = async () => {
     enableCodexTicketProxy.value ||
     enableDailyCooldown.value ||
     enableBaseUrl.value ||
-    (enableExcelBPS.value && allOpenAIOAuthOnly.value) ||
+    (enableExcelBPS.value && allOpenAIExcelBPSEligible.value) ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
@@ -2543,7 +2547,7 @@ const handleSubmit = async () => {
     return
   }
 
-  if (enableExcelBPS.value && allOpenAIOAuthOnly.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
+  if (enableExcelBPS.value && allOpenAIExcelBPSEligible.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
     const target = Number(excelBPS403TargetGroupID.value)
     if (excelBPS403TargetGroupID.value === '' || !Number.isSafeInteger(target) || target < 0 ||
       !excelBPS403GroupOptions.value.some(option => option.value === target)) {

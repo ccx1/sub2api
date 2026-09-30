@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -323,6 +324,61 @@ func TestSyncBalanceCacheAfterDeduction_SynchronousWhenInflightEnabled(t *testin
 	require.Equal(t, int32(1), cache.deducts.Load(), "cache deduction must land before the billing task returns")
 	bal, _ := cache.GetUserBalance(context.Background(), 3)
 	require.InDelta(t, 0.75, bal, 1e-12)
+}
+
+type failingDeductInflightCache struct {
+	*memInflightCache
+	applyBeforeError bool
+	invalidateErr    error
+	invalidationCt   atomic.Int32
+}
+
+func (m *failingDeductInflightCache) DeductUserBalance(_ context.Context, _ int64, amount float64) error {
+	if m.applyBeforeError {
+		m.mu.Lock()
+		m.balance -= amount
+		m.mu.Unlock()
+	}
+	return errors.New("ambiguous Redis write failure")
+}
+
+func (m *failingDeductInflightCache) InvalidateUserBalance(context.Context, int64) error {
+	m.invalidationCt.Add(1)
+	return m.invalidateErr
+}
+
+func TestSyncBalanceCacheAfterDeduction_FailedWriteRetainsReservation(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		applyBeforeError bool
+		invalidateErr    error
+	}{
+		{name: "write not applied"},
+		{name: "write applied before timeout", applyBeforeError: true},
+		{name: "cache unavailable", invalidateErr: errors.New("Redis unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := &failingDeductInflightCache{
+				memInflightCache: newMemInflightCache(1),
+				applyBeforeError: tc.applyBeforeError,
+				invalidateErr:    tc.invalidateErr,
+			}
+			svc := newInflightSvc(t, cache, 60)
+			res, err := svc.ReserveInflight(context.Background(), &User{ID: 3}, nil, nil, 0.8)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			billingDone := res.Acquire()
+			res.HandlerDone()
+			ctx := WithInflightReservation(context.Background(), res)
+			p := &postUsageBillingParams{Cost: &CostBreakdown{ActualCost: 0.25}, User: &User{ID: 3}}
+			syncBalanceCacheAfterDeduction(ctx, p, &billingDeps{billingCacheService: svc}, nil)
+			billingDone()
+			require.Equal(t, 1, cache.count(), "ambiguous cache update must not release reservation")
+			require.Equal(t, int32(0), cache.releaseCt.Load())
+			require.Equal(t, int32(1), cache.invalidationCt.Load())
+			require.Equal(t, int32(0), cache.deducts.Load(), "ambiguous write must not be queued for a second deduction")
+		})
+	}
 }
 
 // 计费侧：requested 来源下别名本身无价 → billableModelWithFallback 回退到映射模型。

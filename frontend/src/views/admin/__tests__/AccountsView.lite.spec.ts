@@ -261,7 +261,8 @@ describe('admin AccountsView lite account list', () => {
     expect(bulkEditor.props('accountIds')).toEqual([71, 72])
     expect(bulkEditor.props('target')).toEqual({
       mode: 'selected', accountIds: [71, 72],
-      selectedPlatforms: ['openai', 'anthropic'], selectedTypes: ['oauth', 'apikey'], selectedPlanTypes: []
+      selectedPlatforms: ['openai', 'anthropic'], selectedTypes: ['oauth', 'apikey'], selectedPlanTypes: [],
+      selectedExcelBPSEligible: false
     })
     expect(wrapper.getComponent(EditAccountModalStub).props('show')).toBe(false)
     wrapper.unmount()

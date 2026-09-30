@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -753,6 +754,63 @@ func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T)
 	}
 }
 
+func TestImportCodexSessionsReplacesExplicitExcelBPSSettings(t *testing.T) {
+	baseExtra := map[string]any{
+		"openai_excel_bps":                          true,
+		"openai_excel_bps_models":                   []string{"old-model"},
+		"openai_excel_bps_auto_disable_on_403":      true,
+		"openai_excel_bps_cache_creation_as_input":  true,
+		"openai_excel_bps_ignore_images":            true,
+		"openai_excel_bps_ignore_encrypted_content": true,
+		"openai_excel_bps_omit_unsupported_tools":   true,
+		"openai_excel_bps_auto_move_on_403":         true,
+		"openai_excel_bps_403_target_group_id":      int64(7),
+		"unrelated":                                 "keep",
+	}
+	for _, tc := range []struct {
+		name     string
+		incoming map[string]any
+		wantBPS  map[string]any
+	}{
+		{"all models clears old scope and options", map[string]any{"openai_excel_bps": true}, map[string]any{"openai_excel_bps": true}},
+		{"null scope selects all models", map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": nil}, map[string]any{"openai_excel_bps": true}},
+		{"empty scope selects no models", map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{}}, map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{}}},
+		{"explicit off clears family", map[string]any{"openai_excel_bps": false, "openai_excel_bps_models": []string{"new-model"}, "openai_excel_bps_auto_disable_on_403": true}, map[string]any{}},
+		{"scoped replacement clears old options", map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{"new-model"}}, map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{"new-model"}}},
+		{"legacy request keeps current BPS", map[string]any{"session_note": "new"}, baseExtra},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token := buildCodexAccessToken(t, "workspace-1", "user-1", time.Now().Add(time.Hour))
+			svc := newCodexImportMemoryAdminService([]service.Account{{
+				ID: 10, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+				Credentials: map[string]any{"chatgpt_account_id": "workspace-1", "chatgpt_user_id": "user-1", "access_token": token},
+				Extra:       cloneCodexImportTestMap(baseExtra),
+			}})
+			handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			result, err := handler.importCodexSessions(context.Background(), CodexSessionImportRequest{
+				SkipDefaultGroupBind: boolPtr(true), Extra: tc.incoming,
+			}, []codexImportEntry{{Index: 1, Value: map[string]any{"access_token": token}}})
+			if err != nil || result.Updated != 1 || result.Failed != 0 {
+				t.Fatalf("import result = %+v, error = %v", result, err)
+			}
+			got := svc.updatedAccounts[0].input.Extra
+			if got["unrelated"] != "keep" {
+				t.Fatalf("unrelated config lost: %v", got)
+			}
+			for _, key := range service.ExcelBPSExtraKeys() {
+				want, exists := tc.wantBPS[key]
+				value, present := got[key]
+				if present != exists || (present && !reflect.DeepEqual(value, want)) {
+					t.Fatalf("%s = %v (present %t), want %v (present %t)", key, value, present, want, exists)
+				}
+			}
+			if note, ok := tc.incoming["session_note"]; ok && got["session_note"] != note {
+				t.Fatalf("non-BPS import value lost: %v", got)
+			}
+		})
+	}
+}
+
 func TestImportCodexSessionsUpgradesAccessTokenOnlyAccountWithRefreshToken(t *testing.T) {
 	oldToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "old-token", time.Now().Add(time.Hour))
 	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
@@ -1073,5 +1131,83 @@ func TestImportCodexSessionsSkipExistingPreservesAccount(t *testing.T) {
 	third, err := h.importCodexSessions(context.Background(), req, entries)
 	if err != nil || third.Created != 1 {
 		t.Fatal("legacy create-only behavior changed")
+	}
+}
+
+func TestImportCodexSessionsFiltersBPSByAccountIdentity(t *testing.T) {
+	svc := newCodexImportMemoryAdminService(nil)
+	h := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	free := buildCodexAccessOnlyImportValue(t, "workspace-free", "user-free")
+	free["account"] = map[string]any{"planType": "free"}
+	entries := []codexImportEntry{
+		{Index: 1, Value: buildCodexAccessOnlyImportValue(t, "workspace-plus", "user-plus")},
+		{Index: 2, Value: free},
+		{Index: 3, Value: buildAgentIdentityImportValue(t, "runtime-agent", "workspace-agent", "user-agent", "task-agent")},
+	}
+	request := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true), Extra: map[string]any{
+		"openai_excel_bps": true, "openai_excel_bps_models": []string{"gpt-5"},
+		"openai_excel_bps_ignore_images": true, "unrelated": "keep",
+	}}
+	result, err := h.importCodexSessions(context.Background(), request, entries)
+	if err != nil || result.Created != 3 || result.Failed != 0 {
+		t.Fatalf("mixed import result = %+v, err = %v", result, err)
+	}
+	if svc.createdAccounts[0].Extra["openai_excel_bps"] != true || svc.createdAccounts[0].Extra["openai_excel_bps_ignore_images"] != true {
+		t.Fatalf("eligible OAuth lost BPS settings: %+v", svc.createdAccounts[0].Extra)
+	}
+	for _, input := range svc.createdAccounts[1:] {
+		assertNoCodexImportBPSExtra(t, input.Extra)
+		if input.Extra["unrelated"] != "keep" {
+			t.Fatalf("unrelated extra was removed: %+v", input.Extra)
+		}
+	}
+}
+
+func TestImportCodexSessionsRemovesBPSWhenIdentityBecomesIneligible(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		credentials map[string]any
+		entry       map[string]any
+	}{
+		{
+			name: "free", credentials: map[string]any{"chatgpt_account_id": "workspace-free", "chatgpt_user_id": "user-free", "plan_type": "plus"},
+			entry: func() map[string]any {
+				value := buildCodexRefreshImportValue(t, "workspace-free", "user-free", "refresh-free")
+				value["account"] = map[string]any{"planType": "free"}
+				return value
+			}(),
+		},
+		{
+			name: "agent identity", credentials: map[string]any{"chatgpt_account_id": "workspace-agent", "chatgpt_user_id": "user-agent"},
+			entry: buildAgentIdentityImportValue(t, "runtime-agent", "workspace-agent", "user-agent", "task-agent"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newCodexImportMemoryAdminService([]service.Account{{
+				ID: 21, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+				Credentials: tc.credentials, Extra: map[string]any{"openai_excel_bps": true, "openai_excel_bps_ignore_images": true, "unrelated": "keep"},
+			}})
+			h := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			result, err := h.importCodexSessions(context.Background(), CodexSessionImportRequest{
+				SkipDefaultGroupBind: boolPtr(true), Extra: map[string]any{"openai_excel_bps": true, "openai_excel_bps_models": []string{"gpt-5"}},
+			}, []codexImportEntry{{Index: 1, Value: tc.entry}})
+			if err != nil || result.Updated != 1 || result.Failed != 0 {
+				t.Fatalf("update result = %+v, err = %v", result, err)
+			}
+			extra := svc.updatedAccounts[0].input.Extra
+			assertNoCodexImportBPSExtra(t, extra)
+			if extra["unrelated"] != "keep" {
+				t.Fatalf("unrelated extra was removed: %+v", extra)
+			}
+		})
+	}
+}
+
+func assertNoCodexImportBPSExtra(t *testing.T, extra map[string]any) {
+	t.Helper()
+	for _, key := range service.ExcelBPSExtraKeys() {
+		if _, exists := extra[key]; exists {
+			t.Fatalf("ineligible account retained BPS extra %q: %+v", key, extra)
+		}
 	}
 }

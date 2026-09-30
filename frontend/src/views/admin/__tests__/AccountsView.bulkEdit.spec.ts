@@ -132,6 +132,11 @@ const BulkEditAccountModalStub = {
   template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
 }
 
+const ImportDataModalStub = {
+  emits: ['imported-and-edit'],
+  template: '<button data-test="imported-and-edit" @click="$emit(\'imported-and-edit\', [7, 11])">edit imported</button>'
+}
+
 const makeProbeAccount = (id: number, rate = 0.25) => ({
   id, name: 'account-' + id, platform: 'openai', type: 'apikey',
   status: 'active', schedulable: true, rate_multiplier: rate,
@@ -178,7 +183,7 @@ const mountBulkEditView = () => mount(AccountsView, { global: { stubs: {
   DataTable: DataTableStub, Pagination: true, ConfirmDialog: true,
   AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
   AccountTableFilters: true, AccountBulkActionsBar: AccountBulkActionsBarStub,
-  AccountActionMenu: true, ImportDataModal: true, ReAuthAccountModal: true,
+  AccountActionMenu: true, ImportDataModal: ImportDataModalStub, ReAuthAccountModal: true,
   AccountTestModal: true, AccountStatsModal: true, ScheduledTestsPanel: true, SyncFromCrsModal: true,
   TempUnschedStatusModal: true, ErrorPassthroughRulesModal: true, TLSFingerprintProfilesModal: true,
   CreateAccountModal: true, EditAccountModal: true, BulkEditAccountModal: BulkEditAccountModalStub,
@@ -307,6 +312,25 @@ describe('admin AccountsView bulk edit scope', () => {
     wrapper.unmount()
   })
 
+  it('hides BPS for filtered results when a later account is a PAT', async () => {
+    const ids = Array.from({ length: 101 }, (_, index) => index + 1)
+    listAccounts.mockResolvedValue({ items: ids.map(id => makeProbeAccount(id)), total: ids.length, page: 1, page_size: 1000, pages: 1 })
+    getAccountById.mockImplementation(async id => ({
+      ...makeProbeAccount(id), type: 'oauth',
+      credentials: id === 101 ? { auth_mode: 'personalAccessToken' } : { plan_type: 'pro' }
+    }))
+    const wrapper = mountBulkEditView()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+
+    expect(getAccountById).toHaveBeenCalledTimes(101)
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toMatchObject({
+      mode: 'filtered', previewCount: 101, selectedExcelBPSEligible: false
+    })
+    wrapper.unmount()
+  })
+
   it('does not open bulk edit when target metadata is incomplete', async () => {
     listAccounts.mockResolvedValue({ items: [makeProbeAccount(1)], total: 1, page: 1, page_size: 20, pages: 1 })
     getAccountById.mockResolvedValue({ ...makeProbeAccount(2), credentials: { plan_type: 'pro' } })
@@ -318,6 +342,88 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(showError).toHaveBeenCalledOnce()
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { name: 'regular OAuth', credentials: { plan_type: 'pro' }, parent_account_id: null, eligible: true },
+    { name: 'shadow OAuth', credentials: { plan_type: 'pro' }, parent_account_id: 7, eligible: false },
+    { name: 'Agent Identity', credentials: { auth_mode: 'agentIdentity' }, parent_account_id: null, eligible: false },
+    { name: 'PAT', credentials: { openai_auth_mode: 'personal_access_token' }, parent_account_id: null, eligible: false },
+    { name: 'missing credentials', credentials: undefined, parent_account_id: null, eligible: false }
+  ])('checks complete imported target eligibility for $name', async ({ credentials, parent_account_id, eligible }) => {
+    getAccountById.mockImplementation(async id => ({
+      ...makeProbeAccount(id), type: 'oauth',
+      credentials: id === 7 ? { plan_type: 'pro' } : credentials,
+      parent_account_id: id === 7 ? null : parent_account_id
+    }))
+    const wrapper = mountBulkEditView()
+    await flushPromises()
+    await wrapper.get('[data-test="imported-and-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toMatchObject({
+      mode: 'selected', accountIds: [7, 11], selectedExcelBPSEligible: eligible
+    })
+    wrapper.unmount()
+  })
+
+  it.each([
+    { name: 'wrong ID', returnedId: 99 },
+    { name: 'missing result', returnedId: null }
+  ])('does not edit imported accounts with $name metadata', async ({ returnedId }) => {
+    getAccountById.mockImplementation(async id => id === 11
+      ? (returnedId === null ? null : { ...makeProbeAccount(returnedId), type: 'oauth' })
+      : { ...makeProbeAccount(id), type: 'oauth' })
+    const wrapper = mountBulkEditView()
+    await flushPromises()
+    await wrapper.get('[data-test="imported-and-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('ignores stale imported metadata after a newer edit request', async () => {
+    let resolveFirst!: (account: ReturnType<typeof makeProbeAccount>) => void
+    let calls = 0
+    getAccountById.mockImplementation(id => {
+      calls++
+      if (calls === 1) return new Promise(resolve => { resolveFirst = resolve })
+      return Promise.resolve({ ...makeProbeAccount(id), type: 'oauth', credentials: { plan_type: 'pro' } })
+    })
+    const wrapper = mountBulkEditView()
+    await flushPromises()
+    await wrapper.get('[data-test="imported-and-edit"]').trigger('click')
+    await wrapper.get('[data-test="imported-and-edit"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
+
+    resolveFirst(makeProbeAccount(99))
+    await flushPromises()
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toMatchObject({
+      accountIds: [7, 11], selectedExcelBPSEligible: true
+    })
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not open imported metadata after selection changes', async () => {
+    listAccounts.mockResolvedValue({ items: [makeProbeAccount(7)], total: 1, page: 1, page_size: 20, pages: 1 })
+    let resolveMetadata!: (account: ReturnType<typeof makeProbeAccount>) => void
+    getAccountById.mockImplementation(id => id === 7
+      ? new Promise(resolve => { resolveMetadata = resolve })
+      : Promise.resolve(makeProbeAccount(id)))
+    const wrapper = mountBulkEditView()
+    await flushPromises()
+    await wrapper.get('[data-test="imported-and-edit"]').trigger('click')
+    await wrapper.get('[data-test="select-row"] input').trigger('change')
+    resolveMetadata(makeProbeAccount(7))
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('false')
+    expect(showError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

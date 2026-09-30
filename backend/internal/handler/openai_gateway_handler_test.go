@@ -1940,12 +1940,14 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	simpleModeRejectAtRead int64
-	compositeResolver      *service.CompositeRouteResolver
-	accountPlatform        string
-	closeReason            string
-	closeStatus            coderws.StatusCode
-	firstPayload           string
+	simpleModeRejectAtRead  int64
+	standardInflightBalance float64
+	heldInflightAmount      float64
+	compositeResolver       *service.CompositeRouteResolver
+	accountPlatform         string
+	closeReason             string
+	closeStatus             coderws.StatusCode
+	firstPayload            string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
 	midPayload                string
@@ -1975,6 +1977,14 @@ type openAIResponsesWSUsageLogResult struct {
 type openAIWSUsageHandlerAccountRepoStub struct {
 	service.AccountRepository
 	account service.Account
+}
+
+type openAIWSNoopBillingRepo struct {
+	service.UsageBillingRepository
+}
+
+func (openAIWSNoopBillingRepo) Apply(context.Context, *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
+	return &service.UsageBillingApplyResult{}, nil
 }
 
 func (s *openAIWSUsageHandlerAccountRepoStub) ListSchedulableByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
@@ -3007,6 +3017,14 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	cfg := &config.Config{}
 	cfg.RunMode = config.RunModeSimple
+	var inflightCache *handlerInflightCache
+	var usageBillingRepo service.UsageBillingRepository
+	if tc.standardInflightBalance > 0 {
+		cfg.RunMode = config.RunModeStandard
+		cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60, DefaultMaxTokens: 1, MaxOutputTokens: 128000}
+		inflightCache = newHandlerInflightCache(tc.standardInflightBalance)
+		usageBillingRepo = openAIWSNoopBillingRepo{}
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -3041,13 +3059,13 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg.SimpleModeKeyRateLimitEnabled = true
 		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
 	}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
+	billingCacheSvc := service.NewBillingCacheService(inflightCache, nil, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		nil,
 		usageRepo,
-		nil,
+		usageBillingRepo,
 		nil,
 		nil,
 		nil,
@@ -3096,6 +3114,12 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	if tc.group != nil {
 		apiKey.Group = tc.group
+	}
+	if tc.heldInflightAmount > 0 {
+		held, holdErr := billingCacheSvc.ReserveInflight(context.Background(), apiKey.User, apiKey.Group, nil, tc.heldInflightAmount)
+		require.NoError(t, holdErr)
+		require.NotNil(t, held)
+		defer held.HandlerDone()
 	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -3197,6 +3221,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			require.Contains(t, closeErr.Reason, reason)
 			require.Len(t, upstreamPayloadCh, turnCount-1, "rejected turn must not reach upstream")
 			_ = clientConn.CloseNow()
+			if inflightCache != nil {
+				require.Eventually(t, func() bool { return inflightCache.count() == 1 }, time.Second, 10*time.Millisecond,
+					"rejected turn must release its reservation and leave only the test's held reservation")
+			}
 			return openAIResponsesWSUsageLogResult{}
 		}
 		readCompleted()
@@ -3341,6 +3369,22 @@ func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 				firstPayload:  `{"type":"response.create","model":"gpt-5.1"}`,
 				secondPayload: `{"type":"response.create","model":"gpt-5.1"}`,
 				ingressMode:   mode, simpleModeRejectAtRead: 3, secondTurnCloseExpected: true, closeReason: "billing check failed",
+			})
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketStandardModeReservesFollowupTurn(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:            `{"type":"response.create","model":"gpt-5.1","max_output_tokens":1}`,
+				secondPayload:           `{"type":"response.create","model":"gpt-5.1","max_output_tokens":100000}`,
+				ingressMode:             mode,
+				standardInflightBalance: 0.01,
+				heldInflightAmount:      0.001,
+				secondTurnCloseExpected: true,
+				closeReason:             "billing check failed",
 			})
 		})
 	}

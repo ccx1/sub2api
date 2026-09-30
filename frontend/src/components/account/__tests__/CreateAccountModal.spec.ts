@@ -193,11 +193,14 @@ async function submitApiKeyAccount(
   return wrapper
 }
 
-async function openCodexImportStep(toggleClicks = 0) {
+async function openCodexImportStep(toggleClicks = 0, bpsToggleClicks = 0) {
   const wrapper = mountModal()
   await selectButtonByText(wrapper, 'OpenAI')
   for (let click = 0; click < toggleClicks; click += 1) {
     await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
+  }
+  for (let click = 0; click < bpsToggleClicks; click += 1) {
+    await wrapper.get('[data-testid="create-excel-bps-toggle"]').trigger('click')
   }
   await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
   await wrapper.get('form#create-account-form').trigger('submit.prevent')
@@ -948,5 +951,98 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it('keeps BPS off by default and excludes it from API Key creation', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get('[data-testid="create-excel-bps-toggle"]').attributes('aria-checked')).toBe('false')
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="create-excel-bps-toggle"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sends BPS model scope and suboptions for a refresh-token account', async () => {
+    const wrapper = mountModal([{ id: 7, name: 'OpenAI paid', platform: 'openai' }] as any)
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-excel-bps-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="create-excel-bps-all-models"]').setValue(false)
+    await wrapper.get('[data-testid="create-excel-bps-ignore-images"]').setValue(true)
+    await wrapper.get('[data-testid="create-excel-bps-cache-creation-as-input"]').setValue(true)
+    await wrapper.get('[data-testid="create-excel-bps-auto-move-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="create-excel-bps-target-group"]').setValue('7')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS RT')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('validate-refresh-token', 'rt-1')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      openai_excel_bps: true,
+      openai_excel_bps_models: ['gpt-6-astra'],
+      openai_excel_bps_ignore_images: true,
+      openai_excel_bps_cache_creation_as_input: true,
+      openai_excel_bps_auto_move_on_403: true,
+      openai_excel_bps_403_target_group_id: 7
+    })
+  })
+
+  it('rejects a BPS 403 action without a target before starting an import', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-excel-bps-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="create-excel-bps-auto-move-on-403"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('No target')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
+  })
+
+  it('rejects a known Free refresh token when BPS is enabled', async () => {
+    refreshOpenAITokenMock.mockResolvedValue({ access_token: 'free', refresh_token: 'rt', plan_type: 'free' })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-excel-bps-toggle"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Free')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('validate-refresh-token', 'rt-free')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('sends explicit BPS choices to session import but omits them for PAT and Agent Identity', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-excel-bps-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="create-excel-bps-ignore-encrypted-content"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      openai_excel_bps: true,
+      openai_excel_bps_ignore_encrypted_content: true
+    })
+    await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
+    await flushPromises()
+    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_excel_bps).toBeUndefined()
+  })
+
+  it('keeps import defaults when untouched and explicitly disables BPS after toggling off', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_excel_bps).toBeUndefined()
+    const disabledWrapper = await openCodexImportStep(0, 2)
+    await disabledWrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[1]?.[0]?.extra?.openai_excel_bps).toBe(false)
+  })
+
+  it.each(['agent_identity', 'codex_session'])('omits BPS for an Agent Identity import through %s', async inputMethod => {
+    const wrapper = await openCodexImportStep(0, 1)
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.inputMethod = inputMethod
+    flow.vm.$emit('import-codex-session', JSON.stringify({ authMode: 'agentIdentity', agentIdentity: { agentRuntimeId: 'runtime' } }))
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_excel_bps).toBeUndefined()
+    wrapper.unmount()
   })
 })

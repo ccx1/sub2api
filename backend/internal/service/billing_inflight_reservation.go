@@ -60,12 +60,13 @@ type InflightReservation struct {
 	amount    float64
 	ttl       time.Duration
 
-	refs        atomic.Int64
-	releaseOnce sync.Once
-	stopOnce    sync.Once
-	closeOnce   sync.Once
-	stopRenew   chan struct{}
-	renewDone   chan struct{}
+	refs              atomic.Int64
+	retainUntilExpiry atomic.Bool
+	releaseOnce       sync.Once
+	stopOnce          sync.Once
+	closeOnce         sync.Once
+	stopRenew         chan struct{}
+	renewDone         chan struct{}
 }
 
 // Amount 预留金额。
@@ -114,12 +115,24 @@ func (r *InflightReservation) Release() {
 	r.stopRenewal()
 	r.releaseOnce.Do(func() {
 		r.refs.Store(0)
+		if r.retainUntilExpiry.Load() {
+			return
+		}
 		relCtx, relCancel := context.WithTimeout(context.Background(), inflightReservationReleaseTimeout)
 		defer relCancel()
 		if err := r.cache.ReleaseInflightBalance(relCtx, r.userID, r.requestID); err != nil {
 			logger.LegacyPrintf("service.billing_cache", "Warning: inflight reservation release failed for user %d (expires by ttl): %v", r.userID, err)
 		}
 	})
+}
+
+// RetainUntilExpiry keeps a reservation when the committed charge cannot be
+// reflected reliably in the balance cache. Renewal stops with the handler;
+// Redis then removes it at its normal TTL rather than releasing it early.
+func (r *InflightReservation) RetainUntilExpiry() {
+	if r != nil {
+		r.retainUntilExpiry.Store(true)
+	}
 }
 
 func (r *InflightReservation) decRef() {

@@ -286,7 +286,8 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				autoPauseOnExpired = nil
 			}
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
-			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
+			mergedExtra := mergeCodexImportExtra(existing.Extra, extra)
+			removeIneligibleCodexImportBPSExtra(mergedExtra, mergedCredentials)
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
@@ -339,6 +340,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			continue
 		}
 
+		removeIneligibleCodexImportBPSExtra(extra, credentials)
 		account, createErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 			Name:                  accountName,
 			Notes:                 req.Notes,
@@ -1104,6 +1106,40 @@ func mergeCodexImportMap(existing, incoming map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func mergeCodexImportExtra(existing, incoming map[string]any) map[string]any {
+	out := mergeCodexImportMap(existing, nil)
+	enabled, explicit := incoming["openai_excel_bps"].(bool)
+	if explicit {
+		for _, key := range service.ExcelBPSExtraKeys() {
+			delete(out, key)
+		}
+	}
+	for key, value := range incoming {
+		out[key] = value
+	}
+	if explicit && !enabled {
+		for _, key := range service.ExcelBPSExtraKeys() {
+			delete(out, key)
+		}
+	} else if explicit && out["openai_excel_bps_models"] == nil {
+		delete(out, "openai_excel_bps_models")
+	}
+	return out
+}
+
+func removeIneligibleCodexImportBPSExtra(extra, credentials map[string]any) {
+	account := &service.Account{
+		Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Credentials: credentials, Extra: map[string]any{"openai_excel_bps": true},
+	}
+	if account.IsExcelBPSEnabled() && !strings.EqualFold(strings.TrimSpace(codexCredentialString(credentials, "plan_type")), "free") {
+		return
+	}
+	for _, key := range service.ExcelBPSExtraKeys() {
+		delete(extra, key)
+	}
 }
 
 func mergeCodexImportCredentials(existing, incoming map[string]any, item *codexImportAccount) map[string]any {
