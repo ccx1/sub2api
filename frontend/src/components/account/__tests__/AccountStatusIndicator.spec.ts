@@ -51,6 +51,38 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it.each([
+    [{}, 'active'],
+    [{ status: 'error', error_message: 'upstream unavailable' }, 'error'],
+    [{ rate_limit_reset_at: '2099-01-01T00:00:00Z' }, 'rateLimited'],
+    [{ schedulable: false, error_message: 'paused after failure' }, 'paused'],
+  ] as [Partial<Account>, string][])('shows BPS above %s without hiding account errors', (overrides, status) => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: { account: makeAccount({ platform: 'openai', extra: { openai_excel_bps: true }, ...overrides }) },
+      global: { stubs: { Icon: true } },
+    })
+    const badge = wrapper.get('[data-testid="bps-status-badge"]')
+    expect(badge.text()).toBe('bps')
+    expect(badge.element.nextElementSibling?.textContent).toContain(`admin.accounts.status.${status}`)
+    if (overrides.error_message) expect(wrapper.text()).toContain(overrides.error_message)
+  })
+
+  it.each([
+    { extra: { openai_excel_bps: false } },
+    { extra: { openai_excel_bps: 'true' } },
+    { platform: 'anthropic' },
+    { type: 'apikey' },
+    { parent_account_id: 2 },
+    { credentials: { plan_type: 'Free' } },
+    { credentials: { auth_mode: 'agentIdentity' } },
+    { credentials: { openai_auth_mode: 'personalAccessToken' } },
+  ] as Partial<Account>[])('hides BPS for ineligible accounts: %j', overrides => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: { account: makeAccount({ platform: 'openai', extra: { openai_excel_bps: true }, ...overrides }) },
+    })
+    expect(wrapper.find('[data-testid="bps-status-badge"]').exists()).toBe(false)
+  })
+
   it('Claude 5 系列模型限流时显示 Opus 和 Sonnet 的短别名', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {
