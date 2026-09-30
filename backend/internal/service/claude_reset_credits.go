@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"strings"
@@ -110,19 +111,44 @@ func (s *ClaudeResetCreditService) account(ctx context.Context, id int64) (*Acco
 	if !profile {
 		return nil, "", "", infraerrors.BadRequest("CLAUDE_RESET_PROFILE_SCOPE_REQUIRED", "user:profile scope required")
 	}
-	proxy := ""
-	if a.ProxyID != nil {
-		p, e := s.proxies.GetByID(ctx, *a.ProxyID)
-		if e != nil || p == nil {
-			return nil, "", "", infraerrors.ServiceUnavailable("CLAUDE_RESET_PROXY_UNAVAILABLE", "account proxy unavailable")
-		}
-		proxy = p.URL()
+	requestAccount := *a
+	requestAccount.Extra, requestAccount.Credentials = maps.Clone(a.Extra), maps.Clone(a.Credentials)
+	a = &requestAccount
+	proxy, err := s.proxyURL(ctx, a)
+	if err != nil {
+		return nil, "", "", err
 	}
 	token, err := s.tokens.GetAccessToken(ctx, a)
 	if err != nil || strings.TrimSpace(token) == "" {
 		return nil, "", "", infraerrors.ServiceUnavailable("CLAUDE_RESET_TOKEN_UNAVAILABLE", "OAuth token unavailable")
 	}
 	return a, token, proxy, nil
+}
+
+func (s *ClaudeResetCreditService) proxyURL(ctx context.Context, account *Account) (string, error) {
+	unavailable := infraerrors.ServiceUnavailable("CLAUDE_RESET_PROXY_UNAVAILABLE", "account proxy unavailable")
+	if err := ResolveRandomProxyFromSource(ctx, account, s.accounts); err != nil {
+		_ = DisableRandomProxyAccountOnUnavailable(ctx, account, s.accounts, err)
+		return "", unavailable
+	}
+	if account.ProxyID == nil {
+		return "", nil
+	}
+	if account.Proxy == nil || account.Proxy.ID != *account.ProxyID {
+		if s.proxies == nil {
+			return "", unavailable
+		}
+		proxy, err := s.proxies.GetByID(ctx, *account.ProxyID)
+		if err != nil {
+			return "", unavailable
+		}
+		account.Proxy = proxy
+	}
+	proxy := account.Proxy
+	if proxy == nil || proxy.ID != *account.ProxyID || !proxy.IsActive() || proxy.IsExpired(time.Now()) {
+		return "", unavailable
+	}
+	return proxy.URL(), nil
 }
 
 func (s *ClaudeResetCreditService) headers(ctx context.Context, req *http.Request, token string) {

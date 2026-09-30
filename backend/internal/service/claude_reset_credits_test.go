@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
@@ -20,7 +21,7 @@ type resetTokenStub struct{}
 func (resetTokenStub) GetAccessToken(context.Context, *Account) (string, error) {
 	return "synthetic-token", nil
 }
-func TestClaudeResetStatusNativeContract(t *testing.T) {
+func TestClaudeResetCreditStatusNativeContract(t *testing.T) {
 	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	s := &ClaudeResetCreditService{accounts: resetAccountStub{&Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile user:inference"}}}, tokens: resetTokenStub{}, now: func() time.Time { return now }}
 	s.do = func(r *http.Request, p string) (*http.Response, error) {
@@ -42,7 +43,7 @@ func TestClaudeResetStatusNativeContract(t *testing.T) {
 	require.NotContains(t, string(b), "synthetic-token")
 	require.NotContains(t, string(b), "selection_token")
 }
-func TestClaudeResetPastCooldownIsCleared(t *testing.T) {
+func TestClaudeResetCreditPastCooldownIsCleared(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-time.Minute)
 	no := false
@@ -54,7 +55,7 @@ func TestClaudeResetPastCooldownIsCleared(t *testing.T) {
 	r = projectClaudeResetCredits(&claudeResetBlock{Eligible: true, NextGrantID: g.ID, CooldownUntil: &future, Grants: []claudeResetGrant{g}}, now)
 	require.Equal(t, &future, r.CooldownUntil)
 }
-func TestClaudeResetEligibilityFailClosed(t *testing.T) {
+func TestClaudeResetCreditEligibilityFailClosed(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-time.Minute)
 	future := now.Add(time.Hour)
@@ -90,12 +91,12 @@ func TestClaudeResetEligibilityFailClosed(t *testing.T) {
 		})
 	}
 }
-func TestClaudeResetStatusRejectsMissingScopeBeforeNetwork(t *testing.T) {
+func TestClaudeResetCreditStatusRejectsMissingScopeBeforeNetwork(t *testing.T) {
 	s := &ClaudeResetCreditService{accounts: resetAccountStub{&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}}, do: func(*http.Request, string) (*http.Response, error) { t.Fatal("network called"); return nil, nil }}
 	_, e := s.Query(context.Background(), 1)
 	require.Error(t, e)
 }
-func TestClaudeResetMalformedAndAbsent(t *testing.T) {
+func TestClaudeResetCreditMalformedAndAbsent(t *testing.T) {
 	for _, body := range []string{`{}`, `{"five_hour":{},"cedar_ember":null}`, `{"cedar_ember":{"eligible":true}}`, `{"error":{"message":"private upstream data"}}`, `not json`} {
 		t.Run(body, func(t *testing.T) {
 			s := &ClaudeResetCreditService{accounts: resetAccountStub{&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}}, tokens: resetTokenStub{}, now: time.Now, do: func(*http.Request, string) (*http.Response, error) {
@@ -110,5 +111,133 @@ func TestClaudeResetMalformedAndAbsent(t *testing.T) {
 				require.NotContains(t, e.Error(), "private upstream data")
 			}
 		})
+	}
+}
+
+type resetProxyAccounts struct {
+	resetAccountStub
+	randomProxySelectorStub
+	disabled   []int64
+	disableErr error
+}
+
+func (s *resetProxyAccounts) DisableRandomProxyAccountIfUnavailable(_ context.Context, id int64) error {
+	s.disabled = append(s.disabled, id)
+	return s.disableErr
+}
+
+type resetProxyRepository struct {
+	ProxyRepository
+	proxy *Proxy
+	err   error
+}
+
+func (s *resetProxyRepository) GetByID(context.Context, int64) (*Proxy, error) {
+	return s.proxy, s.err
+}
+
+func resetProxyTestAccount() *Account {
+	return &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"scope": "user:profile"}}
+}
+
+func resetProxyTestService(accounts claudeResetAccounts) *ClaudeResetCreditService {
+	return &ClaudeResetCreditService{accounts: accounts, tokens: resetTokenStub{}, now: time.Now}
+}
+
+func TestClaudeResetCreditRandomProxyUsesRequestCopy(t *testing.T) {
+	account := resetProxyTestAccount()
+	account.Extra = map[string]any{ProxyModeExtraKey: ProxyModeRandom}
+	stale := &Proxy{ID: 3, Status: StatusActive}
+	account.ProxyID, account.Proxy = &stale.ID, stale
+	selected := &Proxy{ID: 7, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: StatusActive}
+	repo := &resetProxyAccounts{resetAccountStub: resetAccountStub{account}, randomProxySelectorStub: randomProxySelectorStub{proxy: selected}}
+	s := resetProxyTestService(repo)
+	s.do = func(_ *http.Request, proxy string) (*http.Response, error) {
+		require.Equal(t, selected.URL(), proxy)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	}
+	_, err := s.Query(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, &stale.ID, account.ProxyID)
+	require.Same(t, stale, account.Proxy)
+}
+
+func TestClaudeResetCreditRandomProxyFailurePolicies(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	for _, tc := range []struct {
+		name, policy            string
+		proxy                   *Proxy
+		selectorErr, disableErr error
+	}{
+		{name: "reject", policy: RandomProxyEmptyPoolPolicyReject},
+		{name: "disable", policy: RandomProxyEmptyPoolPolicyDisable},
+		{name: "direct", policy: RandomProxyEmptyPoolPolicyDirect},
+		{name: "selection-error", policy: RandomProxyEmptyPoolPolicyDirect, selectorErr: errors.New("pool failed")},
+		{name: "inactive", policy: RandomProxyEmptyPoolPolicyReject, proxy: &Proxy{ID: 7, Status: StatusDisabled}},
+		{name: "expired", policy: RandomProxyEmptyPoolPolicyReject, proxy: &Proxy{ID: 7, Status: StatusActive, ExpiresAt: &past}},
+		{name: "disable-error", policy: RandomProxyEmptyPoolPolicyDisable, disableErr: errors.New("disable failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := resetProxyTestAccount()
+			account.Extra = map[string]any{ProxyModeExtraKey: ProxyModeRandom, RandomProxyEmptyPoolPolicyExtraKey: tc.policy}
+			repo := &resetProxyAccounts{resetAccountStub: resetAccountStub{account}, randomProxySelectorStub: randomProxySelectorStub{proxy: tc.proxy, err: tc.selectorErr}, disableErr: tc.disableErr}
+			s := resetProxyTestService(repo)
+			s.do = func(_ *http.Request, proxy string) (*http.Response, error) {
+				require.Equal(t, "direct", tc.name)
+				require.Empty(t, proxy)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			}
+			_, err := s.Query(context.Background(), account.ID)
+			if tc.name == "direct" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.Equal(t, tc.policy == RandomProxyEmptyPoolPolicyDisable, len(repo.disabled) == 1)
+			require.Nil(t, account.ProxyID)
+			require.Nil(t, account.Proxy)
+		})
+	}
+}
+
+func TestClaudeResetCreditFixedProxyNeverFallsBackToDirect(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	for _, tc := range []struct {
+		name  string
+		proxy *Proxy
+		err   error
+	}{
+		{name: "active", proxy: &Proxy{ID: 7, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: StatusActive}},
+		{name: "missing"},
+		{name: "lookup-error", err: errors.New("lookup failed")},
+		{name: "inactive", proxy: &Proxy{ID: 7, Status: StatusDisabled}},
+		{name: "expired", proxy: &Proxy{ID: 7, Status: StatusActive, ExpiresAt: &past}},
+		{name: "wrong-id", proxy: &Proxy{ID: 8, Status: StatusActive}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := resetProxyTestAccount()
+			id := int64(7)
+			account.ProxyID = &id
+			s := resetProxyTestService(resetAccountStub{account})
+			s.proxies = &resetProxyRepository{proxy: tc.proxy, err: tc.err}
+			s.do = func(_ *http.Request, proxy string) (*http.Response, error) {
+				require.Equal(t, "active", tc.name)
+				require.Equal(t, tc.proxy.URL(), proxy)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			}
+			_, err := s.Query(context.Background(), account.ID)
+			require.Equal(t, tc.name == "active", err == nil)
+			require.Nil(t, account.Proxy)
+		})
+	}
+}
+
+func TestClaudeResetCreditRejectsNonOAuthAccountsBeforeNetwork(t *testing.T) {
+	for _, account := range []*Account{{Platform: PlatformOpenAI, Type: AccountTypeOAuth}, {Platform: PlatformAnthropic, Type: AccountTypeAPIKey}, {Platform: PlatformAnthropic, Type: AccountTypeSetupToken}} {
+		s := resetProxyTestService(resetAccountStub{account})
+		s.do = func(*http.Request, string) (*http.Response, error) { t.Fatal("network called"); return nil, nil }
+		_, err := s.Query(context.Background(), 1)
+		require.Error(t, err)
 	}
 }
