@@ -171,7 +171,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { questionPrompt, questionContract, type IntelligenceQuestion } from '@/utils/intelligenceTest'
+import { questionPrompt, questionContract, isTextAnswerKind, STATE_PROBE_QUESTION, type IntelligenceQuestion } from '@/utils/intelligenceTest'
 import { useI18n } from 'vue-i18n'
 import { extractPelicanHtml as extractHtml } from '@/utils/pelicanHtml'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -191,7 +191,7 @@ const STORAGE_PREFIX = 'sub2api-pelican-test:'
 
 type RunStatus = 'running' | 'success' | 'error'
 interface TestRun {
-  questionKind?: IntelligenceQuestion
+  questionKind?: IntelligenceQuestion | typeof STATE_PROBE_QUESTION
   id: string
   status: RunStatus
   output: string
@@ -211,7 +211,7 @@ interface TestRecord {
   prompt: string
   modelId: string
   reasoningEffort: string
-  runs: TestRun[]
+  runs: (TestRun & { questionKind: IntelligenceQuestion })[]
 }
 
 const props = defineProps<{ show: boolean; account: Account | null; accounts?: AccountListItem[] }>()
@@ -278,7 +278,7 @@ function formatDate(value: string) {
 
 function editSchedule(config: PelicanTestConfig, model: string) {
   if (running.value) return
-  questionKind.value = config.question_kind || 'pelican'
+  if (config.question_kind === 'candy' || config.question_kind === 'pelican') questionKind.value = config.question_kind
   prompt.value = config.prompt
   modelId.value = model
   reasoningEffort.value = config.reasoning_effort
@@ -296,7 +296,7 @@ function previewScheduled(result: ScheduledTestResult) {
   if (running.value) return
   const config = result.pelican_config
   if (config) editSchedule(config, config.model_id || modelId.value)
-  const html = config?.question_kind === 'candy' ? '' : extractHtml(result.response_text)
+  const html = isTextAnswerKind(config?.question_kind) ? '' : extractHtml(result.response_text)
   runs.value = [{ id: `scheduled-${result.id}`, questionKind: config?.question_kind || 'pelican', status: result.status === 'success' ? 'success' : 'error', output: result.response_text, html, error: result.error_message,
     source: 'scheduled', startedAt: result.started_at, finishedAt: result.finished_at,
     durationMs: result.latency_ms, modelId: config?.model_id, reasoningEffort: config?.reasoning_effort
@@ -423,19 +423,20 @@ async function startTest() {
     prompt: prompt.value.trim(),
     modelId: modelId.value.trim(),
     reasoningEffort: reasoningEffort.value,
-    runs: runs.value.map((run) => ({ ...run }))
+    runs: runs.value.map((run) => ({ ...run, questionKind: questionKind.value }))
   }
   records.value = [record, ...records.value.filter((item) => item.id !== record.id)]
   saveRecords()
 }
 
 function downloadHtml(run: TestRun) {
-  const content = run.questionKind === 'candy' ? run.output : run.html || extractHtml(run.output)
+  const textAnswer = isTextAnswerKind(run.questionKind)
+  const content = textAnswer ? run.output : run.html || extractHtml(run.output)
   if (!content) return
-  const url = URL.createObjectURL(new Blob([content], { type: run.questionKind === 'candy' ? 'text/plain;charset=utf-8' : 'text/html;charset=utf-8' }))
+  const url = URL.createObjectURL(new Blob([content], { type: textAnswer ? 'text/plain;charset=utf-8' : 'text/html;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
-  link.download = `intelligence-test-${new Date().toISOString().replace(/[:.]/g, '-')}.${run.questionKind === 'candy' ? 'txt' : 'html'}`
+  link.download = `intelligence-test-${new Date().toISOString().replace(/[:.]/g, '-')}.${textAnswer ? 'txt' : 'html'}`
   link.click()
   URL.revokeObjectURL(url)
 }

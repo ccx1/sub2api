@@ -190,6 +190,9 @@ func sharedExcelBPSExtra(in SharedPoolAccountInput, account *Account) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	if options.AutoMoveOn403 || options.TargetGroupID != nil {
+		return nil, infraerrors.Forbidden("SHARED_BPS_GROUP_ADMIN_ONLY", "共享池账号分组由管理员管理")
+	}
 	return excelBPSExtra(options), nil
 }
 

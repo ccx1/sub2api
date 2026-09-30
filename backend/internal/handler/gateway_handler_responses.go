@@ -102,20 +102,21 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 	c.Request = c.Request.WithContext(requestCtx)
 
-	// 解析渠道级模型映射
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(requestCtx, apiKey.GroupID, reqModel)
-
 	// Claude Code only restriction:
 	// /v1/responses is never a Claude Code endpoint.
-	// When claude_code_only is enabled, this endpoint is rejected.
-	// The existing service-layer checkClaudeCodeRestriction handles degradation
-	// to fallback groups when the Forward path calls SelectAccountForModelWithExclusions.
-	// Here we just reject at handler level since /v1/responses clients can't be Claude Code.
-	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly {
+	// Compatible clients can use the configured fallback group.
+	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly && apiKey.Group.FallbackGroupID == nil {
 		h.responsesErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
+
+	// 渠道映射须与调度使用的降级分组一致，计费仍保留原 API key 分组。
+	mappingGroupID := apiKey.GroupID
+	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly {
+		mappingGroupID = apiKey.Group.FallbackGroupID
+	}
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(requestCtx, mappingGroupID, reqModel)
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.responsesSecurityAuditError(c, decision)

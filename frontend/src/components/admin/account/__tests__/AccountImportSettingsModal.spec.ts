@@ -6,14 +6,14 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
 import { defaultAccountImportSettings } from '@/api/admin/accountImportSettings'
 
-const { getSettings, saveSettings, getProxies, listGroups, showSuccess } = vi.hoisted(() => ({
-  getSettings: vi.fn(), saveSettings: vi.fn(), getProxies: vi.fn(), listGroups: vi.fn(), showSuccess: vi.fn()
+const { getSettings, saveSettings, getProxies, getGroups, listGroups, showSuccess } = vi.hoisted(() => ({
+  getSettings: vi.fn(), saveSettings: vi.fn(), getProxies: vi.fn(), getGroups: vi.fn(), listGroups: vi.fn(), showSuccess: vi.fn()
 }))
 vi.mock('@/api/admin/accountImportSettings', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/admin/accountImportSettings')>(),
   getAccountImportSettings: getSettings, saveAccountImportSettings: saveSettings
 }))
-vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { getAll: getProxies, listGroups } } }))
+vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { getAll: getProxies, listGroups }, groups: { getAllIncludingInactive: getGroups } } }))
 vi.mock('@/api/client', () => ({ apiClient: {} }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -34,6 +34,7 @@ describe('AccountImportSettingsModal', () => {
     vi.clearAllMocks()
     getSettings.mockReset().mockResolvedValue(defaultAccountImportSettings())
     getProxies.mockReset().mockResolvedValue(proxies)
+    getGroups.mockReset().mockResolvedValue([{ id: 3, name: 'Japan pool', platform: 'openai', proxy_count: 1, active_proxy_count: 1 }])
     listGroups.mockReset().mockResolvedValue([{ id: 3, name: 'Japan pool', proxy_count: 1, active_proxy_count: 1 }])
     saveSettings.mockReset().mockImplementation(async settings => settings)
   })
@@ -73,7 +74,7 @@ describe('AccountImportSettingsModal', () => {
     await flushPromises()
     expect(saveSettings).toHaveBeenCalledWith({
       enabled: true, protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true,
-      excel_bps_options: { models: null, auto_disable_on_403: false, cache_creation_as_input: false }, proxy_mode: 'fixed', proxy_id: 7,
+      excel_bps_options: { models: null, auto_disable_on_403: false, cache_creation_as_input: false, ignore_images: false, ignore_encrypted_content: false, omit_unsupported_tools: false, auto_move_on_403: false, target_group_id: null }, proxy_mode: 'fixed', proxy_id: 7,
       extra: { proxy_region_mode: 'manual', proxy_region_country: 'JP', codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 7, codex_ticket_proxy_strategy: 'affinity' }
     })
     wrapper.unmount()
@@ -175,8 +176,7 @@ describe('AccountImportSettingsModal', () => {
     getSettings.mockResolvedValue({ ...defaultAccountImportSettings(), enabled: true, proxy_mode: 'fixed', proxy_id: 8 })
     const wrapper = mountModal()
     await flushPromises()
-    await submit(wrapper)
-    expect(saveSettings).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="import-settings-save"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('admin.accountImportSettings.fixedProxyRequired')
     await wrapper.get('[data-testid="import-settings-proxy-mode"]').setValue('random')
     await wrapper.get('[data-testid="random-proxy-scope"]').setValue('selected')
@@ -189,16 +189,15 @@ describe('AccountImportSettingsModal', () => {
   it('blocks group saving during loading and after failure, then recovers through group retry', async () => {
     getSettings.mockResolvedValue({ ...defaultAccountImportSettings(), enabled: true, proxy_mode: 'random', extra: { random_proxy_pool_scope: 'group', random_proxy_group_id: 3 } })
     let rejectGroups!: (reason: Error) => void
-    listGroups.mockReturnValueOnce(new Promise((_, reject) => { rejectGroups = reject }))
+    getGroups.mockReturnValueOnce(new Promise((_, reject) => { rejectGroups = reject }))
     const wrapper = mountModal()
     await flushPromises()
-    await submit(wrapper)
-    expect(saveSettings).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="import-settings-save"]').attributes('disabled')).toBeDefined()
     rejectGroups(new Error('failed'))
     await flushPromises()
-    await submit(wrapper)
-    expect(saveSettings).not.toHaveBeenCalled()
-    await wrapper.findAll('button').find(button => button.text() === 'accountProxyGroups.retry')!.trigger('click')
+    expect(wrapper.get('[data-testid="import-settings-save"]').attributes('disabled')).toBeDefined()
+    getGroups.mockResolvedValue([{ id: 3, name: 'Japan pool', platform: 'openai', proxy_count: 1, active_proxy_count: 1 }])
+    await wrapper.get('[data-testid="import-settings-retry"]').trigger('click')
     await flushPromises()
     await submit(wrapper)
     await flushPromises()

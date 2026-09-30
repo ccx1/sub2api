@@ -224,7 +224,7 @@
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSelection(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
@@ -533,6 +533,7 @@
       :account-ids="bulkEditTarget?.mode === 'selected' ? bulkEditTarget.accountIds : selIds"
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
+      :selected-plan-types="bulkEditTarget?.selectedPlanTypes ?? []"
       :target="bulkEditTarget ?? undefined"
       :proxies="proxies"
       :groups="groups"
@@ -616,7 +617,6 @@ import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupSc
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
-
 const proxies = ref<AccountProxy[]>([])
 const proxyGroups = ref<ProxyGroup[]>([])
 const proxyGroupsState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
@@ -691,6 +691,7 @@ type AccountBulkEditTarget =
       accountIds: number[]
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
+      selectedPlanTypes: string[]
     }
   | {
       mode: 'filtered'
@@ -707,6 +708,7 @@ type AccountBulkEditTarget =
       previewCount: number
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
+      selectedPlanTypes: string[]
     }
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
@@ -1313,7 +1315,12 @@ const clearSelection = () => {
 }
 
 const selectPage = () => {
+  selectionRequestVersion.value++
   selectCurrentPage()
+}
+const toggleSelection = (id: number) => {
+  selectionRequestVersion.value++
+  toggleSel(id)
 }
 
 const swipeVirtualContext: SwipeSelectVirtualContext = {
@@ -1332,6 +1339,7 @@ useSwipeSelect(accountTableRef, {
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
+  upstreamBillingRateAbortController?.abort()
 }
 
 type AccountLoadOptions = {
@@ -1383,25 +1391,35 @@ const upstreamBillingRateContextKey = () => JSON.stringify({
 })
 
 const applyUpstreamBillingRateSnapshots = async (
-  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>
+  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>,
+  requestContextKey: string,
+  signal: AbortSignal
 ) => {
   const nextIDs = result.items.map(item => item.account_id)
   const currentIDs = accounts.value.map(account => account.id)
+  const currentByID = new Map(accounts.value.map(account => [account.id, account]))
 
-  // The compact response cannot fill a row that crossed a page boundary.
-  // Only that case needs the expensive, full account-list request.
-  if (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs)) {
-    try {
-      await load({ refreshTodayStats: false })
-    } catch (error) {
-      console.error('Failed to reconcile upstream billing sort:', error)
-    }
+  // Fetch missing rows without replacing the table with its loading skeleton.
+  if (result.total !== pagination.total || nextIDs.length !== currentIDs.length || nextIDs.some(id => !currentByID.has(id))) {
+    const page = await adminAPI.accounts.list(
+      pagination.page,
+      pagination.page_size,
+      { ...toRaw(params), lite: '1' },
+      { signal }
+    )
+    if (signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    pagination.total = page.total
+    pagination.pages = page.pages
+    mergeAccountsIncrementally(page.items)
+    hasPendingListSync.value = false
+    upstreamBillingNow.value = Date.now()
     return
   }
 
   const itemsByID = new Map(result.items.map(item => [item.account_id, item]))
-  let changed = false
-  const nextAccounts = accounts.value.map(account => {
+  let changed = !sameAccountIDOrder(nextIDs, currentIDs)
+  const nextAccounts = nextIDs.map(id => {
+    const account = currentByID.get(id)!
     const item = itemsByID.get(account.id)
     if (!item) return account
     const nextSnapshot = item.snapshot ?? null
@@ -1452,10 +1470,13 @@ const refreshUpstreamBillingRates = async (force = false) => {
       buildUpstreamBillingRateFilters(),
       { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
     )
-    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    if (controller.signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
     if (result.etag) upstreamBillingRateETag.value = result.etag
-    if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
+    if (!result.notModified && result.data) {
+      await applyUpstreamBillingRateSnapshots(result.data, requestContextKey, controller.signal)
+    }
   } catch (error) {
+    upstreamBillingRateETag.value = null
     const refreshError = error as { name?: string; code?: string }
     if (refreshError.name !== 'AbortError' && refreshError.name !== 'CanceledError' && refreshError.code !== 'ERR_CANCELED') {
       console.error('Failed to refresh upstream billing rates:', error)
@@ -1464,11 +1485,6 @@ const refreshUpstreamBillingRates = async (force = false) => {
     if (upstreamBillingRateAbortController === controller) upstreamBillingRateAbortController = null
     upstreamBillingRateRefreshing.value = false
   }
-}
-
-const refreshUpstreamBillingSortedList = async (force = false) => {
-  if (!force && sortState.sort_by !== 'upstream_billing_rate') return
-  await refreshUpstreamBillingRates(force)
 }
 
 useIntervalFn(() => { void refreshUpstreamBillingRates() }, 5 * 60_000, { immediate: false })
@@ -2060,6 +2076,7 @@ const openMenu = (a: Account, e: MouseEvent) => {
 }
 const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
+  selectionRequestVersion.value++
   toggleVisible(target.checked)
 }
 const handleBulkDelete = async () => {
@@ -2299,32 +2316,66 @@ const handleSelectAllResults = async () => {
 const collectSelectionMetadata = (rows: Account[]) => {
   const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
   const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
-  return { selectedPlatforms, selectedTypes }
+  const selectedPlanTypes = Array.from(new Set(rows.map(account => {
+    const plan = (account.credentials as Record<string, unknown> | undefined)?.plan_type
+    return typeof plan === 'string' ? plan.trim() : ''
+  }).filter(Boolean)))
+  return { selectedPlatforms, selectedTypes, selectedPlanTypes }
 }
 
-const openBulkEditSelected = () => {
-  bulkEditTarget.value = {
-    mode: 'selected',
-    accountIds: [...selIds.value],
-    selectedPlatforms: [...selPlatforms.value],
-    selectedTypes: [...selTypes.value]
+const selectionMetadataLoading = ref(false)
+let bulkMetadataRequest = 0
+const loadAccountsForMetadata = async (ids: number[]) => {
+  const rows: Account[] = []
+  for (let offset = 0; offset < ids.length; offset += 8) {
+    const batch = await Promise.all(ids.slice(offset, offset + 8).map(id => adminAPI.accounts.getById(id)))
+    if (batch.some((row, index) => !row || row.id !== ids[offset + index])) throw new Error('Incomplete account metadata')
+    rows.push(...batch)
   }
-  showBulkEdit.value = true
+  if (rows.length !== ids.length) throw new Error('Incomplete account metadata')
+  return rows
+}
+
+const openBulkEditSelected = async () => {
+  if (selectionMetadataLoading.value || selIds.value.length === 0) return
+  const requestVersion = ++bulkMetadataRequest
+  selectionMetadataLoading.value = true
+  try {
+    const ids = [...selIds.value]
+    const rows = await loadAccountsForMetadata(ids)
+    if (requestVersion !== bulkMetadataRequest) return
+    bulkEditTarget.value = { mode: 'selected', accountIds: ids, ...collectSelectionMetadata(rows) }
+    showBulkEdit.value = true
+  } catch (error) {
+    if (requestVersion === bulkMetadataRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  } finally {
+    if (requestVersion === bulkMetadataRequest) selectionMetadataLoading.value = false
+  }
 }
 
 const openBulkEditFiltered = async () => {
+  if (selectionMetadataLoading.value) return
+  const requestVersion = ++bulkMetadataRequest
+  selectionMetadataLoading.value = true
   const filters = buildBulkEditFilterSnapshot()
-  const preview = await adminAPI.accounts.list(1, 100, filters)
-  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
-  bulkEditTarget.value = {
-    mode: 'filtered',
-    filters,
-    previewCount: preview.total,
-    selectedPlatforms,
-    selectedTypes
+  try {
+    const ids = await fetchAllAccountIds(
+      (page, pageSize, requestFilters) => adminAPI.accounts.list(page, pageSize, requestFilters), filters)
+    if (requestVersion !== bulkMetadataRequest || ids.length === 0) return
+    const rows = await loadAccountsForMetadata(ids)
+    if (requestVersion !== bulkMetadataRequest) return
+    bulkEditTarget.value = { mode: 'filtered', filters, previewCount: ids.length, ...collectSelectionMetadata(rows) }
+    showBulkEdit.value = true
+  } catch (error) {
+    if (requestVersion === bulkMetadataRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  } finally {
+    if (requestVersion === bulkMetadataRequest) selectionMetadataLoading.value = false
   }
-  showBulkEdit.value = true
 }
+watch([selIds, () => JSON.stringify(buildBulkEditFilterSnapshot())], () => {
+  bulkMetadataRequest++
+  selectionMetadataLoading.value = false
+}, { flush: 'sync' })
 
 const handleBulkUpdated = () => {
   showBulkEdit.value = false
@@ -2477,7 +2528,9 @@ const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBilli
   })
 }
 const refreshAccountsAfterUpstreamBillingProbe = async () => {
-  await refreshUpstreamBillingSortedList(true)
+  enterAutoRefreshSilentWindow()
+  // Cost may change even when the active sort does not depend on upstream rates.
+  await refreshUpstreamBillingRates(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
@@ -2848,6 +2901,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  bulkMetadataRequest++
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

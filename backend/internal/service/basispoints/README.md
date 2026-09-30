@@ -47,7 +47,11 @@ the final response locally. This does not provide upstream constrained decoding.
 - Preserve `detail: original` on HTTPS images and inline images rewritten by
   the relay. Let the upstream model validate its supported detail levels; do
   not silently downgrade the requested detail.
-- Enforce the existing 20-inline-image and 32 MiB per-request relay limits.
+- Send only type and file_id for validated message attachment references,
+  including uploaded images, replayed IDs and images moved from tool results.
+  Inline tool screenshots retain their existing detail handling.
+- Enforce the saved inline-image count and byte limits; defaults remain 20
+  inline images and 32 MiB per request for the relay.
   A relay capacity error and an upstream overload are separate from a tool
   protocol error; HTTP 200 alone does not establish a successful SSE terminal.
 - When image support is enabled and a request carries more than
@@ -91,3 +95,29 @@ the final response locally. This does not provide upstream constrained decoding.
 The gateway separately permits one regeneration when the first tool interaction ends in exactly one undeclared run_officejs target at the end of a completed response. It must have no prior tool calls/results and no dispatched client tool. This path reuses the prepared request, current catalog, account, model, proxy and attachment IDs; it does not append a fabricated executed tool result. Its corrected response must pass the current catalog, argument schema, identity and parallel-call checks. A second unknown target, invalid arguments or incomplete response fails without dispatching tools. Both attempts' reported usage is retained, including progressive usage if the correction disconnects before its terminal event.
 
 This path and the existing known-target formatting path are selected independently. A function argument schema error alone does not trigger either path.
+
+For streaming clients, first-turn regeneration stops once nonempty text, reasoning
+summary or refusal content has been forwarded. An unknown target then produces
+`response.failed` with the original response identity and usage, without tool
+dispatch or another generation. Empty lifecycle events and opaque reasoning alone
+do not block regeneration; non-streaming requests remain buffered and retain their
+one correction attempt. Known-target formatting corrections still preserve the
+original text and replace only withheld tool slots.
+
+# In-band upstream failures
+
+- Recognize error, response.failed and response.cancelled as failed terminals.
+  Explicit error status takes precedence over known error codes and types;
+  unknown identifiers use a safe 502 fallback. Never forward upstream free text.
+- Buffered client responses return the classified HTTP status. Started streams
+  retain their HTTP status and carry the classification in the error event.
+  Ops records keep the actual upstream HTTP status separate from the semantic
+  failure status; existing compact keepalives still finish with an SSE failure.
+- A rate-limit terminal cools only the BPS route for subsequent requests, except
+  observation-only quality probes. It never retries the accepted generation,
+  disables an account on an in-band 403, or changes shared Codex account health.
+- Failure/cancellation retains usage and withholds unvalidated tools. Readers
+  stop at cancellation without waiting for EOF, including correction and image
+  description readers. Failed image descriptions retain the safe failure type
+  and usage; unknown upstream details are not exposed. This does not add a BPS
+  WebSocket transport.

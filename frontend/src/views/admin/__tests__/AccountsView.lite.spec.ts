@@ -3,6 +3,7 @@ import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
+import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import CodexTicketAlerts from '@/components/account/CodexTicketAlerts.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
@@ -14,6 +15,8 @@ const {
   getById,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
+  getUpstreamBillingRatesWithEtag,
+  probeUpstreamBilling,
   getAllProxies,
   listProxyGroups,
   getAllGroups,
@@ -27,6 +30,8 @@ const {
   getById: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
+  getUpstreamBillingRatesWithEtag: vi.fn(),
+  probeUpstreamBilling: vi.fn(),
   getAllProxies: vi.fn(),
   listProxyGroups: vi.fn(),
   getAllGroups: vi.fn(),
@@ -39,12 +44,13 @@ const {
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       list: listAccounts,
       getById,
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
+      getUpstreamBillingRatesWithEtag,
+      probeUpstreamBilling,
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -79,6 +85,8 @@ const DataTableStub = defineComponent({
         <slot name="cell-groups" :row="row" />
         <slot name="cell-proxy" :row="row" />
         <slot name="cell-codex_ticket" :row="row" />
+        <slot name="cell-capacity" :row="row" />
+        <slot name="cell-upstream_billing_rate" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -137,7 +145,7 @@ function mountView(stubActionMenu = true) {
         EditAccountModal: EditAccountModalStub,
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
-        AccountCapacityCell: true,
+        AccountCapacityCell: false,
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: AccountGroupsCellStub,
@@ -210,6 +218,8 @@ describe('admin AccountsView lite account list', () => {
     getAllProxies.mockReset().mockResolvedValue([])
     listProxyGroups.mockReset().mockResolvedValue([{ id: 7, name: 'Tokyo pool', proxy_count: 2, active_proxy_count: 1 }])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
+    getUpstreamBillingRatesWithEtag.mockReset().mockResolvedValue({ notModified: true, data: null })
+    probeUpstreamBilling.mockReset()
     refreshCredentials.mockReset()
     setCodexTicketEnabled.mockReset()
     showError.mockReset()
@@ -251,7 +261,7 @@ describe('admin AccountsView lite account list', () => {
     expect(bulkEditor.props('accountIds')).toEqual([71, 72])
     expect(bulkEditor.props('target')).toEqual({
       mode: 'selected', accountIds: [71, 72],
-      selectedPlatforms: ['openai', 'anthropic'], selectedTypes: ['oauth', 'apikey']
+      selectedPlatforms: ['openai', 'anthropic'], selectedTypes: ['oauth', 'apikey'], selectedPlanTypes: []
     })
     expect(wrapper.getComponent(EditAccountModalStub).props('show')).toBe(false)
     wrapper.unmount()
@@ -330,6 +340,24 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
     expect(setCodexTicketEnabled).toHaveBeenCalledWith(43, true)
     expect(wrapper.find('[data-account-name="bps off"] button[title="admin.accounts.codexTicketEnabled"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('preserves the saved cost after probing with an unchanged snapshot', async () => {
+    const snapshot = { status: 'ok', data: { effective_rate_multiplier: 0.14 } }
+    const row = { ...listRow, type: 'apikey', extra: { cost_multiplier: 0.1, upstream_billing_probe: snapshot } }
+    listAccounts.mockResolvedValue({ items: [row], total: 1, page: 1, page_size: 20, pages: 1 })
+    probeUpstreamBilling.mockResolvedValue({ account_id: row.id, snapshot })
+    getUpstreamBillingRatesWithEtag.mockResolvedValue({ notModified: false, data: {
+      items: [{ account_id: row.id, snapshot, cost_multiplier: 0.14 }], total: 1, page: 1, page_size: 20
+    } })
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.findComponent(UpstreamBillingRateCell).vm.$emit('probe')
+    await flushPromises()
+    expect(probeUpstreamBilling).toHaveBeenCalledWith(row.id)
+    expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalled()
+    expect(wrapper.findComponent(UpstreamBillingRateCell).props('account').extra?.cost_multiplier).toBe(0.1)
     wrapper.unmount()
   })
 

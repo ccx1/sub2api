@@ -138,3 +138,30 @@ func TestImageRelayConfigureConcurrentConversions(t *testing.T) {
 	require.Zero(t, r.reservedEntries)
 	require.Len(t, r.entries, 1)
 }
+
+func TestImageRelayLocalCapacityBounds(t *testing.T) {
+	max := ImageRelayLimits{MaxImageMiB: 128, MaxTotalMiB: 128, MaxImages: 4096, StorageMiB: 16384, StorageEntries: 65536, TTLMinutes: 1440}
+	require.NoError(t, max.Validate())
+	for _, change := range []func(*ImageRelayLimits){
+		func(l *ImageRelayLimits) { l.MaxImageMiB++ },
+		func(l *ImageRelayLimits) { l.MaxTotalMiB++ },
+		func(l *ImageRelayLimits) { l.MaxImages++ },
+		func(l *ImageRelayLimits) { l.StorageMiB++ },
+		func(l *ImageRelayLimits) { l.StorageEntries++ },
+		func(l *ImageRelayLimits) { l.TTLMinutes++ },
+	} {
+		invalid := max
+		change(&invalid)
+		require.Error(t, invalid.Validate())
+	}
+	relay, err := newTestImageRelay(t, "https://images.example")
+	require.NoError(t, err)
+	require.NoError(t, relay.Configure(relay.baseURL, max))
+	out, err := relay.Rewrite(relayTestRequest(t, relayTestPNG(t)), "local-capacity")
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	relay.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, relayTestURL(t, out), nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, relay.entries, 1, "raising a ceiling must not preallocate entries")
+	require.Zero(t, relay.reservedBytes)
+}

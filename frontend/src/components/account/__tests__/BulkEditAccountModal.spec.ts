@@ -341,6 +341,18 @@ describe('BulkEditAccountModal', () => {
       await wrapper.get('[data-testid="bulk-excel-bps-toggle"]').trigger('click')
     }
 
+    it('blocks enabling BPS for a complete target containing a Free plan but permits disabling it', async () => {
+      const wrapper = mountModal({ ...oauthProps, selectedPlanTypes: ['pro', ' FREE '] })
+      await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(true)
+      const toggle = wrapper.get('[data-testid="bulk-excel-bps-toggle"]')
+      expect(toggle.attributes('disabled')).toBeDefined()
+      await submit(wrapper)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+        extra: { ...defaultExtra, openai_excel_bps: false, openai_excel_bps_models: null }
+      })
+      wrapper.unmount()
+    })
+
     it.each([
       { selectedPlatforms: ['openai'], selectedTypes: ['apikey'] },
       { selectedPlatforms: ['openai'], selectedTypes: ['setup-token'] },

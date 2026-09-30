@@ -1,5 +1,4 @@
 export default {
-
   // Subscription Progress (Header component)
   subscriptionProgress: {
     title: 'My Subscriptions',

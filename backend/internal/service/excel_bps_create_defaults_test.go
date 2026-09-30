@@ -228,6 +228,36 @@ func TestSharedPoolCreateExcelBPSOptionsKeepTicketForScopedModels(t *testing.T) 
 	require.True(t, *view.ExcelBPSEnabled)
 }
 
+func TestSharedPoolBPSRejectsAdminGroupMove(t *testing.T) {
+	target := int64(0)
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "pro"}}
+	for _, options := range []ExcelBPSOptions{
+		{AutoMoveOn403: true, TargetGroupID: &target},
+		{AutoMoveOn403: true},
+	} {
+		_, err := sharedExcelBPSExtra(SharedPoolAccountInput{ExcelBPSEnabled: new(true), ExcelBPSOptions: &options}, account)
+		require.Error(t, err)
+	}
+}
+
+func TestNormalizeExcelBPSOptionsGroupTarget(t *testing.T) {
+	zero := int64(0)
+	normalized, err := normalizeExcelBPSOptions(ExcelBPSOptions{AutoMoveOn403: true, TargetGroupID: &zero})
+	require.NoError(t, err)
+	require.Equal(t, &zero, normalized.TargetGroupID)
+
+	_, err = normalizeExcelBPSOptions(ExcelBPSOptions{AutoMoveOn403: true})
+	require.Equal(t, "OPENAI_EXCEL_BPS_INVALID", infraerrors.Reason(err))
+
+	negative := int64(-1)
+	_, err = normalizeExcelBPSOptions(ExcelBPSOptions{AutoMoveOn403: true, TargetGroupID: &negative})
+	require.Equal(t, "OPENAI_EXCEL_BPS_INVALID", infraerrors.Reason(err))
+
+	normalized, err = normalizeExcelBPSOptions(ExcelBPSOptions{TargetGroupID: &zero})
+	require.NoError(t, err)
+	require.Nil(t, normalized.TargetGroupID)
+}
+
 func TestAccountImportDefaultsExcelBPSOptions(t *testing.T) {
 	settings := excelBPSImportSettings()
 	models := []string{"gpt-6-astra"}

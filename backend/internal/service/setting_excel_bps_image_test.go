@@ -140,7 +140,7 @@ func TestExcelBPSImageSettingsRejectInvalidUpdatesAtomically(t *testing.T) {
 	settings := NewSettingService(repo, &config.Config{})
 	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{ExcelBPSImageRelayEnabled: true, ExcelBPSImageBaseURL: "https://images.example"}))
 	for _, limits := range []struct{ body, budget, requests int }{
-		{129, 2048, 32}, {64, 511, 32}, {64, 2049, 32}, {64, 512, 513}, {128, 512, 32},
+		{basispoints.MaxImageBodyMiB + 1, basispoints.MaxImageBudgetMiB, 32}, {64, 511, 32}, {64, basispoints.MaxImageBudgetMiB + 1, 32}, {64, 512, basispoints.MaxImageRequests + 1}, {128, 512, 32},
 	} {
 		err := settings.UpdateSettings(ctx, &SystemSettings{
 			ExcelBPSImageRelayEnabled: true, ExcelBPSImageBaseURL: "https://images.example",
@@ -208,4 +208,20 @@ func TestExcelBPSImageLimitsHotReload(t *testing.T) {
 	repo.mu.Unlock()
 	_, err = settings.GetExcelBPSImageRelaySettings(ctx)
 	require.Error(t, err)
+}
+
+func TestExcelBPSImageRelayIgnoresLegacyImagePolicy(t *testing.T) {
+	repo := &excelBPSImageSettingsRepo{values: map[string]string{
+		SettingKeyExcelBPSImageRelayEnabled: "true",
+		SettingKeyExcelBPSImageBaseURL:      "https://images.example",
+		SettingKeyExcelBPSImageMaxImages:    "40",
+		"excel_bps_image_limit_policy":      "invalid",
+		"excel_bps_image_warning_remaining": "not-a-number",
+		"excel_bps_image_compact_reserve":   "not-a-number",
+	}}
+	settings := NewSettingService(repo, &config.Config{})
+	runtime, err := settings.GetExcelBPSImageRelaySettings(context.Background())
+	require.NoError(t, err)
+	require.True(t, runtime.Enabled)
+	require.Equal(t, 40, runtime.Limits.MaxImages)
 }

@@ -18,18 +18,34 @@ const (
 
 // ExcelBPSOptions 是开启 Excel / BPS 时的子选项；Models 为 nil 表示对所有模型启用（兼容原设置）。
 type ExcelBPSOptions struct {
-	Models               *[]string `json:"models"`
-	AutoDisableOn403     bool      `json:"auto_disable_on_403"`
-	CacheCreationAsInput bool      `json:"cache_creation_as_input"`
+	Models                 *[]string `json:"models"`
+	AutoDisableOn403       bool      `json:"auto_disable_on_403"`
+	CacheCreationAsInput   bool      `json:"cache_creation_as_input"`
+	IgnoreImages           bool      `json:"ignore_images"`
+	IgnoreEncryptedContent bool      `json:"ignore_encrypted_content"`
+	OmitUnsupportedTools   bool      `json:"omit_unsupported_tools"`
+	AutoMoveOn403          bool      `json:"auto_move_on_403"`
+	TargetGroupID          *int64    `json:"target_group_id"`
 }
 
-var excelBPSExtraKeys = []string{excelBPSExtraKey, excelBPSModelsExtraKey, excelBPSCacheCreationAsInputExtraKey, excelBPSAutoDisableOn403ExtraKey}
+var excelBPSExtraKeys = []string{excelBPSExtraKey, excelBPSModelsExtraKey, excelBPSCacheCreationAsInputExtraKey, excelBPSAutoDisableOn403ExtraKey, ExcelBPSIgnoreImagesKey, ExcelBPSIgnoreEncryptedContentKey, ExcelBPSOmitUnsupportedToolsKey, ExcelBPSAutoMoveOn403Key, ExcelBPS403TargetGroupIDKey}
 
 // ExcelBPSExtraKeys 返回 BPS 配置族的全部 extra 键。
 func ExcelBPSExtraKeys() []string { return append([]string{}, excelBPSExtraKeys...) }
 
 // normalizeExcelBPSOptions 去除空白与重复模型；空列表有效，表示不对任何模型启用 BPS。
 func normalizeExcelBPSOptions(options ExcelBPSOptions) (ExcelBPSOptions, error) {
+	if options.TargetGroupID != nil {
+		if *options.TargetGroupID < 0 {
+			return options, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "BPS 403 destination must be nonnegative")
+		}
+		if !options.AutoMoveOn403 {
+			options.TargetGroupID = nil
+		}
+	}
+	if options.AutoMoveOn403 && options.TargetGroupID == nil {
+		return options, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "BPS 403 group action requires an explicit target group, or 0 to leave all groups")
+	}
 	if options.Models == nil {
 		return options, nil
 	}
@@ -63,6 +79,21 @@ func excelBPSExtra(options ExcelBPSOptions) map[string]any {
 	}
 	if options.CacheCreationAsInput {
 		extra[excelBPSCacheCreationAsInputExtraKey] = true
+	}
+	if options.IgnoreImages {
+		extra[ExcelBPSIgnoreImagesKey] = true
+	}
+	if options.IgnoreEncryptedContent {
+		extra[ExcelBPSIgnoreEncryptedContentKey] = true
+	}
+	if options.OmitUnsupportedTools {
+		extra[ExcelBPSOmitUnsupportedToolsKey] = true
+	}
+	if options.AutoMoveOn403 {
+		extra[ExcelBPSAutoMoveOn403Key] = true
+		if options.TargetGroupID != nil {
+			extra[ExcelBPS403TargetGroupIDKey] = *options.TargetGroupID
+		}
 	}
 	return extra
 }
@@ -103,8 +134,15 @@ func ExcelBPSOptionsFromAccount(a *Account) *ExcelBPSOptions {
 		return nil
 	}
 	options := &ExcelBPSOptions{
-		AutoDisableOn403:     a.IsExcelBPSAutoDisableOn403Enabled(),
-		CacheCreationAsInput: a.IsExcelBPSCacheCreationAsInputEnabled(),
+		AutoDisableOn403:       a.IsExcelBPSAutoDisableOn403Enabled(),
+		CacheCreationAsInput:   a.IsExcelBPSCacheCreationAsInputEnabled(),
+		IgnoreImages:           a.IsExcelBPSIgnoreImagesEnabled(),
+		IgnoreEncryptedContent: a.IsExcelBPSIgnoreEncryptedContentEnabled(),
+		OmitUnsupportedTools:   a.IsExcelBPSOmitUnsupportedToolsEnabled(),
+		AutoMoveOn403:          a.Extra[ExcelBPSAutoMoveOn403Key] == true,
+	}
+	if target, ok := a.ExcelBPS403GroupTarget(); ok {
+		options.TargetGroupID = &target
 	}
 	if raw, scoped := a.Extra[excelBPSModelsExtraKey]; scoped {
 		models := []string{}

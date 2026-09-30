@@ -107,7 +107,7 @@ func TestExcelBPSNativeAttachmentForward(t *testing.T) {
 							if part.Get("type").String() == "input_image" {
 								found++
 								require.Equal(t, "file-native123", part.Get("file_id").String())
-								require.Equal(t, "original", part.Get("detail").String())
+								require.Len(t, part.Map(), 2, "native file references only accept type and file_id")
 								require.False(t, part.Get("image_url").Exists())
 							}
 						}
@@ -186,6 +186,49 @@ func TestExcelBPSNativeUploadFailureStopsWithoutQuotaWrite(t *testing.T) {
 				require.True(t, closed.closed)
 			}
 		})
+	}
+}
+
+func TestExcelBPSLocalEgressFailureReachesAccountScheduler(t *testing.T) {
+	for _, stage := range []string{"response", "attachment"} {
+		for _, sentinel := range []error{ErrRandomProxyUnavailable, ErrRandomProxyChanged} {
+			t.Run(stage+"/"+sentinel.Error(), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-6-astra","input":"test"}`)
+				if stage == "attachment" {
+					body, _ = nativeGatewayBody(t)
+				}
+				svc := openAIClientToolsTestService(nil)
+				enableNativeAttachments(svc)
+				calls := 0
+				svc.httpUpstream = &nativeAttachmentUpstream{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+					calls++
+					if stage == "attachment" {
+						require.Equal(t, basispoints.AttachmentsURL, req.URL.String())
+					} else {
+						require.Equal(t, basispoints.ResponsesURL, req.URL.String())
+					}
+					return nil, fmt.Errorf("PRIVATE_EGRESS_URL: %w", sentinel)
+				}}
+				account := excelAccount()
+				ttft := 450
+				svc.ReportOpenAIAccountScheduleResult(account, "gpt-6-astra", true, &ttft)
+				beforeRate, beforeTTFT, beforeKnown := svc.openaiAccountStats.snapshot(account.ID)
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+				_, err := svc.Forward(context.Background(), c, account, body)
+				require.ErrorIs(t, err, sentinel)
+				require.Equal(t, http.StatusBadGateway, rec.Code)
+				require.Equal(t, 1, calls)
+				require.NotContains(t, err.Error(), "PRIVATE_EGRESS_URL")
+				require.NotContains(t, rec.Body.String(), "PRIVATE_EGRESS_URL")
+				require.False(t, svc.ReportOpenAIAccountScheduleResult(account, "gpt-6-astra", false, nil, err))
+				rate, latency, known := svc.openaiAccountStats.snapshot(account.ID)
+				require.Equal(t, beforeRate, rate)
+				require.Equal(t, beforeTTFT, latency)
+				require.Equal(t, beforeKnown, known)
+			})
+		}
 	}
 }
 

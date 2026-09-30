@@ -42,6 +42,7 @@ const (
 	opsErrAPIKeyRequired             = "api_key_required"
 	opsErrInsufficientBalance        = "insufficient balance"
 	opsErrInsufficientAccountBalance = "insufficient account balance"
+	opsErrInsufficientUserBalance    = "insufficient user balance"
 	opsErrInsufficientQuota          = "insufficient_quota"
 
 	// 上游错误码常量 — 错误分类 (normalizeOpsErrorType / classifyOpsPhase / classifyOpsIsBusinessLimited)
@@ -780,6 +781,19 @@ func (w *opsCaptureWriter) Flush() {
 	defer finishDelegatedCall(state)
 	rw.Flush()
 }
+
+// FlushError keeps the writer lease alive while exposing transport flush failures.
+// Do not expose Unwrap: it would let callers bypass the generation/in-flight guard.
+func (w *opsCaptureWriter) FlushError() error {
+	state, rw := w.beginDelegatedCall()
+	if state == nil {
+		return errors.New("response writer released")
+	}
+	state.mu.Unlock()
+	defer finishDelegatedCall(state)
+	return service.FlushGatewayResponse(rw)
+}
+
 func (w *opsCaptureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	state, rw := w.beginDelegatedCall()
 	if state == nil {
@@ -1096,7 +1110,6 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		c.Next()
 		service.SetOpsLatencyMs(c, service.OpsRequestDurationMsKey, time.Since(requestStart).Milliseconds())
 		w.finalizeCapture()
-
 		if _, rejected := middleware2.GetIngressRejectReason(c); rejected {
 			return
 		}
@@ -2327,6 +2340,7 @@ func isOpsLocalBusinessLimitError(code string, msg string) bool {
 		strings.Contains(msg, "no active subscription found for this group") ||
 		strings.Contains(msg, "subscription is invalid or expired") ||
 		strings.Contains(msg, opsErrInsufficientBalance) ||
+		strings.Contains(msg, opsErrInsufficientUserBalance) ||
 		strings.Contains(msg, "insufficient account balance") ||
 		strings.Contains(msg, "api key group platform is not gemini") ||
 		strings.Contains(msg, "api key 额度已用完") ||
@@ -2505,7 +2519,8 @@ func shouldSkipOpsErrorLog(ctx context.Context, ops *service.OpsService, message
 
 	// Check if insufficient balance errors should be ignored
 	if settings.IgnoreInsufficientBalanceErrors {
-		if strings.Contains(bodyLower, opsErrInsufficientBalance) || strings.Contains(bodyLower, opsErrInsufficientAccountBalance) ||
+		if strings.Contains(bodyLower, opsErrInsufficientUserBalance) || strings.Contains(msgLower, opsErrInsufficientUserBalance) ||
+			strings.Contains(bodyLower, opsErrInsufficientBalance) || strings.Contains(bodyLower, opsErrInsufficientAccountBalance) ||
 			strings.Contains(bodyLower, opsErrInsufficientQuota) ||
 			strings.Contains(msgLower, opsErrInsufficientBalance) || strings.Contains(msgLower, opsErrInsufficientAccountBalance) {
 			return true

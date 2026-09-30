@@ -37,8 +37,14 @@ func (h *SharedPoolHandler) accountImportDefaults(ctx context.Context) (*sharedA
 	}
 	return &sharedAccountImportDefaults{
 		ProtectionEnabled: settings.ProtectionEnabled, CodexTicketEnabled: settings.CodexTicketEnabled,
-		ExcelBPSEnabled: settings.ExcelBPSEnabled, ExcelBPSOptions: settings.ExcelBPSOptions,
+		ExcelBPSEnabled: settings.ExcelBPSEnabled, ExcelBPSOptions: sharedImportExcelBPSOptions(settings.ExcelBPSOptions),
 	}, nil
+}
+
+func sharedImportExcelBPSOptions(options service.ExcelBPSOptions) service.ExcelBPSOptions {
+	options.AutoMoveOn403 = false
+	options.TargetGroupID = nil
+	return options
 }
 
 func applySharedAccountImportDefaults(input *service.SharedPoolAccountInput, defaults *sharedAccountImportDefaults, choices sharedImportDefaults) {
@@ -59,7 +65,8 @@ func applySharedAccountImportDefaults(input *service.SharedPoolAccountInput, def
 	input.CodexTicketEnabled = new(defaults.CodexTicketEnabled)
 	account := &service.Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
 	// 与后台导入一致：显式填写任一 BPS 字段时，整个配置族使用当次提交值。
-	if choices.ExcelBPSEnabled != nil || choices.ExcelBPSOptions != nil || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() {
+	if choices.ExcelBPSEnabled != nil || choices.ExcelBPSOptions != nil || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() ||
+		!(&service.Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: map[string]any{"openai_excel_bps": true}}).IsExcelBPSEnabled() {
 		return
 	}
 	input.ExcelBPSEnabled = new(defaults.ExcelBPSEnabled)

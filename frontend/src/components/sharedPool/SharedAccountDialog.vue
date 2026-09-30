@@ -63,8 +63,9 @@
         <div v-if="supportsExcelBPS" class="space-y-3">
           <div class="flex items-start justify-between gap-4">
             <div><label for="shared-excel-bps" class="input-label">{{ t('sharedPool.excelBPS') }}</label><p class="input-hint">{{ t('sharedPool.excelBPSHint') }}</p></div>
-            <Toggle id="shared-excel-bps" v-model="excelBPSEnabled" :aria-label="t('sharedPool.excelBPS')" :disabled="saving" />
+            <Toggle id="shared-excel-bps" v-model="excelBPSEnabled" :aria-label="t('sharedPool.excelBPS')" :disabled="saving || (freePlan && !excelBPSEnabled)" />
           </div>
+          <p v-if="freePlan" class="input-hint">{{ t('admin.accounts.openai.excelBPSFreeUnsupported') }}</p>
           <ExcelBPSOptionsFields v-if="excelBPSEnabled" v-model="excelBPSOptions" :disabled="saving" test-id-prefix="shared-excel-bps"
             class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" />
         </div>
@@ -96,7 +97,7 @@ import { hasSettlementPolicy } from './settlementPolicy'
 import { resolveSharedAccountImportDefaults } from './sharedAccountImportDefaults'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
-import { defaultExcelBPSOptions, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
+import { defaultExcelBPSOptions, isKnownFreePlan, sharedExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { sharedPoolAPI, type SharedAccount, type SharedAccountInput, type SharedAccountUpdateInput, type SharedConfig, type SharedImportDefaults, type SharedPlatform } from '@/api/sharedPool'
 
@@ -121,17 +122,17 @@ const canConsent = computed(() => hasSettlementPolicy(props.config))
 // 编辑时仅对后端标记为支持 BPS 的账号显示；只在开关或子选项变化时提交，避免覆盖 403 自动关闭等并行变化。
 const supportsExcelBPS = computed(() => props.account ? props.account.excel_bps_enabled !== undefined : isOpenAIOAuth.value)
 const initialExcelBPSEnabled = props.account ? props.account.excel_bps_enabled === true : importDefaults.excel_bps_enabled
-const initialExcelBPSOptions = normalizeExcelBPSOptions(props.account
+const initialExcelBPSOptions = sharedExcelBPSOptions(props.account
   ? props.account.excel_bps_options ?? defaultExcelBPSOptions() : importDefaults.excel_bps_options)
 const excelBPSEnabled = ref(initialExcelBPSEnabled)
-const excelBPSOptions = ref(normalizeExcelBPSOptions(initialExcelBPSOptions))
+const excelBPSOptions = ref(sharedExcelBPSOptions(initialExcelBPSOptions))
 function excelBPSInput() {
   return excelBPSEnabled.value
-    ? { excel_bps_enabled: true, excel_bps_options: normalizeExcelBPSOptions(excelBPSOptions.value) }
+    ? { excel_bps_enabled: true, excel_bps_options: sharedExcelBPSOptions(excelBPSOptions.value) }
     : { excel_bps_enabled: false }
 }
 const excelBPSChanged = computed(() => excelBPSEnabled.value !== initialExcelBPSEnabled
-  || (excelBPSEnabled.value && JSON.stringify(normalizeExcelBPSOptions(excelBPSOptions.value)) !== JSON.stringify(initialExcelBPSOptions)))
+  || (excelBPSEnabled.value && JSON.stringify(sharedExcelBPSOptions(excelBPSOptions.value)) !== JSON.stringify(initialExcelBPSOptions)))
 const dailyCooldown = ref(normalizeDailyCooldown(props.account?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
 function cooldownInput() {
@@ -141,6 +142,8 @@ function cooldownInput() {
 watch(() => form.platform, () => { if (!accountTypes.value.includes(form.type)) form.type = 'oauth' })
 const changeProxy = ref(false)
 const credentials = ref<Record<string, unknown>>()
+const freePlan = computed(() => !props.account && isOpenAIOAuth.value && isKnownFreePlan(credentials.value))
+watch(freePlan, value => { if (value) excelBPSEnabled.value = false })
 const credentialsValid = ref(true)
 const authorizing = ref(false)
 const saving = ref(false)
@@ -163,6 +166,7 @@ function submit() {
   if (!validateCooldown()) return
   if (!props.account && !canConsent.value) { error.value = t('sharedPool.settlementRequired'); return }
   if (!props.account && (!credentialsValid.value || !credentials.value)) { error.value = t('sharedPool.credentialsRequired'); return }
+  if (freePlan.value && excelBPSEnabled.value) { error.value = t('admin.accounts.openai.excelBPSFreeUnsupported'); return }
   void save()
 }
 async function save() {

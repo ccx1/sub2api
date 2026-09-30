@@ -242,14 +242,14 @@ describe('shared account creation and edit boundaries', () => {
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    const options = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true }
+    const options = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true, ignore_images: false, ignore_encrypted_content: false, omit_unsupported_tools: false, auto_move_on_403: false, target_group_id: null }
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: true, excel_bps_options: options }))
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
     expect(wrapper.emitted('import')?.[0]?.[0]).toEqual(expect.objectContaining({ excel_bps_enabled: true, excel_bps_options: options }))
   })
 
   it('edits Excel / BPS only when the saved configuration changes', async () => {
-    const saved = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false }
+    const saved = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false, ignore_images: false, ignore_encrypted_content: false, omit_unsupported_tools: false, auto_move_on_403: false, target_group_id: null }
     const wrapper = render(true, { excel_bps_enabled: true, excel_bps_options: saved })
     expect(wrapper.get('#shared-excel-bps').attributes('aria-checked')).toBe('true')
     expect((wrapper.get('[data-testid="shared-excel-bps-auto-disable-on-403"]').element as HTMLInputElement).checked).toBe(true)

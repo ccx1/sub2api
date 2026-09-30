@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"hash/fnv"
 	"log/slog"
 	"math"
@@ -17,6 +16,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -2565,13 +2566,16 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	if account == nil {
 		return false
 	}
-	if !success && len(observedErr) > 0 && isExcelBPSRateLimitError(observedErr[0]) {
+	if len(observedErr) > 0 && ignoreOpenAIAccountHealthError(observedErr[0]) {
 		return false
 	}
 	accountID := account.ID
 	healthTripped := false
 	if s != nil && s.rateLimitService != nil {
 		if success {
+			// Reset at the synchronous result boundary, before asynchronous
+			// usage recording can reorder this success behind a later failure.
+			s.rateLimitService.resetOpenAIIPUnauthorizedStreak(account)
 			s.rateLimitService.ObserveOpenAIAPIKeyHealthSuccess(context.Background(), account)
 		} else if len(observedErr) > 0 && observedErr[0] != nil {
 			healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(context.Background(), account, observedErr[0])
@@ -2592,10 +2596,19 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 // ObserveOpenAIAccountHealthFailure records failures that cannot reach the
 // scheduler-result path, for example after semantic response bytes were sent.
 func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Context, account *Account, observedErr error) bool {
-	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || isExcelBPSRateLimitError(observedErr) {
+	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || ignoreOpenAIAccountHealthError(observedErr) {
 		return false
 	}
 	return s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr)
+}
+
+func ignoreOpenAIAccountHealthError(err error) bool {
+	if isExcelBPSRateLimitError(err) || IsOpenAITurnAdmissionError(err) ||
+		errors.Is(err, ErrRandomProxyUnavailable) || errors.Is(err, ErrRandomProxyChanged) {
+		return true
+	}
+	var failure *basispoints.UpstreamFailure
+	return errors.As(err, &failure) && (failure.Status == 401 || failure.Status == 403 || failure.Status == 429)
 }
 
 func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {

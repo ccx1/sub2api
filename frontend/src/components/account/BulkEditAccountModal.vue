@@ -51,10 +51,12 @@
           aria-labelledby="bulk-edit-excel-bps-label">
           <button type="button" role="switch" :aria-checked="excelBPSEnabled"
             :aria-label="t('admin.accounts.openai.excelBPS')" data-testid="bulk-excel-bps-toggle"
+            :disabled="hasFreePlan && !excelBPSEnabled"
             @click="excelBPSEnabled = !excelBPSEnabled"
             :class="['relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2', excelBPSEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
             <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', excelBPSEnabled ? 'translate-x-5' : 'translate-x-0']" />
           </button>
+          <p v-if="hasFreePlan" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSFreeUnsupported') }}</p>
           <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
             <label class="flex items-center gap-2 text-sm">
               <input v-model="excelBPSAllModels" type="checkbox" data-testid="bulk-excel-bps-all-models" />
@@ -1706,12 +1708,14 @@ interface Props {
   accountIds: number[]
   selectedPlatforms: AccountPlatform[]
   selectedTypes: AccountType[]
+  selectedPlanTypes?: string[]
   target?: {
     mode: 'selected' | 'filtered'
     filters?: Record<string, unknown>
     previewCount?: number
     selectedPlatforms?: AccountPlatform[]
     selectedTypes?: AccountType[]
+    selectedPlanTypes?: string[]
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
@@ -1732,6 +1736,8 @@ const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
+const targetSelectedPlanTypes = computed(() => props.target?.selectedPlanTypes ?? props.selectedPlanTypes ?? [])
+const hasFreePlan = computed(() => targetSelectedPlanTypes.value.some(plan => plan.trim().toLowerCase() === 'free'))
 // Grok 快捷端点仅在所选账号全部为 grok 平台时展示（其他平台不显示）
 const allTargetsGrok = computed(
   () =>
@@ -2491,6 +2497,10 @@ const handleSubmit = async () => {
   }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
+    return
+  }
+  if (enableExcelBPS.value && hasFreePlan.value && excelBPSEnabled.value) {
+    appStore.showError(t('admin.accounts.openai.excelBPSFreeUnsupported'))
     return
   }
 

@@ -934,6 +934,7 @@ export default {
         excelBPSAutoMoveOn403Desc: 'Disabled by default. Uses the same trigger as disabling BPS; both options work independently or together. Move to the selected group and leave all other groups, or leave every group. The account stays enabled and the request is not retried. Invalid destinations or changed settings leave memberships unchanged. After an automatic move, the account list shows a “BPS 403: Excel possibly banned” badge under the account name until the account’s groups change again.',
         excelBPS403TargetGroup: 'Group action after a 403',
         excelBPS403SelectTarget: 'Select a destination group or leave all groups',
+        excelBPSFreeUnsupported: 'Free plan accounts cannot use Excel / BPS.',
         excelBPS403LeaveAllGroups: 'Leave all groups',
         excelBPSAutoDisableOn403Desc: 'Disabled by default. Turn off this account’s Excel / BPS protocol when the BPS upstream returns HTTP 403 mapped to basispoints_upstream_error. The account stays enabled and the current request is not retried. Model access errors do not trigger this option, and a 403 does not confirm a ban. After an automatic shutdown, the account list shows a “BPS 403: Excel possibly banned” badge under the account name until the protocol is turned back on.',
         excelBPS403Badge: 'BPS 403: Excel possibly banned',
@@ -965,6 +966,9 @@ export default {
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
         wsMode: 'WS mode',
+        wsSseAcceleration: 'HTTP streaming over WS',
+        wsSseAccelerationDesc:
+          'Off by default. Stream Responses through the upstream WS pool for ordinary OAuth accounts, delivering early SSE events immediately. Use Context Pool mode and disable automatic passthrough. Global WS gates still apply and bound transport plugins take precedence. Only handshake failures fall back to HTTP; sent requests are not replayed. Early events do not mean text generation has started.',
         wsModeDesc:
           'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
         wsModeOff: 'Off (off)',
@@ -1376,8 +1380,8 @@ export default {
 	    hint: 'Uses the earliest-expiring available credit only when actual usage reaches a threshold. Off by default; the account remains paused if no credit is available or reset fails.',
 	    threshold5h: '5h auto-reset threshold (%)',
 	    threshold7d: '7d auto-reset threshold (%)',
-	    thresholdHint: 'Each window is evaluated independently. Enter 0.1–100; both default to 100.',
-	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.'
+	    thresholdHint: 'Set 0 to ignore a window. Any enabled window reaching its threshold triggers a reset. Enter 0 or 0.1–100; both default to 100. For example, 5h = 0 and 7d = 90 uses credits only at 90% weekly usage. Normal auto-pause rules still apply.',
+	    thresholdInvalid: 'Automatic reset-credit thresholds must be 0 (ignore this window) or between 0.1% and 100%.'
 	  },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {

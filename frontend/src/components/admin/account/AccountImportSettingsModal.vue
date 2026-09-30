@@ -12,7 +12,7 @@
         <Toggle v-model="form.enabled" :disabled="saving" aria-labelledby="account-import-settings-enabled" data-testid="import-settings-enabled" />
       </div>
       <p v-if="!form.enabled" class="input-hint">{{ t('admin.accountImportSettings.disabledHint') }}</p>
-      <AccountImportSettingsForm v-model="form" v-model:validation-error="validationError" :proxies="proxies" :disabled="saving || !form.enabled" />
+      <AccountImportSettingsForm v-model="form" v-model:validation-error="validationError" :proxies="proxies" :groups="groups" :disabled="saving || !form.enabled" />
       <p v-if="validationError && form.enabled" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ t(validationError) }}</p>
       <p v-if="saveError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ saveError }}</p>
     </form>
@@ -38,7 +38,7 @@ import { defaultAccountImportSettings, getAccountImportSettings, saveAccountImpo
 import { useAppStore } from '@/stores/app'
 import { defaultExcelBPSOptions, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyGroupId, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyRegionFallback, normalizeRandomProxyReuseMinutes, randomProxyExtra } from '@/utils/randomProxy'
-import type { Proxy } from '@/types'
+import type { Group, Proxy } from '@/types'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -46,6 +46,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const form = ref(defaultAccountImportSettings())
 const proxies = ref<Proxy[]>([])
+const groups = ref<Group[]>([])
 const loading = ref(false)
 const loaded = ref(false)
 const saving = ref(false)
@@ -62,15 +63,18 @@ async function load() {
   loadError.value = ''
   saveError.value = ''
   validationError.value = null
-  const [settings, directory] = await Promise.allSettled([getAccountImportSettings(), adminAPI.proxies.getAll()])
+  const [settings, directory, groupDirectory] = await Promise.allSettled([
+    getAccountImportSettings(), adminAPI.proxies.getAll(), adminAPI.groups.getAllIncludingInactive()
+  ])
   if (version !== loadVersion || !props.show) return
   loading.value = false
-  if (settings.status === 'rejected' || directory.status === 'rejected') {
-    loadError.value = settings.status === 'rejected' ? 'admin.accountImportSettings.loadFailed' : 'admin.accountImportSettings.proxiesLoadFailed'
+  if (settings.status === 'rejected' || directory.status === 'rejected' || groupDirectory.status === 'rejected') {
+    loadError.value = settings.status === 'rejected' || groupDirectory.status === 'rejected' ? 'admin.accountImportSettings.loadFailed' : 'admin.accountImportSettings.proxiesLoadFailed'
     return
   }
   form.value = { ...settings.value, excel_bps_options: normalizeExcelBPSOptions(settings.value.excel_bps_options), extra: { ...settings.value.extra } }
   proxies.value = directory.value
+  groups.value = groupDirectory.value
   loaded.value = true
 }
 

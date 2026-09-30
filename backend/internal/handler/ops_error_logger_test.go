@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1163,6 +1164,15 @@ func TestClassifyOpsLocalBusinessLimitErrorsExcludedFromSLA(t *testing.T) {
 			wantPhase:   "request",
 		},
 		{
+			name:        "explicit local user balance",
+			errType:     "billing_error",
+			message:     service.InsufficientUserBalanceMessage,
+			code:        "",
+			status:      http.StatusForbidden,
+			wantErrType: "billing_error",
+			wantPhase:   "request",
+		},
+		{
 			name:        "gemini group platform mismatch",
 			errType:     "api_error",
 			message:     "API key group platform is not gemini",
@@ -2247,4 +2257,40 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDi
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
+}
+
+func TestOpsBalanceFilterRecognizesExplicitUserMessage(t *testing.T) {
+	settings := &opsAdvancedSettingsRepoStub{advanced: `{"ignore_insufficient_balance_errors":true}`}
+	ops := service.NewOpsService(nil, settings, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	require.True(t, ops.OpsAdvancedSettingsSnapshot().IgnoreInsufficientBalanceErrors)
+	for _, message := range []string{"insufficient balance", "Insufficient account balance", service.InsufficientUserBalanceMessage} {
+		require.True(t, shouldSkipOpsErrorLog(context.Background(), ops, message, "", "/v1/responses"))
+		require.True(t, shouldSkipOpsErrorLog(context.Background(), ops, "", message, "/v1/responses"))
+	}
+}
+
+type opsFlushFailureRecorder struct {
+	*httptest.ResponseRecorder
+	calls int
+}
+
+func (w *opsFlushFailureRecorder) FlushError() error {
+	w.calls++
+	return io.ErrClosedPipe
+}
+
+func TestOpsCaptureWriterFlushErrorPropagatesAndHonorsLease(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := &opsFlushFailureRecorder{ResponseRecorder: httptest.NewRecorder()}
+	c, _ := gin.CreateTestContext(rec)
+	writer := acquireOpsCaptureWriter(c.Writer)
+	defer releaseOpsCaptureWriter(writer)
+	writer.WriteHeader(http.StatusAccepted)
+	require.ErrorIs(t, service.FlushGatewayResponse(writer), io.ErrClosedPipe)
+	require.True(t, writer.Written(), "flush must preserve Gin header bookkeeping")
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Equal(t, 1, rec.calls)
+	releaseOpsCaptureWriter(writer)
+	require.ErrorContains(t, writer.FlushError(), "released")
+	require.Equal(t, 1, rec.calls, "released handles must not reach the old transport")
 }

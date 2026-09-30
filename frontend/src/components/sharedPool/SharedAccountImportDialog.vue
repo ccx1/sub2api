@@ -85,7 +85,7 @@ import { hasSettlementPolicy } from './settlementPolicy'
 import { resolveSharedAccountImportDefaults } from './sharedAccountImportDefaults'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
-import { normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
+import { sharedExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { sharedPoolAPI, type SharedConfig, type SharedImportDefaults, type SharedImportInput, type SharedImportResult } from '@/api/sharedPool'
 import { useAppStore } from '@/stores/app'
@@ -101,7 +101,7 @@ const { excel_bps_options: initialExcelBPSOptions, ...initialDefaults } = {
   ...resolveSharedAccountImportDefaults(props.config.import_defaults, props.initialDefaults)
 }
 const defaults = reactive<SharedImportDefaults & { excel_bps_enabled: boolean }>({ name: '', concurrency: 1, proxy_url: '', ...initialDefaults, enabled: true })
-const excelBPSOptions = ref(normalizeExcelBPSOptions(initialExcelBPSOptions))
+const excelBPSOptions = ref(sharedExcelBPSOptions(initialExcelBPSOptions))
 const canConsent = computed(() => hasSettlementPolicy(props.config))
 const dailyCooldown = ref(normalizeDailyCooldown(props.initialDefaults?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
@@ -162,7 +162,7 @@ async function submit() {
     const cooldown = dailyCooldownChanged.value || props.initialDefaults?.daily_cooldown !== undefined
       ? { daily_cooldown: withDailyCooldownExtra(undefined, dailyCooldown.value).daily_cooldown } : {}
     const input: SharedImportInput = { sources: await getSources(), defaults: { ...defaults, enabled: true, dispatch_consent: true, ...cooldown, name: defaults.name?.trim(),
-      ...(defaults.excel_bps_enabled ? { excel_bps_options: normalizeExcelBPSOptions(excelBPSOptions.value) } : {}) } }
+      ...(defaults.excel_bps_enabled ? { excel_bps_options: sharedExcelBPSOptions(excelBPSOptions.value) } : {}) } }
     const payload = JSON.stringify(input)
     // 网络失败重试沿用同一请求号；凭证只在弹窗内存中保留。
     if (payload !== lastPayload) {

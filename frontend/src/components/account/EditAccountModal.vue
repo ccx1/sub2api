@@ -1810,11 +1810,13 @@
           </div>
           <button type="button" role="switch" :aria-checked="excelBPSEnabled"
             :aria-label="t('admin.accounts.openai.excelBPS')" data-testid="excel-bps-toggle"
+            :disabled="isFreePlan && !excelBPSEnabled"
             @click="excelBPSEnabled = !excelBPSEnabled"
             :class="['relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2', excelBPSEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
             <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', excelBPSEnabled ? 'translate-x-5' : 'translate-x-0']" />
           </button>
         </div>
+        <p v-if="isFreePlan" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSFreeUnsupported') }}</p>
         <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
           <label class="flex items-center gap-2 text-sm">
             <input v-model="excelBPSAllModels" type="checkbox" data-testid="excel-bps-all-models" />
@@ -2031,6 +2033,23 @@
             <Select v-model="openaiResponsesWebSocketV2Mode" data-testid="edit-openai-ws-mode-select" :options="openAIWSModeOptions" />
           </div>
         </div>
+      </div>
+
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div>
+          <label class="input-label mb-0">{{ t('admin.accounts.openai.wsSseAcceleration') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.wsSseAccelerationDesc') }}
+          </p>
+        </div>
+        <Toggle
+          v-model="openaiOAuthWSSSEAcceleration"
+          data-testid="openai-ws-sse-acceleration"
+          :aria-label="t('admin.accounts.openai.wsSseAcceleration')"
+        />
       </div>
 
       <!-- OpenAI APIKey Responses API support mode -->
@@ -2748,7 +2767,7 @@
             <input
               v-model.number="autoResetCredit5hThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="0.1"
               class="input"
@@ -2761,7 +2780,7 @@
             <input
               v-model.number="autoResetCredit7dThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="0.1"
               class="input"
@@ -3967,12 +3986,17 @@ const openAILongContextBillingEnabled = ref(false)
 // OpenAI 订阅档位（Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free）手动覆盖值,
 // 存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
+const isFreePlan = computed(() => editPlanType.value.trim().toLowerCase() === 'free')
+watch(isFreePlan, (free) => {
+  if (free) excelBPSEnabled.value = false
+}, { flush: 'sync' })
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 // Images 非流式响应缺 b64_json 时由网关下载 url 回填（仅 OpenAI API Key）。
 const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiOAuthWSSSEAcceleration = ref(false)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
@@ -4488,6 +4512,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+  openaiOAuthWSSSEAcceleration.value = false
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
@@ -4497,7 +4522,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
-    excelBPSEnabled.value = newAccount.type === 'oauth' && extra?.openai_excel_bps === true
+    // plan_type 手动覆盖仅 OAuth 有实际调度语义(IsOpenAIChatGPTSubscription 要求 oauth)。
+    editPlanType.value = newAccount.type === 'oauth'
+      ? readPlanType(newAccount.credentials as Record<string, unknown> | undefined)
+      : ''
+    excelBPSEnabled.value = newAccount.type === 'oauth' && !isFreePlan.value && extra?.openai_excel_bps === true
     excelBPSAllModels.value = excelBPSEnabled.value && !Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')
     if (Object.prototype.hasOwnProperty.call(extra ?? {}, 'openai_excel_bps_models')) {
       excelBPSModels.value = Array.isArray(extra?.openai_excel_bps_models)
@@ -4518,10 +4547,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
     const longContextBillingValue = extra?.openai_long_context_billing_enabled
     openAILongContextBillingEnabled.value = longContextBillingValue === true
-    // plan_type 手动覆盖仅 OAuth 有实际调度语义(IsOpenAIChatGPTSubscription 要求 oauth),故只对 oauth 回填
-    editPlanType.value = newAccount.type === 'oauth'
-      ? readPlanType(newAccount.credentials as Record<string, unknown> | undefined)
-      : ''
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
@@ -4542,6 +4567,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     } else if (codexImageGenerationBridgeValue === false) {
       codexImageToolMode.value = 'disabled'
     }
+    openaiOAuthWSSSEAcceleration.value = newAccount.type === 'oauth' && extra?.openai_oauth_ws_sse_acceleration === true
     openaiOAuthResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_oauth_responses_websockets_v2_mode',
       enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
@@ -5488,6 +5514,10 @@ const applyRandomProxySelectionToPayload = (updatePayload: Record<string, unknow
 
 const handleSubmit = async () => {
   if (!props.account || submitting.value) return
+  if (isFreePlan.value && excelBPSEnabled.value) {
+    appStore.showError(t('admin.accounts.openai.excelBPSFreeUnsupported'))
+    return
+  }
   const regionError = !isSparkShadow.value && accountProxyRegionValidationError(proxyRegion.value)
   if (regionError) {
     appStore.showError(t(regionError))
@@ -5528,7 +5558,7 @@ const handleSubmit = async () => {
   }
 	if (autoResetCreditEnabled.value) {
 		const thresholds = [autoResetCredit5hThreshold.value, autoResetCredit7dThreshold.value]
-		if (thresholds.some((value) => !Number.isFinite(value) || value < 0.1 || value > 100)) {
+		if (thresholds.some((value) => !Number.isFinite(value) || (value !== 0 && value < 0.1) || value > 100)) {
 			appStore.showError(t('admin.accounts.autoResetCredit.thresholdInvalid'))
 			return
 		}
@@ -6063,7 +6093,7 @@ const handleSubmit = async () => {
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
       // 打票开关由列表开关单独维护；不回写弹窗打开时的快照，避免覆盖期间的手动切换。
       delete newExtra.codex_ticket_enabled
-      if (props.account.type === 'oauth' && !isSparkShadow.value && excelBPSEnabled.value) {
+      if (props.account.type === 'oauth' && !isSparkShadow.value && !isFreePlan.value && excelBPSEnabled.value) {
         newExtra.openai_excel_bps = true
         if (excelBPSAllModels.value) {
           delete newExtra.openai_excel_bps_models
@@ -6114,6 +6144,11 @@ const handleSubmit = async () => {
       } else if (props.account.type === 'apikey') {
         newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
         newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+      }
+      if (props.account.type === 'oauth' && openaiOAuthWSSSEAcceleration.value) {
+        newExtra.openai_oauth_ws_sse_acceleration = true
+      } else {
+        delete newExtra.openai_oauth_ws_sse_acceleration
       }
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled

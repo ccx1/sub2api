@@ -2348,6 +2348,9 @@ func (a *Account) IsExcelBPSEnabled() bool {
 	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth || a.IsShadow() || a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() {
 		return false
 	}
+	if strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free") {
+		return false
+	}
 	enabled, _ := a.Extra[excelBPSExtraKey].(bool)
 	return enabled
 }
@@ -2412,6 +2415,16 @@ func (a *Account) IsExcelBPSEnabledForModel(requestedModel string) bool {
 		return false
 	}
 	return a.isExcelBPSUpstreamModelEnabled(a.GetMappedModel(requestedModel))
+}
+
+// IsExcelBPSImagesEnabledForModel uses the existing BPS account and model scope
+// for the image endpoint, which currently accepts only one upstream model.
+func (a *Account) IsExcelBPSImagesEnabledForModel(requestedModel string) bool {
+	if !a.IsExcelBPSEnabled() {
+		return false
+	}
+	model := a.GetMappedModel(requestedModel)
+	return excelBPSImagesSupportedModel(model) && a.isExcelBPSUpstreamModelEnabled(model)
 }
 
 func (a *Account) isExcelBPSUpstreamModelEnabled(model string) bool {

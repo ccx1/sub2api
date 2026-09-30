@@ -352,7 +352,9 @@ func BuildToolRepairRequest(prepared []byte, failed map[string]any, validation e
 // Only the terminal native response is authoritative, as in the primary stream.
 func ReadToolRepairResponse(reader io.Reader) (map[string]any, error) {
 	var response object
+	var observedUsage object
 	var terminalError error
+	terminal := false
 	pending := make(map[string]bool)
 	err := readEvents(io.LimitReader(reader, 32<<20), func(event string, data []byte) error {
 		if string(data) == "[DONE]" {
@@ -361,6 +363,13 @@ func ReadToolRepairResponse(reader io.Reader) (map[string]any, error) {
 		var payload object
 		if decode(data, &payload) != nil || payload == nil {
 			return fmt.Errorf("invalid Basispoints correction SSE event")
+		}
+		if current, ok := payload["response"].(object); ok {
+			usage, _ := current["usage"].(object)
+			observedUsage = maxReportedUsage(observedUsage, usage)
+		}
+		if usage, ok := payload["usage"].(object); ok {
+			observedUsage = maxReportedUsage(observedUsage, usage)
 		}
 		kind := text(payload["type"])
 		if kind == "" {
@@ -374,10 +383,15 @@ func ReadToolRepairResponse(reader io.Reader) (map[string]any, error) {
 			pending[text(item["call_id"])+"\x00"+text(item["id"])] = true
 		}
 		switch kind {
-		case "response.completed", "response.failed", "response.incomplete", "error":
+		case "response.completed", "response.failed", "response.cancelled", "response.incomplete", "error":
+			terminal = true
 			response, _ = payload["response"].(object)
 			if kind != "response.completed" || response == nil {
-				terminalError = fmt.Errorf("basispoints correction did not complete")
+				if failure := classifyUpstreamFailure(kind, payload); failure != nil {
+					terminalError = failure
+				} else {
+					terminalError = fmt.Errorf("basispoints correction did not complete")
+				}
 			} else {
 				output, _ := response["output"].([]any)
 				for _, raw := range output {
@@ -394,14 +408,19 @@ func ReadToolRepairResponse(reader io.Reader) (map[string]any, error) {
 		}
 		return nil
 	})
+	if response == nil && observedUsage != nil {
+		response = object{"usage": observedUsage}
+	} else if response != nil && response["usage"] == nil && observedUsage != nil {
+		response["usage"] = observedUsage
+	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return response, err
 	}
 	if terminalError != nil {
 		return response, terminalError
 	}
-	if response == nil {
-		return nil, io.ErrUnexpectedEOF
+	if response == nil || !terminal {
+		return response, io.ErrUnexpectedEOF
 	}
 	return response, nil
 }
