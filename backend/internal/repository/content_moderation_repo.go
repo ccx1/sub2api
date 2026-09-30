@@ -199,6 +199,8 @@ func (r *contentModerationRepository) CountFlaggedByUserSince(ctx context.Contex
 	}
 	// SQL 中的 'cyber_policy' 字面量须与 service.ContentModerationActionCyberPolicy 保持一致。
 	// security_policy_* 由分组安全策略写入，只做会话处置，恒不参与封号计数。
+	// 'cyber_log_only' matches service.ContentModerationModeCyberLogOnly; these
+	// events remain evidence but never become penalties after allowlist removal.
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 WITH last_auto_ban AS (
@@ -211,6 +213,8 @@ FROM content_moderation_logs
 WHERE user_id = $1
   AND flagged = TRUE
   AND action <> 'hash_block'
+  AND mode <> 'cyber_log_only'
+  AND mode <> 'risk_control_log_only'
   AND ($3::bool IS FALSE OR action <> 'cyber_policy')
   AND action NOT IN ('security_policy_block', 'security_policy_session_block')
   AND created_at >= $2
