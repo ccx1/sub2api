@@ -155,7 +155,6 @@ type AccountTestService struct {
 	openaiGatewayService      *OpenAIGatewayService
 	bpsProbeMu                sync.Mutex
 	bpsProbeAccounts          map[int64]struct{}
-	stateProbeAccounts        sync.Map
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -1029,11 +1028,6 @@ func (s *AccountTestService) testExcelBPSAccountConnection(c *gin.Context, accou
 	// tested and failed with "request admission denied: account_ineligible".
 	result, err := s.openaiGatewayService.forwardExcelBPS(probeCtx, probeCtx, account, body, time.Now())
 	if err != nil {
-		// A single-account test has no other account to fail over to.
-		var failover *UpstreamFailoverError
-		if errors.As(err, &failover) && failover.ClientMessage != "" {
-			return s.sendErrorAndEnd(c, failover.ClientMessage)
-		}
 		return s.sendErrorAndEnd(c, err.Error())
 	}
 

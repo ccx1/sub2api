@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="iCode API 当前不面向中国境内公众提供服务。"
+  />
+  <title>iCode API - 服务暂不可用</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="./home.js" defer></script>
+  <style>
+    body {
+      display: grid;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% 15%, rgba(20, 184, 166, 0.16), transparent 30%),
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    }
+
+    .page-shell {
+      display: grid;
+      align-content: center;
+      min-height: 100vh;
+      padding-top: 32px;
+    }
+
+    .region-card {
+      display: grid;
+      gap: 22px;
+      width: min(720px, 100%);
+      margin: 0 auto;
+      padding: 44px;
+      border: 1px solid rgba(203, 213, 225, 0.9);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .status-code {
+      color: #0f766e;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 12px;
+      border: 1px solid rgba(20, 184, 166, 0.24);
+      border-radius: 999px;
+      color: #0f766e;
+      background: rgba(240, 253, 250, 0.86);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .region-title {
+      max-width: 620px;
+      margin: 0;
+      color: #111827;
+      font-size: clamp(34px, 6vw, 56px);
+      line-height: 1.05;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .region-copy {
+      display: grid;
+      gap: 12px;
+      max-width: 640px;
+      color: #475569;
+      font-size: 17px;
+    }
+
+    .region-copy p {
+      margin: 0;
+    }
+
+    .region-note {
+      padding: 14px 16px;
+      border-left: 3px solid #f59e0b;
+      color: #5f3b05;
+      background: #fffbeb;
+      font-size: 15px;
+    }
+
+    .region-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-top: 2px;
+    }
+
+    .region-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 16px;
+      border: 1px solid rgba(15, 118, 110, 0.22);
+      border-radius: 6px;
+      color: #0f766e;
+      background: rgba(240, 253, 250, 0.72);
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .region-link:hover,
+    .region-link:focus-visible {
+      color: #0d9488;
+      background: #ccfbf1;
+      text-decoration: none;
+    }
+
+    .region-link:focus-visible {
+      outline: 3px solid rgba(20, 184, 166, 0.2);
+      outline-offset: 2px;
+    }
+
+    .site-footer {
+      width: min(720px, 100%);
+      margin: 0 auto;
+      grid-template-columns: 1fr;
+      justify-items: center;
+    }
+
+    .site-footer .icp-link {
+      grid-column: 1;
+      justify-self: center;
+    }
+
+    @media (max-width: 720px) {
+      .page-shell {
+        align-content: start;
+        min-height: 100vh;
+        padding-top: 28px;
+      }
+
+      .region-card {
+        padding: 28px 22px;
+      }
+
+      .status-row {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .region-copy {
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <main class="region-card" aria-labelledby="region-title">
+      <div class="status-row">
+        <p class="status-code">403 / Unavailable in Region</p>
+        <span class="status-badge">访问受限</span>
+      </div>
+
+      <h1 id="region-title" class="region-title">当前地区暂不提供服务</h1>
+
+      <div class="region-copy">
+        <p>
+          iCode API 是通用 API 中转与接口集成测试站点。由于不同国家和地区对 API 中转、数据跨境、生成式 AI 及相关技术服务的监管要求不同，本站当前不面向中国境内公众提供服务。
+        </p>
+        <p>
+          如你所在地区适用法律允许使用此类技术服务，请在符合当地法律法规、平台规则和第三方服务条款的前提下访问。
+        </p>
+      </div>
+
+      <p class="region-note">
+        中国境内用户请勿注册、访问、购买、调用或以任何方式使用本站服务；任何用户均应自行确认所在地法律是否允许访问、测试或使用相关服务。
+      </p>
+
+      <div class="region-actions" aria-label="辅助链接">
+        <a class="region-link" href="./index.html">查看合规使用声明</a>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <a class="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
+        <img src="./icon-gongan.png" alt="" width="16" height="16" />
+        <span>浙ICP备2026034152号-1</span>
+      </a>
+    </footer>
+  </div>
+</body>
+</html>

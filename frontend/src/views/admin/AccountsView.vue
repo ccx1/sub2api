@@ -257,7 +257,7 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
-              <ExcelBPS403Badge :account="row" :groups="accountGroupsForRow(row)" />
+              <ExcelBPS403Badge :account="row" />
             </div>
           </template>
           <template #cell-notes="{ value }">

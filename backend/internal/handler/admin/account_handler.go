@@ -2758,7 +2758,7 @@ func (h *AccountHandler) ClearTempUnschedulable(c *gin.Context) {
 	response.Success(c, gin.H{"message": "Temp unschedulable cleared successfully"})
 }
 
-// GetTodayStats handles getting account today statistics plus lifetime totals.
+// GetTodayStats handles getting account today statistics
 // GET /api/v1/admin/accounts/:id/today-stats
 func (h *AccountHandler) GetTodayStats(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -2786,7 +2786,7 @@ type BatchUsageRequest struct {
 	Force      bool    `json:"force"`
 }
 
-// GetBatchTodayStats 批量获取多个账号的今日统计及累计 Token/费用。
+// GetBatchTodayStats 批量获取多个账号的今日统计。
 // POST /api/v1/admin/accounts/today-stats/batch
 func (h *AccountHandler) GetBatchTodayStats(c *gin.Context) {
 	var req BatchTodayStatsRequest

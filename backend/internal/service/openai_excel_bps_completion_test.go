@@ -78,10 +78,6 @@ func TestExcelBPSNativeAttachmentFailureDoesNotGenerate(t *testing.T) {
 			_, err := svc.Forward(context.Background(), c, excelAccount(), body)
 			require.Error(t, err)
 			require.Len(t, upstream.requests, 1)
-			if status == http.StatusTooManyRequests {
-				requireExcelBPSRateLimitFailover(t, err, c)
-				return
-			}
 			expected := status
 			if status == 302 {
 				expected = 502

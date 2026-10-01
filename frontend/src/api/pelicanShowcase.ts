@@ -20,7 +20,6 @@ export interface PelicanShowcaseGroup {
   id: number
   name: string
   platform: string
-  /** Newest first (generated_at, then id, descending). */
   items: PelicanShowcaseItem[]
 }
 

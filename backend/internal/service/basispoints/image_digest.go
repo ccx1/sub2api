@@ -164,7 +164,7 @@ func collectInlineImages(source object) []inlineImageRef {
 		item, _ := entry.(object)
 		field, origin := "", ""
 		switch text(item["type"]) {
-		case "", "message", "agent_message":
+		case "", "message":
 			field, origin = "content", fmt.Sprintf("%s message at input[%d]", strings.TrimSpace(text(item["role"])), index)
 		case "function_call_output", "custom_tool_call_output":
 			field, origin = "output", fmt.Sprintf("tool output at input[%d]", index)

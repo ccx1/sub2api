@@ -1,9 +1,7 @@
 package openaiauth
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -73,12 +71,6 @@ func login(tr *transport, email, password, totpSecret, workspaceID, state, verif
 		}
 		if flow != "" {
 			token, err := solver.BuildToken(tr.post, flow)
-			if tr.ctx != nil && tr.ctx.Err() != nil {
-				return nil, tr.ctx.Err()
-			}
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
-			}
 			if err != nil || token == "" {
 				return nil, loginErr("security_verification_unavailable")
 			}
@@ -269,16 +261,7 @@ func isCallback(u *url.URL) bool {
 // responseData 复刻 customer_auth.response_data：200 才返回 JSON，否则映射错误码。
 func responseData(resp *http.Response) (map[string]any, error) {
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.Request != nil && resp.Request.Context().Err() != nil {
-		return nil, resp.Request.Context().Err()
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return nil, err
-	}
-	if err != nil {
-		return nil, errNetwork
-	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode != 200 {
 		return nil, mapHTTPError(resp.StatusCode, raw)
 	}

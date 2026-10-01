@@ -177,11 +177,6 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 	callCtx, cancel := context.WithTimeout(ctx, openaiQuotaUpstreamTimeout)
 	defer cancel()
 	agentIdentity := s.isAgentIdentityAccount(ctx, accountID)
-	// 在请求上游前记录限流代次，避免旧请求成功后清除并发产生的新 429。
-	var observed *openAIQuotaRecoveryObservation
-	if account, readErr := s.accountRepo.GetByID(callCtx, accountID); readErr == nil {
-		observed = observeOpenAIQuotaRecovery(account, time.Now())
-	}
 
 	var payload OpenAIQuotaUsage
 	for recovered := false; ; {
@@ -214,7 +209,6 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 			slog.Warn("openai_quota_query_failed", "account_id", accountID, "status", status, "body", body)
 			return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_UPSTREAM_ERROR", "upstream returned %d: %s", status, body)
 		}
-		s.persistOpenAIQuotaRecoverySnapshot(callCtx, observed, resp.Bytes())
 		break
 	}
 

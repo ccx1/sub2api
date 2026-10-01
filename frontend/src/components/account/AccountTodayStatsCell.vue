@@ -14,37 +14,37 @@
 
     <!-- Stats data -->
     <div v-else-if="props.stats" class="space-y-0.5 text-xs">
+      <!-- Requests -->
       <div class="flex items-center gap-1">
-        <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stats.requests') }}:</span>
-        <span class="font-medium text-gray-700 dark:text-gray-300">{{ formatNumber(props.stats.requests) }}</span>
+        <span class="text-gray-500 dark:text-gray-400"
+          >{{ t('admin.accounts.stats.requests') }}:</span
+        >
+        <span class="font-medium text-gray-700 dark:text-gray-300">{{
+          formatNumber(props.stats.requests)
+        }}</span>
       </div>
+      <!-- Tokens -->
       <div class="flex items-center gap-1">
-        <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stats.todayTokens') }}:</span>
-        <span class="font-medium text-emerald-600 dark:text-emerald-400">{{
+        <span class="text-gray-500 dark:text-gray-400"
+          >{{ t('admin.accounts.stats.tokens') }}:</span
+        >
+        <span class="font-medium text-gray-700 dark:text-gray-300">{{
           formatTokens(props.stats.tokens)
         }}</span>
       </div>
+      <!-- Cost (Account) -->
       <div class="flex items-center gap-1">
-        <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stats.lifetimeTokens') }}:</span>
-        <span class="font-medium text-gray-900 dark:text-gray-100">{{
-          props.stats.lifetime_tokens == null ? '—' : formatTokens(props.stats.lifetime_tokens)
-        }}</span>
-      </div>
-      <div class="flex items-center gap-1">
-        <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stats.todayCost') }}:</span>
+        <span class="text-gray-500 dark:text-gray-400">{{ t('usage.accountBilled') }}:</span>
         <span class="font-medium text-emerald-600 dark:text-emerald-400">{{
           formatCurrency(props.stats.cost)
         }}</span>
       </div>
-      <div class="flex items-center gap-1">
-        <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stats.lifetimeCost') }}:</span>
-        <span class="font-medium text-gray-900 dark:text-gray-100">{{
-          props.stats.lifetime_cost == null ? '—' : formatCurrency(props.stats.lifetime_cost)
-        }}</span>
-      </div>
+      <!-- Cost (User/API Key) -->
       <div v-if="props.stats.user_cost != null" class="flex items-center gap-1">
         <span class="text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}:</span>
-        <span class="font-medium text-gray-700 dark:text-gray-300">{{ formatCurrency(props.stats.user_cost) }}</span>
+        <span class="font-medium text-gray-700 dark:text-gray-300">{{
+          formatCurrency(props.stats.user_cost)
+        }}</span>
       </div>
     </div>
 

@@ -64,16 +64,8 @@ class OnScreenObserver {
   unobserve() {}
 }
 
-// Cards report being on screen after a short dwell (see PelicanShowcaseCard); then their HTML is fetched.
-async function settle() {
-  await flushPromises()
-  await vi.advanceTimersByTimeAsync(1000)
-  await flushPromises()
-}
-
 let wrapper: ReturnType<typeof mountView>
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   vi.stubGlobal('IntersectionObserver', OnScreenObserver)
   getShowcase.mockReset()
   getShowcaseItem.mockReset().mockImplementation(async (id: number) => ({
@@ -88,7 +80,6 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount()
   vi.unstubAllGlobals()
-  vi.useRealTimers()
 })
 
 describe('PelicanShowcaseView', () => {
@@ -101,10 +92,10 @@ describe('PelicanShowcaseView', () => {
     expect(getShowcaseItem).not.toHaveBeenCalled()
   })
 
-  it('lists every group as one row with the gallery rules and loads visible cards in a sandbox', async () => {
+  it('lists every group with the gallery rules and loads visible cards in a sandbox', async () => {
     getShowcase.mockResolvedValue(showcase())
     wrapper = mountView()
-    await settle()
+    await flushPromises()
 
     expect(wrapper.get('[data-testid="showcase-keep-rule"]').text()).toContain('"count":20')
     expect(wrapper.get('[data-testid="showcase-retention-rule"]').text()).toContain('"days":7')
@@ -113,18 +104,9 @@ describe('PelicanShowcaseView', () => {
     ])
     expect(wrapper.get('[data-testid="showcase-group-3"]').text()).toContain('pelicanShowcase.groupEmpty')
 
-    // Every item of a group sits in its row, in the order received (newest first); no paging.
-    const firstRow = wrapper.get('[data-testid="showcase-group-1"] [data-testid="pelican-showcase-row"]')
-    expect(firstRow.findAll('iframe').map((frame) => frame.attributes('srcdoc').match(/data-item="(\d+)"/)?.[1]))
-      .toEqual(Array.from({ length: 10 }, (_, i) => String(100 + i)))
-    expect(wrapper.find('[data-testid="showcase-group-3"] [data-testid="pelican-showcase-row"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="showcase-group-1"] [role="scrollbar"]').attributes('aria-label'))
-      .toBe('pelicanShowcase.scrollLabel {"group":"Claude Max"}')
-
     const cards = wrapper.findAll('[data-testid="pelican-showcase-card"]')
-    expect(cards).toHaveLength(11)
-    expect(cards[0].classes()).toContain('shrink-0')
-    expect(getShowcaseItem).toHaveBeenCalledTimes(11)
+    expect(cards).toHaveLength(9) // 8 of the first group, then the second group's only item
+    expect(getShowcaseItem).toHaveBeenCalledTimes(9)
     const frame = cards[0].get('iframe')
     expect(frame.attributes('sandbox')).toBe('allow-scripts')
     expect(frame.attributes('referrerpolicy')).toBe('no-referrer')
@@ -133,6 +115,11 @@ describe('PelicanShowcaseView', () => {
     expect(cards[0].text()).toContain('gpt-6-astra')
     expect(cards[0].text()).toContain('"seconds":"42.3"')
     expect(cards[0].text()).toContain('pelicanShowcase.efforts.high')
+
+    await wrapper.get('[data-testid="showcase-more-1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="showcase-group-1"]').findAll('[data-testid="pelican-showcase-card"]')).toHaveLength(10)
+    expect(wrapper.find('[data-testid="showcase-more-1"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="showcase-tab-2"]').trigger('click')
     expect(wrapper.find('[data-testid="showcase-group-1"]').exists()).toBe(false)
@@ -143,8 +130,8 @@ describe('PelicanShowcaseView', () => {
     vi.unstubAllGlobals() // back to the setup observer, which never reports a card as visible
     getShowcase.mockResolvedValue(showcase())
     wrapper = mountView()
-    await settle()
-    expect(wrapper.findAll('[data-testid="pelican-showcase-card"]')).toHaveLength(11)
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="pelican-showcase-card"]')).toHaveLength(9)
     expect(getShowcaseItem).not.toHaveBeenCalled()
   })
 
@@ -157,7 +144,7 @@ describe('PelicanShowcaseView', () => {
       return { ...item(id, 2), response_text: '21' }
     })
     wrapper = mountView()
-    await settle()
+    await flushPromises()
     const cards = wrapper.findAll('[data-testid="pelican-showcase-card"]')
     expect(cards[0].find('iframe').exists()).toBe(false)
     expect(cards[0].text()).toContain('pelicanShowcase.invalidHtml')
@@ -174,7 +161,7 @@ describe('PelicanShowcaseView', () => {
   it('previews a card, and only admins can take it down', async () => {
     getShowcase.mockResolvedValue(showcase())
     wrapper = mountView()
-    await settle()
+    await flushPromises()
 
     await wrapper.get('[data-testid="showcase-group-2"] [data-testid="pelican-showcase-card"] button').trigger('click')
     await flushPromises()
@@ -189,7 +176,7 @@ describe('PelicanShowcaseView', () => {
 
     auth.isAdmin = true
     wrapper = mountView()
-    await settle()
+    await flushPromises()
     await wrapper.get('[data-testid="showcase-group-2"] [data-testid="pelican-showcase-card"] button').trigger('click')
     await wrapper.get('[data-testid="showcase-remove"]').trigger('click')
     await wrapper.get('.confirm-yes').trigger('click')
