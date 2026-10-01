@@ -818,13 +818,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if accountScoped {
 		firstClientMessage = accountScopedFirst
 	}
-	// 指纹收敛：首帧体改写并暂存 IDs，下方 buildOpenAIWSHeaders 握手头读取同一份。
-	fpFirst, fpIDs, fpErr := s.applyCodexFingerprintToWSPayload(ctx, c, account, firstClientMessage)
-	if fpErr != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fpErr)
-	}
-	firstClientMessage = fpFirst
-	stageCodexFingerprintIDs(c, fpIDs)
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
@@ -1130,14 +1123,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if accountScoped {
 					payload = accountScopedPayload
 				}
-			}
-			if isResponseCreate {
-				// 后续 turn 同样收敛（握手已完成，只需改写帧体 client_metadata）。
-				fpPayload, _, fpErr := s.applyCodexFingerprintToWSPayload(ctx, c, account, payload)
-				if fpErr != nil {
-					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fpErr)
-				}
-				payload = fpPayload
 			}
 			if isResponseCreate {
 				if responsesLite {

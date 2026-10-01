@@ -2,24 +2,10 @@ package basispoints
 
 import "fmt"
 
-// ContentValidationError 只暴露安全协议路径，保留根因供图片转发分支识别。
-type ContentValidationError struct {
-	Path        string
-	ContentType string
-	message     string
-	cause       error
-}
-
-func (e *ContentValidationError) Error() string {
-	return fmt.Sprintf("%s (path=%s; type=%s)", e.message, e.Path, e.ContentType)
-}
-
-func (e *ContentValidationError) Unwrap() error { return e.cause }
 func (b *Bridge) validateHistoryContent(value any, inputIndex int, field string) error {
 	content, _ := value.([]any)
 	for index, rawPart := range content {
 		part, _ := rawPart.(object)
-		path := fmt.Sprintf("input[%d].%s[%d]", inputIndex, field, index)
 		switch text(part["type"]) {
 		case "input_text", "output_text", "text", "refusal":
 		case "input_image":
@@ -35,12 +21,12 @@ func (b *Bridge) validateHistoryContent(value any, inputIndex int, field string)
 				err = validateImage(part)
 			}
 			if err != nil {
-				return &ContentValidationError{Path: path, ContentType: "input_image", message: err.Error(), cause: err}
+				return fmt.Errorf("%w (path=input[%d].%s[%d])", err, inputIndex, field, index)
 			}
 		case "encrypted_content":
-			return &ContentValidationError{Path: path, ContentType: "encrypted_content", message: "basispoints cannot forward encrypted_content message parts; refresh the model catalog and start a new conversation without a multi-agent v2 override, or resend the original plaintext"}
+			return fmt.Errorf("basispoints cannot forward encrypted_content message parts; refresh the model catalog and start a new conversation without a multi-agent v2 override, or resend the original plaintext (path=input[%d].%s[%d]; type=encrypted_content)", inputIndex, field, index)
 		default:
-			return &ContentValidationError{Path: path, ContentType: contentTypeDiagnostic(part), message: "basispoints supports text and HTTPS input_image content only"}
+			return fmt.Errorf("basispoints supports text and HTTPS input_image content only (path=input[%d].%s[%d]; type=%s)", inputIndex, field, index, contentTypeDiagnostic(part))
 		}
 	}
 	return nil

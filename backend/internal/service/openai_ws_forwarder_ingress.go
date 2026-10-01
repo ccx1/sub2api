@@ -365,15 +365,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if accountScoped {
 			normalized = accountScopedPayload
 		}
-		// 指纹收敛：客户端直连 WS（ctx_pool 与 HTTP bridge）与 HTTP 入口同语义。
-		// 帧体在此改写；同一份 IDs 暂存到 context，供握手头（buildOpenAIWSHeaders）
-		// 与 bridge 出站头（buildUpstreamRequestOpenAIPassthrough）读取。
-		fpPayload, fpIDs, fpErr := s.applyCodexFingerprintToWSPayload(ctx, c, account, normalized)
-		if fpErr != nil {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fpErr)
-		}
-		normalized = fpPayload
-		stageCodexFingerprintIDs(c, fpIDs)
 		if responsesLite {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
 			if liteErr != nil {

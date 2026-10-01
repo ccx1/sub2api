@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -178,7 +177,6 @@ func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL st
 	}()
 	evidence := &excelBPSWriteEvidence{}
 	req = evidence.request(req)
-	defer func() { resp, err = evidence.observeResult(req, resp, err) }()
 	if target, pinned := req.Context().Value(excelBPSPinnedEgressKey{}).(runtimeProxyEgress); pinned {
 		return s.doOpenAIProxyAttempt(req, account, target)
 	}
@@ -197,49 +195,25 @@ func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL st
 // BPS deliberately bypasses Codex ticket/cookie injection and OAuth plugins:
 // only the selected account's bearer and ChatGPT account ID belong on this host.
 func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, start time.Time) (*OpenAIForwardResult, error) {
-	fail := func(status int, code, message string, params ...string) (*OpenAIForwardResult, error) {
+	fail := func(status int, code, message string) (*OpenAIForwardResult, error) {
 		// A compact keepalive may already have committed SSE headers. Otherwise
 		// finish a single JSON response so the handler cannot append another error.
 		committed := StopOpenAICompactSSEKeepaliveCommitted(c)
 		MarkResponseCommitted(c)
-		param := ""
-		if len(params) > 0 {
-			param = params[0]
-		}
 		if committed {
-			writeOpenAICompactSSEFailureMessageParam(c, status, code, message, param)
+			writeOpenAICompactSSEFailureMessage(c, status, code, message)
 		} else {
 			errorType := "invalid_request_error"
 			if status >= 500 {
 				errorType = "server_error"
 			}
-			errorBody := gin.H{"type": errorType, "code": code, "message": message}
-			if param != "" {
-				errorBody["param"] = param
-			}
-			c.JSON(status, gin.H{"error": errorBody})
+			c.JSON(status, gin.H{"error": gin.H{"type": errorType, "code": code, "message": message}})
 		}
 		return nil, fmt.Errorf("excel BPS: %s", code)
 	}
 	originalModel := gjson.GetBytes(body, "model").String()
 	model := account.GetMappedModel(originalModel)
 	stream := gjson.GetBytes(body, "stream").Bool()
-	clientCanceled := func() (*OpenAIForwardResult, error) {
-		StopOpenAICompactSSEKeepaliveCommitted(c)
-		MarkResponseCommitted(c)
-		MarkOpsClientCancellation(c, stream)
-		// No response or metered usage exists before headers; do not create a usage row.
-		return nil, context.Canceled
-	}
-	// No output exists yet, so the handler may replay the request on another
-	// account within its switch budget unless the client is already gone.
-	failoverRateLimited := func(retryAfter string) (*OpenAIForwardResult, error) {
-		s.coolDownExcelBPS(ctx, account, retryAfter)
-		if isExcelBPSClientCancellation(c, ctx.Err()) {
-			return clientCanceled()
-		}
-		return nil, newExcelBPSRateLimitedFailoverError(retryAfter)
-	}
 	var err error
 	body, err = sjson.SetBytes(body, "model", model)
 	if err != nil {
@@ -282,44 +256,14 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if identity != "" {
 		replay, catalog = &excelBPSReplay, &excelBPSCatalog
 	}
-	if account.IsExcelBPSIgnoreEncryptedContentEnabled() {
-		stripped, stripErr := basispoints.StripEncryptedContent(body)
-		if stripErr != nil {
-			return fail(400, "basispoints_request_invalid", stripErr.Error())
-		}
-		body = stripped
-	}
-	var imageSettings ExcelBPSImageRelaySettings
-	imageSettingsLoaded := false
-	if account.IsExcelBPSIgnoreImagesEnabled() {
-		stripped, stripErr := basispoints.StripInputImages(body)
-		if stripErr != nil {
-			return fail(400, "basispoints_request_invalid", stripErr.Error())
-		}
-		// 只有真实图片需要读取全局开关；纯文本请求继续保持无图片配置依赖。
-		if !bytes.Equal(stripped, body) {
-			var settingsErr error
-			imageSettings, settingsErr = s.settingService.GetExcelBPSImageRelaySettings(ctx)
-			if settingsErr != nil {
-				return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
-			}
-			imageSettingsLoaded = true
-			if !imageSettings.Enabled {
-				body = stripped
-			}
-		}
-	}
 	upstreamBody, bridge, err := basispoints.PrepareWithCatalog(body, scope, replay, catalog)
 	var images *basispoints.NativeImages
 	var digestUsage OpenAIUsage
 	// 仅内联图片需要读取图片配置；纯文本和现成 HTTPS/file_id 不触碰图片存储。
 	if errors.Is(err, basispoints.ErrInlineImage) {
-		if !imageSettingsLoaded {
-			var settingsErr error
-			imageSettings, settingsErr = s.settingService.GetExcelBPSImageRelaySettings(ctx)
-			if settingsErr != nil {
-				return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
-			}
+		imageSettings, settingsErr := s.settingService.GetExcelBPSImageRelaySettings(ctx)
+		if settingsErr != nil {
+			return fail(503, "basispoints_image_settings_unavailable", "Excel BPS image settings are unavailable")
 		}
 		if imageSettings.Enabled {
 			// 图片超过窗口时，先把最早的图片理解为文字描述，只保留最近的图片。
@@ -361,17 +305,10 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 	}
 	if err != nil {
-		var contentErr *basispoints.ContentValidationError
-		if errors.As(err, &contentErr) {
-			return fail(400, "basispoints_request_invalid", err.Error(), contentErr.Path)
-		}
 		return fail(400, "basispoints_request_invalid", err.Error())
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		if isExcelBPSClientCancellation(c, err) {
-			return clientCanceled()
-		}
 		return fail(502, "basispoints_auth_unavailable", "Account OAuth credential is unavailable")
 	}
 	accountID := excelBPSAccountID(account, token)
@@ -396,9 +333,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return s.uploadExcelBPSAttachment(uploadCtx, account, token, accountID, attachmentProxy, img)
 		})
 		if err != nil {
-			if isExcelBPSClientCancellation(c, err) {
-				return clientCanceled()
-			}
 			status, code := http.StatusBadGateway, "basispoints_attachment_error"
 			var uploadError *excelBPSAttachmentError
 			if errors.As(err, &uploadError) {
@@ -407,14 +341,8 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			if errors.Is(err, basispoints.ErrAttachmentBusy) {
 				status = http.StatusServiceUnavailable
 			}
-			if status == http.StatusTooManyRequests && uploadError != nil {
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
-					ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
-					UpstreamStatusCode: status, UpstreamURL: basispoints.AttachmentsURL, Kind: "failover",
-					Message: "Excel BPS attachment upload was rate limited",
-				})
-				return failoverRateLimited(uploadError.retryAfter)
+			if status == http.StatusTooManyRequests {
+				code = "basispoints_rate_limited"
 			}
 			setOpsUpstreamError(c, status, "Excel BPS attachment upload failed", "")
 			if status == http.StatusUnauthorized {
@@ -435,9 +363,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	resp, proxyURL, err := s.doExcelBPSRequest(requestCtx, c, account, scope, upstreamBody, token, accountID)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 	if err != nil {
-		if isExcelBPSClientCancellation(c, err) {
-			return clientCanceled()
-		}
 		return fail(502, "basispoints_transport_error", "Excel BPS connection failed; request was not replayed after sending")
 	}
 	replayTarget, replayRouteKnown := openAIResponseEgressTarget(resp)
@@ -482,9 +407,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			resp, err = s.doExcelBPSUpstream(retryReq, proxyURL, account)
 			SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 			if err != nil {
-				if isExcelBPSClientCancellation(c, err) {
-					return clientCanceled()
-				}
 				recordExcelBPSTransportFailure(ctx, c, account, scope, proxyURL, err, "encrypted_recovery", c.GetInt("excel_bps_upstream_attempt"), false)
 				return fail(502, "basispoints_transport_error", "Excel BPS recovery connection failed; request was not replayed again")
 			}
@@ -494,7 +416,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 		// BPS throttles its own endpoint. A BPS 429 must not write Codex
-		// quota/cooldown state; it cools only the BPS route and fails over.
+		// quota/cooldown state or trigger account failover.
 		// Preserve the original rejection for Ops without exposing it to clients.
 		// BPS errors can echo request fields, so redact before storing diagnostics.
 		upstreamMessage := fmt.Sprintf("Excel BPS returned HTTP %d", resp.StatusCode)
@@ -510,22 +432,14 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				upstreamMessage = truncateString(message, 2048)
 			}
 		}
-		// A failover attempt is only an event; the handler records the final state.
-		kind := "failover"
-		if resp.StatusCode != http.StatusTooManyRequests {
-			kind = "http_error"
-			setOpsUpstreamError(c, resp.StatusCode, upstreamMessage, upstreamDetail)
-		}
+		setOpsUpstreamError(c, resp.StatusCode, upstreamMessage, upstreamDetail)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
 			ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
 			UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"),
-			UpstreamURL: basispoints.ResponsesURL, Kind: kind,
+			UpstreamURL: basispoints.ResponsesURL, Kind: "http_error",
 			Message: upstreamMessage, Detail: upstreamDetail, UpstreamResponseBody: upstreamDetail,
 		})
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return failoverRateLimited(resp.Header.Get("Retry-After"))
-		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			s.handleExcelBPSUnauthorized(ctx, account, resp.StatusCode, resp.Header, raw)
 			return fail(resp.StatusCode, "basispoints_upstream_error", "Excel BPS authentication failed; request was not replayed")
@@ -539,6 +453,10 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if resp.StatusCode == http.StatusBadRequest && isExcelBPSInvalidEncryptedContent(raw) {
 			errorCode = "invalid_encrypted_content"
 			message = "Excel BPS could not verify encrypted conversation state; resend the original plaintext history or start a new conversation"
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			errorCode = "basispoints_rate_limited"
+			message = "Excel BPS rate limit exceeded; Codex account scheduling was not changed"
 		}
 		if resp.StatusCode == http.StatusForbidden {
 			// Apply group routing before the independent protocol switch is disabled.
@@ -558,7 +476,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	// BPS and Codex share quota. Refresh at the HTTP boundary even if the client
 	// disconnects or a later stream/protocol error prevents normal completion.
 	s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, resp.Header)
-	var rateLimitedAfterOutput atomic.Bool
 	converted := bridge.StreamWithRepairs(requestCtx, resp.Body, func(repairCtx context.Context, failed map[string]any, validation error) (map[string]any, error) {
 		correctedBody, err := basispoints.BuildToolRepairRequest(upstreamBody, failed, validation)
 		if err != nil {
@@ -580,12 +497,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		defer stop()
 		if repairResp.StatusCode < 200 || repairResp.StatusCode >= 300 {
 			raw, _ := io.ReadAll(io.LimitReader(repairResp.Body, 512<<10))
-			if repairResp.StatusCode == http.StatusTooManyRequests {
-				// Output was already accepted: cool the route, never replay the request.
-				s.coolDownExcelBPS(repairCtx, account, repairResp.Header.Get("Retry-After"))
-				rateLimitedAfterOutput.Store(true)
-				return nil, errExcelBPSRateLimitedAfterOutput
-			}
 			s.handleExcelBPSUnauthorized(repairCtx, account, repairResp.StatusCode, repairResp.Header, raw)
 			if repairResp.StatusCode == http.StatusForbidden && gjson.GetBytes(raw, "error.code").String() != "basispoints_model_access_changed" {
 				s.moveExcelBPSOn403(repairCtx, account)
@@ -612,11 +523,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if repaired.StatusCode < 200 || repaired.StatusCode >= 300 {
 			raw, _ := io.ReadAll(io.LimitReader(repaired.Body, 512<<10))
 			_ = repaired.Body.Close()
-			if repaired.StatusCode == http.StatusTooManyRequests {
-				s.coolDownExcelBPS(repairCtx, account, repaired.Header.Get("Retry-After"))
-				rateLimitedAfterOutput.Store(true)
-				return nil, errExcelBPSRateLimitedAfterOutput
-			}
 			s.handleExcelBPSUnauthorized(repairCtx, account, repaired.StatusCode, repaired.Header, raw)
 			if repaired.StatusCode == http.StatusForbidden && gjson.GetBytes(raw, "error.code").String() != "basispoints_model_access_changed" {
 				s.moveExcelBPSOn403(repairCtx, account)
@@ -680,9 +586,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if stream {
 			if _, err = c.Writer.WriteString(line + "\n"); err != nil {
 				result.ClientDisconnect = true
-				if isExcelBPSClientCancellation(c, c.Request.Context().Err()) {
-					MarkOpsClientCancellation(c, stream)
-				}
 				result.Duration = time.Since(start)
 				return result, err
 			}
@@ -695,9 +598,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	result.UpstreamTerminalEvent = terminal
 	if err = scanner.Err(); err != nil || terminal == "" {
 		if ctx.Err() != nil {
-			if isExcelBPSClientCancellation(c, ctx.Err()) {
-				MarkOpsClientCancellation(c, stream)
-			}
 			result.ClientDisconnect = true
 			return result, ctx.Err()
 		}
@@ -706,7 +606,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			streamErr = errors.New("stream ended before terminal event")
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, streamErr, result.RequestID, resp)
-		recordExcelBPSTransportFailure(ctx, c, account, scope, proxyURL, err, "stream", c.GetInt("excel_bps_upstream_attempt"), false, resp)
+		recordExcelBPSTransportFailure(ctx, c, account, scope, proxyURL, err, "stream", c.GetInt("excel_bps_upstream_attempt"), false)
 		MarkOpsStreamError(c, "basispoints_stream_incomplete", "Excel BPS stream ended before completion", http.StatusBadGateway)
 		MarkResponseCommitted(c)
 		if stream {
@@ -714,9 +614,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			c.Writer.Flush()
 		} else {
 			c.JSON(502, gin.H{"error": gin.H{"type": "server_error", "code": "basispoints_stream_incomplete", "message": "Excel BPS stream ended before completion"}})
-		}
-		if rateLimitedAfterOutput.Load() {
-			return result, errExcelBPSRateLimitedAfterOutput
 		}
 		return result, fmt.Errorf("excel BPS stream incomplete")
 	}
@@ -732,9 +629,6 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 	}
 	if terminal != "response.completed" {
-		if rateLimitedAfterOutput.Load() {
-			return result, errExcelBPSRateLimitedAfterOutput
-		}
 		return result, fmt.Errorf("excel BPS terminal: %s", terminal)
 	}
 	s.bindHTTPResponseAccount(ctx, c, account, result.ResponseID)

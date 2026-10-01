@@ -18,9 +18,9 @@ func (s *AccountUsageService) openAIUsageProbeAccount(ctx context.Context, accou
 	return &requestAccount, nil
 }
 
-func (s *AccountUsageService) persistOpenAIUsageProbeSnapshot(ctx context.Context, account *Account, updates map[string]any, observed ...*openAIQuotaRecoveryObservation) error {
+func (s *AccountUsageService) persistOpenAIUsageProbeSnapshot(ctx context.Context, account *Account, updates map[string]any) error {
 	if _, shared := account.Extra[SharedPoolOwnerKey]; !shared {
-		s.persistOpenAICodexProbeSnapshot(account.ID, updates, observed...)
+		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
 		return nil
 	}
 	if len(updates) == 0 {
@@ -36,9 +36,6 @@ func (s *AccountUsageService) persistOpenAIUsageProbeSnapshot(ctx context.Contex
 	defer cancel()
 	if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, updates); err != nil {
 		return fmt.Errorf("persist shared usage snapshot: %w", err)
-	}
-	if len(observed) > 0 {
-		recoverOpenAIQuotaRateLimit(writeCtx, s.accountRepo, observed[0], updates)
 	}
 	notifyOpenAIAutoReset(account.ID)
 	return nil

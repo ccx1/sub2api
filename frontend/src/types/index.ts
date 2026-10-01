@@ -1234,44 +1234,6 @@ export interface UpstreamBillingData {
 
 export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
 
-// A spending window reported by the upstream /v1/usage endpoint: subscription
-// limits use daily/weekly/monthly, key rate limits use 5h/1d/7d.
-export interface UpstreamBalanceWindow {
-  window: string
-  limit: number
-  used?: number
-  reset_at?: string
-}
-
-// Sanitized balance fields of the upstream /v1/usage response.
-export interface UpstreamBalanceData {
-  is_valid: boolean
-  mode?: 'unrestricted' | 'quota_limited'
-  key_status?: string
-  plan_name?: string
-  unit?: string
-  // Wallet balance, the smallest subscription headroom, or the key quota
-  // headroom, depending on how the upstream bills the key.
-  remaining?: number
-  wallet_balance?: number
-  // Subscription without any spending limit.
-  unlimited?: boolean
-  quota_limit?: number
-  quota_used?: number
-  expires_at?: string
-  windows?: UpstreamBalanceWindow[]
-}
-
-export interface UpstreamBalanceSnapshot {
-  status: UpstreamBillingProbeStatus
-  data?: UpstreamBalanceData
-  received_at?: string
-  fresh_until?: string
-  last_attempt_at: string
-  http_status?: number
-  last_error?: string
-}
-
 export interface UpstreamBillingProbeSnapshot {
   status: UpstreamBillingProbeStatus
   data?: UpstreamBillingData
@@ -1285,9 +1247,6 @@ export interface UpstreamBillingProbeSnapshot {
   // Value this probe wrote into the account rate multiplier; absent when the
   // probe did not sync a rate.
   synced_rate_multiplier?: number
-  // Upstream balance read by the same probe; its status is independent of the
-  // rate status above.
-  balance?: UpstreamBalanceSnapshot
 }
 
 export interface UpstreamBillingProbeSettings {
@@ -1627,8 +1586,6 @@ export interface WindowStats {
   cost: number // Account cost (account multiplier)
   standard_cost?: number
   user_cost?: number
-  lifetime_tokens?: number // All-time totals (no time filter)
-  lifetime_cost?: number
 }
 
 export interface UsageProgress {
@@ -1959,7 +1916,6 @@ export interface AdminDataImportResult {
 }
 
 export interface CodexSessionImportRequest {
-  skip_existing?: boolean
   protection_enabled?: boolean
   codex_ticket_enabled?: boolean
   use_import_defaults?: boolean
