@@ -44,8 +44,11 @@ func (s *SQLStore) SaveRecord(ctx context.Context, r *Record) error {
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO request_capture_records(id,task_id,request_id,is_error,created_at,data) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET request_id=EXCLUDED.request_id,is_error=EXCLUDED.is_error,data=EXCLUDED.data`, r.ID, r.TaskID, r.RequestID, r.IsError, r.CreatedAt, string(b))
 	return err
 }
+
+// Records with onlyErrors=true returns published records: finished errors, plus
+// finished records of raw-mode tasks (which retain successful requests too).
 func (s *SQLStore) Records(ctx context.Context, task, requestID string, onlyErrors bool, limit, offset int) ([]Record, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT data - 'parts' - 'attempts' - 'usage' FROM request_capture_records WHERE task_id=$1 AND ($2='' OR request_id=$2) AND ($3=FALSE OR (is_error=TRUE AND data->>'finished_at' IS NOT NULL)) ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`, task, requestID, onlyErrors, limit, offset)
+	rows, err := s.DB.QueryContext(ctx, `SELECT data - 'parts' - 'attempts' - 'usage' - 'handshakes' - 'client_headers' FROM request_capture_records WHERE task_id=$1 AND ($2='' OR request_id=$2) AND ($3=FALSE OR ((is_error=TRUE OR data->>'raw'='true') AND data->>'finished_at' IS NOT NULL)) ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`, task, requestID, onlyErrors, limit, offset)
 	if err != nil {
 		return nil, err
 	}

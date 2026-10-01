@@ -48,5 +48,34 @@ export default {
     success: '出票成功', ticket_rejected: '票据被规则拒收', model_mismatch: '目标模型不匹配', model_failed: '模型响应失败',
     upstream_error: '上游错误', verification_failed: '业务复验失败', verification_deferred: '已采集，复验暂缓',
     canceled: '已取消', controls_changed: '配置变更中止', failed: '未成功出票'
+  },
+  codexTicketNodes: {
+    menu: '节点采集', title: '节点采集', refresh: '刷新', copyJson: '复制全部 JSON', copied: '已复制节点采集 JSON',
+    rawWarning: '测试阶段：以下 Cookie、STATE、Authorization 与报文均为原样展示，请勿截图外传。探测结果只随本次响应返回，不写入票池、采集历史或质量记录。',
+    loading: '正在读取节点信息…', failed: '节点采集失败', overview: '账号与出口',
+    proxyUnavailable: '代理不可用', notConfigured: '未在打票模型中配置', noSlots: '当前没有票据', businessSelected: '业务当前选中',
+    usable: '可用', unusable: '不可用', crossRegion: '跨区节点', pending: '待定 Cookie',
+    connections: 'WS 连接池', noConnections: '当前没有 WS 连接', handshakeHeaders: '握手响应头', truncated: '已截断',
+    sentCookies: '发送的 Cookie', receivedCookies: '返回的 Cookie（Set-Cookie）', noCookies: '无 Cookie',
+    excludedByMode: '当前 Cookie 模式不会发送', decodeError: '解析失败',
+    probeTitle: '节点探测', probeHint: '按所选来源实际向上游发送探测请求，逐轮记录发送/返回的 __oailb 节点与耗时，用于判断节点是否被锁定。',
+    runProbe: '开始探测', probing: '探测中…', businessSlot: '业务当前票据', roundDetail: '第 {index} 轮详情',
+    request: '原始请求', response: '原始响应', notRecorded: '未记录', rawJson: '原始 JSON',
+    fields: {
+      accountStatus: '账号状态', cookieMode: 'Cookie 模式', proxy: '当前出口', egressCountry: '出口国家/大区', ticketEnabled: '打票 / 采集 / 随机代理',
+      credentialMode: '凭据/会话/刷新', pool: '票池', strategy: '请求策略', routeAffinity: '路由亲和', serverTime: '服务器时间',
+      model: '模型', source: '来源', slot: '票据槽位', count: '轮数（1–5）', slotNode: '票据节点', duration: '总耗时', startedAt: '开始时间'
+    },
+    sources: { ticket: '重放票据 Cookie', sticky_jar: '空 Cookie 起步并沿用', empty_jar: '每轮空 Cookie' },
+    sourceHints: {
+      ticket: '使用所选票据的会话和 Cookie（按当前 Cookie 模式过滤），观察节点是否保持。',
+      sticky_jar: '第一轮不带 Cookie，之后沿用上一轮返回的 Cookie，观察上游是否把同一会话钉在同一节点。',
+      empty_jar: '每轮都用新会话且不带 Cookie，观察上游自然分配的节点分布。'
+    },
+    rounds: { index: '轮', status: '状态', http: 'HTTP', latency: '头 / 首字节 / 首 delta / 总（ms）', node: '发送 → 返回节点', outcome: '节点变化', effective: '实际节点' },
+    outcomes: {
+      no_route: '无节点 Cookie', assigned: '新分配', kept: '未返回（沿用）', cleared: '被清除', unparsed: '无法解析',
+      refreshed: '同节点续期', changed: '节点变更', no_response: '无响应', skipped: '已跳过'
+    }
   }
 }

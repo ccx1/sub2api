@@ -1,6 +1,7 @@
 package openaiauth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ var allowedAuthHosts = map[string]bool{
 }
 
 type transport struct {
+	ctx       context.Context
 	client    *http.Client
 	userAgent string
 	secCHUA   string
@@ -133,7 +135,11 @@ func (t *transport) do(req *http.Request) (*http.Response, error) {
 	req = req.WithContext(ctx)
 	resp, err := t.client.Do(req)
 	if err != nil {
+		contextErr := ctx.Err()
 		cancel()
+		if contextErr != nil {
+			return nil, contextErr
+		}
 		return nil, errNetwork
 	}
 	// 用包装体在 Body 关闭时释放 context。
@@ -163,7 +169,11 @@ func (t *transport) post(rawURL string, body []byte, headers map[string]string) 
 
 // newRequest 构造带默认头的请求。
 func (t *transport) newRequest(method, rawURL string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, rawURL, body)
+	ctx := t.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		return nil, err
 	}

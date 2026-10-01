@@ -818,6 +818,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if accountScoped {
 		firstClientMessage = accountScopedFirst
 	}
+	// 指纹收敛：首帧体改写并暂存 IDs，下方 buildOpenAIWSHeaders 握手头读取同一份。
+	fpFirst, fpIDs, fpErr := s.applyCodexFingerprintToWSPayload(ctx, c, account, firstClientMessage)
+	if fpErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fpErr)
+	}
+	firstClientMessage = fpFirst
+	stageCodexFingerprintIDs(c, fpIDs)
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
@@ -970,13 +977,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		cancelDial()
 		ticketReceipt.observeHandshake(ctx, s, handshakeHeaders)
-		if err == nil {
-			break
-		}
 		var handshakeErr *openAIWSHandshakeError
 		responseBody := []byte(nil)
 		if errors.As(err, &handshakeErr) && handshakeErr != nil {
 			responseBody = handshakeErr.Body
+		}
+		requestcapture.FromContext(ctx).Handshake(account.ID, wsURL, headers, statusCode, handshakeHeaders, responseBody, err)
+		if err == nil {
+			break
 		}
 		requestcapture.FromContext(ctx).SelectionFailed(account.ID, statusCode, handshakeHeaders, responseBody, err)
 		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Err: err}
@@ -1123,6 +1131,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if accountScoped {
 					payload = accountScopedPayload
 				}
+			}
+			if isResponseCreate {
+				// 后续 turn 同样收敛（握手已完成，只需改写帧体 client_metadata）。
+				fpPayload, _, fpErr := s.applyCodexFingerprintToWSPayload(ctx, c, account, payload)
+				if fpErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fpErr)
+				}
+				payload = fpPayload
 			}
 			if isResponseCreate {
 				if responsesLite {

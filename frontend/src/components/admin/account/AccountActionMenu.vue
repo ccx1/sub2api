@@ -25,6 +25,10 @@
               <Icon name="shield" size="sm" class="text-emerald-500" />
               {{ t('admin.accounts.codexModelQualityMenu') }}
             </button>
+            <button v-if="showCodexTicketNodes" @click="$emit('codex-ticket-nodes', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="server" size="sm" class="text-cyan-600" />
+              {{ t('admin.accounts.codexTicketNodes.menu') }}
+            </button>
             <button @click="$emit('schedule', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="clock" size="sm" class="text-orange-500" />
               {{ t('admin.scheduledTests.schedule') }}
@@ -79,8 +83,8 @@ import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 
-const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; showCodexTicketHistory?: boolean; showCodexModelQuality?: boolean }>()
-const emit = defineEmits(['close', 'test', 'stats', 'codex-ticket-history', 'codex-model-quality', 'schedule', 'iq-test', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; showCodexTicketHistory?: boolean; showCodexModelQuality?: boolean; showCodexTicketNodes?: boolean }>()
+const emit = defineEmits(['close', 'test', 'stats', 'codex-ticket-history', 'codex-model-quality', 'codex-ticket-nodes', 'schedule', 'iq-test', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
 const { t } = useI18n()
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()

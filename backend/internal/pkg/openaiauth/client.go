@@ -1,6 +1,7 @@
 package openaiauth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -39,6 +40,14 @@ type LoginInput struct {
 
 // Login 执行站内 OAuth 登录，返回新凭据。
 func Login(in LoginInput) (*Credentials, error) {
+	return LoginContext(context.Background(), in)
+}
+
+// LoginContext 将巡检任务的取消与时间预算传递到每一步授权请求。
+func LoginContext(ctx context.Context, in LoginInput) (*Credentials, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	workspaceID := strings.TrimSpace(in.WorkspaceID)
 	if workspaceID == "" {
 		var err error
@@ -51,11 +60,15 @@ func Login(in LoginInput) (*Credentials, error) {
 	if err != nil {
 		return nil, err
 	}
+	tr.ctx = ctx
 	defer tr.close()
 
 	state := randToken(32)
 	verifier := randToken(64)
 	result, err := login(tr, strings.ToLower(strings.TrimSpace(in.Email)), in.Password, in.TOTPSecret, workspaceID, state, verifier)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return nil, contextErr
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +129,14 @@ type ProbeResult struct {
 // Probe 站内测活：用 access_token 调 chatgpt.com usage 接口核验令牌与空间。
 // 与 customer_recovery.verified_account 的 usage 核验一致，但仅判断可用性。
 func Probe(existing map[string]string, proxyURL string) ProbeResult {
+	return ProbeContext(context.Background(), existing, proxyURL)
+}
+
+// ProbeContext 保留令牌失效分类，取消与超时仅作为临时异常。
+func ProbeContext(ctx context.Context, existing map[string]string, proxyURL string) ProbeResult {
+	if err := ctx.Err(); err != nil {
+		return ProbeResult{Detail: err.Error()}
+	}
 	access := strings.TrimSpace(existing["access_token"])
 	if access == "" {
 		return ProbeResult{AuthFail: true, Detail: "missing access_token"}
@@ -130,7 +151,11 @@ func Probe(existing map[string]string, proxyURL string) ProbeResult {
 		return ProbeResult{Detail: "transport: " + err.Error()}
 	}
 	defer tr.close()
-	req, err := http.NewRequest(http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", nil)
+	return tr.probeUsage(ctx, access, workspaceID)
+}
+
+func (tr *transport) probeUsage(ctx context.Context, access, workspaceID string) ProbeResult {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", nil)
 	if err != nil {
 		return ProbeResult{Detail: err.Error()}
 	}
@@ -145,7 +170,10 @@ func Probe(existing map[string]string, proxyURL string) ProbeResult {
 		return ProbeResult{Detail: "usage request failed"}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil || ctx.Err() != nil {
+		return ProbeResult{Detail: "usage response incomplete"}
+	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return ProbeResult{AuthFail: true, Detail: "usage " + strconv.Itoa(resp.StatusCode)}
 	}

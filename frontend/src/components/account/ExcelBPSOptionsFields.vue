@@ -14,6 +14,24 @@
     <p class="text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
     <div>
       <label class="flex items-center gap-2">
+        <input :checked="options.ignore_encrypted_content" type="checkbox" :data-testid="`${testIdPrefix}-ignore-encrypted-content`"
+          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+          @change="update({ ignore_encrypted_content: ($event.target as HTMLInputElement).checked })" />
+        <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContent') }}</span>
+      </label>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContentDesc') }}</p>
+    </div>
+    <div>
+      <label class="flex items-center gap-2">
+        <input :checked="options.omit_unsupported_tools" type="checkbox" :data-testid="testIdPrefix + '-omit-unsupported-tools'"
+          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+          @change="update({ omit_unsupported_tools: ($event.target as HTMLInputElement).checked })" />
+        <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
+      </label>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
+    </div>
+    <div>
+      <label class="flex items-center gap-2">
         <input :checked="options.auto_disable_on_403" type="checkbox" :data-testid="`${testIdPrefix}-auto-disable-on-403`"
           class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
           @change="update({ auto_disable_on_403: ($event.target as HTMLInputElement).checked })" />

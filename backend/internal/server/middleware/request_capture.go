@@ -26,11 +26,16 @@ func RequestCapture(manager *requestcapture.Manager) gin.HandlerFunc {
 			group = *key.GroupID
 		}
 		rid, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
-		session := manager.Begin(requestcapture.Meta{RequestID: rid, ClientRequestID: c.GetHeader("X-Client-Request-ID"), UserID: key.UserID, GroupID: group, Method: c.Request.Method, Path: c.Request.URL.RequestURI(), Protocol: "http"})
+		userEmail := ""
+		if key.User != nil {
+			userEmail = key.User.Email
+		}
+		session := manager.Begin(requestcapture.Meta{RequestID: rid, ClientRequestID: c.GetHeader("X-Client-Request-ID"), UserID: key.UserID, UserEmail: userEmail, APIKeyID: key.ID, APIKeyName: key.Name, GroupID: group, Method: c.Request.Method, Path: c.Request.URL.RequestURI(), Protocol: "http"})
 		if session == nil {
 			c.Next()
 			return
 		}
+		session.SetClientHeaders(c.Request.Header)
 		c.Request = c.Request.WithContext(requestcapture.WithSession(c.Request.Context(), session))
 		writer := &captureResponseWriter{ResponseWriter: c.Writer, session: session}
 		c.Writer = writer

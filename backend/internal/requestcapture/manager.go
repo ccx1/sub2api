@@ -44,6 +44,64 @@ type Manager struct {
 	storageMu        sync.Mutex
 	unhealthy        atomic.Bool
 	stopping         atomic.Bool
+	accountNames     func(context.Context, []int64) map[int64]string
+}
+
+// SetAccountNamer 注册账号名解析器，管理接口读取记录时用于填充账号名称。
+// 名称只在读取时解析，不入库，账号改名后展示最新名称。
+func (m *Manager) SetAccountNamer(fn func(context.Context, []int64) map[int64]string) {
+	if m != nil {
+		m.accountNames = fn
+	}
+}
+
+func (m *Manager) decorate(ctx context.Context, rs ...*Record) {
+	if m == nil || m.accountNames == nil {
+		return
+	}
+	ids := []int64{}
+	seen := map[int64]bool{}
+	add := func(id int64) {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	for _, r := range rs {
+		for _, id := range r.AccountIDs {
+			add(id)
+		}
+		for _, a := range r.Attempts {
+			add(a.AccountID)
+		}
+		for _, h := range r.Handshakes {
+			add(h.AccountID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	names := m.accountNames(ctx, ids)
+	if len(names) == 0 {
+		return
+	}
+	for _, r := range rs {
+		r.AccountNames = map[int64]string{}
+		for _, id := range r.AccountIDs {
+			if n, ok := names[id]; ok {
+				r.AccountNames[id] = n
+			}
+		}
+		for i := range r.Attempts {
+			r.Attempts[i].AccountName = names[r.Attempts[i].AccountID]
+			if n, ok := names[r.Attempts[i].AccountID]; ok {
+				r.AccountNames[r.Attempts[i].AccountID] = n
+			}
+		}
+		for i := range r.Handshakes {
+			r.Handshakes[i].AccountName = names[r.Handshakes[i].AccountID]
+		}
+	}
 }
 
 func New(store Store, dir string, config Config) (*Manager, error) {
@@ -119,7 +177,7 @@ func New(store Store, dir string, config Config) (*Manager, error) {
 				}
 				kept := 0
 				for _, r := range records {
-					if !r.IsError || r.FinishedAt == nil {
+					if !r.published() {
 						if _, e = uuid.Parse(r.ID); e != nil {
 							return nil, e
 						}
@@ -287,7 +345,7 @@ func (m *Manager) Create(ctx context.Context, req CreateTask, name string) (*Tas
 		name = name[:256]
 	}
 	now := time.Now().UTC()
-	t := Task{ID: uuid.NewString(), InstanceID: m.instance, TargetType: req.TargetType, TargetID: req.TargetID, TargetName: name, SaveMedia: req.SaveMedia, CreatedAt: now, ExpiresAt: now.Add(time.Duration(req.DurationMinutes) * time.Minute), Status: "running"}
+	t := Task{ID: uuid.NewString(), InstanceID: m.instance, TargetType: req.TargetType, TargetID: req.TargetID, TargetName: name, SaveMedia: req.SaveMedia, Raw: req.Raw, CreatedAt: now, ExpiresAt: now.Add(time.Duration(req.DurationMinutes) * time.Minute), Status: "running"}
 	if err := m.store.SaveTask(ctx, &t); err != nil {
 		return nil, err
 	}
@@ -341,11 +399,25 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	m.signal()
 	return nil
 }
+
+// published 判定记录是否对外可见：已完结，且为错误记录或原文模式任务的记录。
+func (r *Record) published() bool {
+	return r != nil && r.FinishedAt != nil && (r.IsError || r.Raw)
+}
+
 func (m *Manager) Records(ctx context.Context, task, rid string, _ bool, limit, offset int) ([]Record, error) {
 	if _, err := m.Task(ctx, task); err != nil {
 		return nil, err
 	}
-	return m.store.Records(ctx, task, rid, true, limit, offset)
+	records, err := m.store.Records(ctx, task, rid, true, limit, offset)
+	if err == nil {
+		ptrs := make([]*Record, len(records))
+		for i := range records {
+			ptrs[i] = &records[i]
+		}
+		m.decorate(ctx, ptrs...)
+	}
+	return records, err
 }
 func (m *Manager) Record(ctx context.Context, task, id string) (*Record, error) {
 	if _, err := m.Task(ctx, task); err != nil {
@@ -355,9 +427,10 @@ func (m *Manager) Record(ctx context.Context, task, id string) (*Record, error) 
 	if err != nil {
 		return nil, err
 	}
-	if r.InstanceID != m.instance || !r.IsError || r.FinishedAt == nil {
+	if r.InstanceID != m.instance || !r.published() {
 		return nil, ErrNotFound
 	}
+	m.decorate(ctx, r)
 	return r, nil
 }
 
@@ -607,7 +680,7 @@ func (m *Manager) cleanOrphanBodies(ctx context.Context) error {
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
-			if err != nil || r.InstanceID != m.instance || !r.IsError || r.FinishedAt == nil {
+			if err != nil || r.InstanceID != m.instance || !r.published() {
 				if err := os.RemoveAll(filepath.Join(m.dir, task.Name(), record.Name())); err != nil {
 					return err
 				}

@@ -28,6 +28,8 @@ func TestAccountFeatureFusionRoutesKeepAdminBoundary(t *testing.T) {
 	}{
 		{http.MethodGet, "codex-ticket/runtime-status", http.StatusBadRequest},
 		{http.MethodPost, "codex-ticket/request-preview", http.StatusBadRequest},
+		{http.MethodGet, "codex-ticket/nodes", http.StatusBadRequest},
+		{http.MethodPost, "codex-ticket/node-probe", http.StatusBadRequest},
 		{http.MethodGet, "opencode-go-usage", http.StatusServiceUnavailable},
 		{http.MethodPost, "opencode-go-usage/refresh", http.StatusServiceUnavailable},
 	} {

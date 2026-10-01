@@ -110,5 +110,7 @@ func (s *OpenAIGatewayService) openAICodexTicketProbeConfigCurrent(ctx context.C
 	// 总开关由 controls 单独检查，配置快照只用于阻止旧规则继续出站及发布。
 	current.Enabled, captured.Enabled = false, false
 	current.HarvestProxyURL, captured.HarvestProxyURL = "", ""
+	// 取票机制只作用于业务取票，切换时不应中止在途采集与复验。
+	current, captured = config.WithoutCodexTicketUsagePolicy(current), config.WithoutCodexTicketUsagePolicy(captured)
 	return reflect.DeepEqual(current, captured) && input.SubscriptionTier == openAICodexTicketSubscriptionTier(input.Account)
 }

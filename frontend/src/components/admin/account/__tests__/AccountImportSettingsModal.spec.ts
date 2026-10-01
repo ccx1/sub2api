@@ -73,7 +73,7 @@ describe('AccountImportSettingsModal', () => {
     await flushPromises()
     expect(saveSettings).toHaveBeenCalledWith({
       enabled: true, protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true,
-      excel_bps_options: { models: null, auto_disable_on_403: false, cache_creation_as_input: false }, proxy_mode: 'fixed', proxy_id: 7,
+      excel_bps_options: { models: null, auto_disable_on_403: false, cache_creation_as_input: false, ignore_encrypted_content: false, omit_unsupported_tools: false }, proxy_mode: 'fixed', proxy_id: 7,
       extra: { proxy_region_mode: 'manual', proxy_region_country: 'JP', codex_ticket_proxy_mode: 'fixed', codex_ticket_proxy_id: 7, codex_ticket_proxy_strategy: 'affinity' }
     })
     wrapper.unmount()
@@ -90,10 +90,12 @@ describe('AccountImportSettingsModal', () => {
     expect(wrapper.find('[data-testid="import-settings-excel-bps-model-selection"]').exists()).toBe(true)
     await wrapper.get('[data-testid="import-settings-excel-bps-auto-disable-on-403"]').setValue(true)
     await wrapper.get('[data-testid="import-settings-excel-bps-cache-creation-as-input"]').setValue(true)
+    await wrapper.get('[data-testid="import-settings-excel-bps-ignore-encrypted-content"]').setValue(true)
+    await wrapper.get('[data-testid="import-settings-excel-bps-omit-unsupported-tools"]').setValue(true)
     await submit(wrapper)
     await flushPromises()
     expect(saveSettings.mock.lastCall?.[0]).toMatchObject({ excel_bps_enabled: true, excel_bps_options: {
-      models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true
+      models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true, ignore_encrypted_content: true, omit_unsupported_tools: true
     } })
 
     await wrapper.get('[aria-labelledby="import-default-excel-bps"]').trigger('click')
@@ -101,8 +103,35 @@ describe('AccountImportSettingsModal', () => {
     await submit(wrapper)
     await flushPromises()
     expect(saveSettings.mock.lastCall?.[0]).toMatchObject({ excel_bps_enabled: false, excel_bps_options: {
-      models: null, auto_disable_on_403: false, cache_creation_as_input: false
+      models: null, auto_disable_on_403: false, cache_creation_as_input: false, ignore_encrypted_content: false, omit_unsupported_tools: false
     } })
+    wrapper.unmount()
+  })
+
+  it.each([
+    { key: 'ignore_encrypted_content', testId: 'ignore-encrypted-content' },
+    { key: 'omit_unsupported_tools', testId: 'omit-unsupported-tools' }
+  ].flatMap(option => [undefined, false, true].map(saved => ({ ...option, saved }))))('loads $key=$saved and persists an independent toggle', async ({ key, testId, saved }) => {
+    getSettings.mockResolvedValue({
+      ...defaultAccountImportSettings(), enabled: true, excel_bps_enabled: true,
+      excel_bps_options: { models: null, auto_disable_on_403: false, cache_creation_as_input: false,
+        ...(saved === undefined ? {} : { [key]: saved }) }
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+    const checkbox = wrapper.get('[data-testid="import-settings-excel-bps-' + testId + '"]')
+    expect((checkbox.element as HTMLInputElement).checked).toBe(saved === true)
+    await checkbox.setValue(saved !== true)
+    await submit(wrapper)
+    await flushPromises()
+    expect(saveSettings.mock.lastCall?.[0].excel_bps_options[key]).toBe(saved !== true)
+    const otherKey = key === 'ignore_encrypted_content' ? 'omit_unsupported_tools' : 'ignore_encrypted_content'
+    expect(saveSettings.mock.lastCall?.[0].excel_bps_options[otherKey]).toBe(false)
+    getSettings.mockResolvedValue(saveSettings.mock.lastCall?.[0])
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect((wrapper.get('[data-testid="import-settings-excel-bps-' + testId + '"]').element as HTMLInputElement).checked).toBe(saved !== true)
     wrapper.unmount()
   })
 

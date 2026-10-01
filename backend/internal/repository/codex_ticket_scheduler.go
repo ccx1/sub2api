@@ -141,6 +141,12 @@ func codexSchedulerVersion(value any) string {
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
+// codexSchedulerPolicyVersion 只对影响采集调度的配置取版本；业务取票机制不参与，
+// 切换即取即用/沉淀/一票一用时不打断在途采集，滚动升级期间新旧实例的版本也保持一致。
+func codexSchedulerPolicyVersion(cfg config.OpenAICodexTicketConfig) string {
+	return codexSchedulerVersion(config.WithoutCodexTicketUsagePolicy(cfg))
+}
+
 func (a *ProxyPoolAllocator) codexSchedulerConfig(ctx context.Context, fallback config.OpenAICodexTicketConfig) (config.OpenAICodexTicketConfig, error) {
 	if a == nil || a.rdb == nil || a.settings == nil {
 		return fallback, errors.New("codex ticket shared scheduler unavailable")
@@ -169,7 +175,7 @@ func (a *ProxyPoolAllocator) codexSchedulerInput(ctx context.Context, action str
 		}
 	}
 	return map[string]any{
-		"action": action, "enabled": p.Enabled, "policy": codexSchedulerVersion(cfg),
+		"action": action, "enabled": p.Enabled, "policy": codexSchedulerPolicyVersion(cfg),
 		"disabled_at_ms": codexSchedulerMillis(disabledAt),
 		"max_attempts":   max(1, p.MaxAccountAttempts), "max_rounds": max(1, p.MaxPoolRounds),
 		"cooldown_ms": max(1, p.AccountCooldownSeconds) * 1000, "silence_ms": max(1, p.ProxySilenceSeconds) * 1000,
@@ -204,7 +210,7 @@ func (a *ProxyPoolAllocator) ReserveCodexTicket(ctx context.Context, req service
 	if err != nil {
 		return nil, err
 	}
-	if q["policy"] != codexSchedulerVersion(config.NormalizeOpenAICodexTicketConfig(req.Config)) {
+	if q["policy"] != codexSchedulerPolicyVersion(config.NormalizeOpenAICodexTicketConfig(req.Config)) {
 		return nil, codexSchedulerWait("controls_changed")
 	}
 	candidates, proxies, err := a.codexSchedulerCandidates(ctx, req)

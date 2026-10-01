@@ -3,20 +3,27 @@ import { apiClient } from '../client'
 export type CaptureTarget = 'user' | 'account' | 'group'
 export interface CaptureTask {
   id: string; instance_id: string; target_type: CaptureTarget; target_id: number; target_name: string
-  save_media: boolean; created_at: string; expires_at: string; ended_at?: string
+  save_media: boolean; raw?: boolean; created_at: string; expires_at: string; ended_at?: string
   status: string; reason?: string; requests: number; partial: number; skipped: number; bytes: number
 }
 export interface CapturePart {
+  url?: string; raw_url?: string; raw_headers?: Record<string, string[]>
   name: string; stage: string; attempt: number; turn: number; content_type: string
   headers?: Record<string, string>; bytes: number; omitted?: string
 }
 export interface CaptureRecord {
   id: string; task_id: string; request_id: string; client_request_id?: string; instance_id: string
-  user_id: number; group_id: number; routed_group_id?: number; model?: string; path: string
+  user_id: number; user_email?: string; api_key_id?: number; api_key_name?: string; raw_path?: string; group_id: number; routed_group_id?: number; model?: string; path: string
   protocol: string; status: number; is_error: boolean; turn?: number; partial: boolean; reason?: string
   created_at: string; finished_at?: string; bytes: number; error_code?: string; client_outcome?: 'completed' | 'failed'
-  attempts: Array<{ number: number; account_id: number; status?: number; upstream_request_id?: string; error?: string; error_stage?: string; read_error?: string; response_terminal?: string; local_close?: boolean }>
+  attempts: Array<{ number: number; account_id: number; account_name?: string; status?: number; upstream_request_id?: string; error?: string; error_detail?: string; error_stage?: string; read_error?: string; read_error_detail?: string; response_terminal?: string; local_close?: boolean }>
   parts: CapturePart[]; usage?: Record<string, number>
+  raw?: boolean; account_ids?: number[]; account_names?: Record<string, string>
+  client_headers?: Record<string, string[]>; handshakes?: CaptureHandshake[]
+}
+export interface CaptureHandshake {
+  account_id: number; account_name?: string; at: string; url: string; status?: number
+  request_headers?: Record<string, string[]>; response_headers?: Record<string, string[]>; response_body?: string; error?: string
 }
 export interface CaptureStats {
   instance_id: string; used_bytes: number; buffer_bytes: number; peak_buffer_bytes: number
@@ -26,7 +33,7 @@ const base = '/admin/request-captures'
 export async function listTasks(page = 1) {
   return (await apiClient.get<{ items: CaptureTask[]; stats: CaptureStats; has_more: boolean }>(base, { params: { page, page_size: 20 } })).data
 }
-export async function createTask(input: { target_type: CaptureTarget; target_id: number; duration_minutes: number; save_media: boolean }) {
+export async function createTask(input: { target_type: CaptureTarget; target_id: number; duration_minutes: number; save_media: boolean; raw: boolean }) {
   return (await apiClient.post<CaptureTask>(base, input)).data
 }
 export async function stopTask(id: string) { await apiClient.post(base + '/' + id + '/stop') }

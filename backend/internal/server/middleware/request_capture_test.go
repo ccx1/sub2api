@@ -112,4 +112,5 @@ func TestCaptureSensitiveReadAuditRoutes(t *testing.T) {
 	for _, route := range []string{"GET /api/v1/admin/request-captures/:task/requests/:record", "GET /api/v1/admin/request-captures/:task/requests/:record/content/:part", "GET /api/v1/admin/request-captures/:task/export", "GET /api/v1/admin/request-captures/:task/requests/:record/export"} {
 		require.NotEmpty(t, auditSensitiveReads[route])
 	}
+	require.NotEmpty(t, auditSensitiveReads["GET /api/v1/admin/accounts/:id/codex-ticket/nodes"])
 }

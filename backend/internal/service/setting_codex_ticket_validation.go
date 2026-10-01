@@ -73,6 +73,10 @@ func validateCodexTicketPolicy(cfg *config.OpenAICodexTicketConfig) error {
 			return invalidCodexTicketPolicy(fmt.Sprintf("%s 必须在 %d 到 %d 之间", item.name, item.min, item.max))
 		}
 	}
+	// 取票机制依赖已校验的 ttl_seconds：沉淀时长必须小于票据有效期。
+	if err := config.ValidateCodexTicketUsage(cfg); err != nil {
+		return invalidCodexTicketPolicy(err.Error())
+	}
 	if len(cfg.RetryBackoffSeconds) < 1 || len(cfg.RetryBackoffSeconds) > 16 {
 		return invalidCodexTicketPolicy("重试退避需要 1 到 16 个间隔")
 	}

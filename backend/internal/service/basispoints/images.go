@@ -1,14 +1,60 @@
 package basispoints
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 )
 
+const imageInputUnavailableMessage = "[Image input is unavailable because Excel / BPS image support is disabled. " +
+	"The model cannot see this image. Do not retry view_image or other image-reading tools while image support is disabled. " +
+	"Continue using the available text and explain this limitation if the task requires the image.]"
+
+// StripInputImages replaces image parts with explicit unavailable notices before
+// validation or attachment handling. Do not traverse tool arguments, schemas or
+// text: image-shaped application data there is not a Responses image input.
+func StripInputImages(raw []byte) ([]byte, error) {
+	var source object
+	if err := decode(raw, &source); err != nil || source == nil {
+		return nil, fmt.Errorf("invalid Basispoints request JSON")
+	}
+	input, _ := source["input"].([]any)
+	changed := false
+	for _, rawItem := range input {
+		item, _ := rawItem.(object)
+		field := "content"
+		switch text(item["type"]) {
+		case "", "message", "agent_message":
+		case "function_call_output", "custom_tool_call_output":
+			field = "output"
+		default:
+			continue
+		}
+		parts, ok := item[field].([]any)
+		if !ok {
+			continue
+		}
+		for i, rawPart := range parts {
+			part, _ := rawPart.(object)
+			if text(part["type"]) == "input_image" {
+				// Mixed outputs also need a notice: view_image may include only
+				// metadata or blank text beside the image. Silently dropping it
+				// makes the result look empty or successful and invites retries.
+				parts[i] = object{"type": "input_text", "text": imageInputUnavailableMessage}
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return raw, nil
+	}
+	return json.Marshal(source)
+}
+
 // ErrInlineImage marks base64 input that the caller may rewrite through ImageRelay.
-var ErrInlineImage = errors.New("basispoints does not accept data:image/base64 image input while image support is disabled; provide an HTTPS image URL, or disable Basispoints and start a new conversation to send this image")
+var ErrInlineImage = errors.New("basispoints does not accept data:image/base64 image input while image support is disabled; ask an administrator to enable the selected BPS account's 'Ignore image inputs when image support is disabled' option (openai_excel_bps_ignore_images), enable BPS image support, provide an HTTPS image URL, or disable Basispoints and start a new conversation to send this image")
 
 // Accept HTTPS URLs or validated native attachment references.
 func validateImage(part object) error {

@@ -67,6 +67,9 @@ type Session struct {
 	m               *Manager
 	mu              sync.Mutex
 	meta            Meta
+	raw             bool // 任一候选任务为原文模式：额外保留完整头、URL 与错误原文。
+	clientHeaders   map[string][]string
+	handshakes      []Handshake
 	candidates      []*runtimeTask
 	matched         map[string]bool
 	inbound         []inputChunk
@@ -110,6 +113,7 @@ func (m *Manager) Begin(meta Meta) *Session {
 	candidates := []*runtimeTask{}
 	matched := map[string]bool{}
 	accounts := false
+	raw := false
 	for id, t := range m.tasks {
 		if t.task.Status != "running" || !time.Now().Before(t.task.ExpiresAt) {
 			continue
@@ -120,6 +124,9 @@ func (m *Manager) Begin(meta Meta) *Session {
 			matched[id] = hit
 			if t.task.TargetType == "account" {
 				accounts = true
+			}
+			if t.task.Raw {
+				raw = true
 			}
 		}
 	}
@@ -138,9 +145,12 @@ func (m *Manager) Begin(meta Meta) *Session {
 	}
 	meta.RequestID = bounded(meta.RequestID, 128)
 	meta.ClientRequestID = bounded(meta.ClientRequestID, 128)
+	if raw {
+		meta.RawPath = meta.Path
+	}
 	meta.Path = bounded(SafeURL(meta.Path), 2048)
 	meta.Method = bounded(meta.Method, 16)
-	s := &Session{m: m, meta: meta, candidates: candidates, matched: matched, hasAccounts: accounts, streams: map[*Stream]struct{}{}, records: map[string]*recordState{}, finishedTargets: map[string]bool{}, usage: map[string]int64{}}
+	s := &Session{m: m, meta: meta, raw: raw, candidates: candidates, matched: matched, hasAccounts: accounts, streams: map[*Stream]struct{}{}, records: map[string]*recordState{}, finishedTargets: map[string]bool{}, usage: map[string]int64{}}
 	for _, t := range candidates {
 		t.refs++
 	}
@@ -160,6 +170,35 @@ func (s *Session) SetRoutedGroup(id int64) {
 	s.mu.Lock()
 	s.meta.RoutedGroupID = id
 	s.mu.Unlock()
+}
+
+// SetClientHeaders 保留客户端原始请求头（仅原文模式）。WebSocket 帧没有
+// 独立头，升级请求的头即整条连接的客户端头。
+func (s *Session) SetClientHeaders(h http.Header) {
+	if s == nil || !s.raw {
+		return
+	}
+	s.mu.Lock()
+	s.clientHeaders = RawHeaders(h)
+	s.mu.Unlock()
+}
+
+// Handshake 记录一次上游 WebSocket 握手（仅原文模式）。
+func (s *Session) Handshake(account int64, url string, reqHeaders http.Header, status int, respHeaders http.Header, body []byte, err error) {
+	if s == nil || !s.raw {
+		return
+	}
+	h := Handshake{AccountID: account, At: time.Now().UTC(), URL: url, RequestHeaders: RawHeaders(reqHeaders), Status: status, ResponseHeaders: RawHeaders(respHeaders), ResponseBody: string(body)}
+	if err != nil {
+		h.Error = err.Error()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || len(s.handshakes) >= 64 {
+		return
+	}
+	s.handshakes = append(s.handshakes, h)
+	s.bindAccountLocked(account)
 }
 func (s *Session) MarkPartial(reason string) {
 	if s == nil {
@@ -336,6 +375,9 @@ func (s *Session) AttemptResponse(n, status int, h http.Header, err error) {
 	if err != nil {
 		a.Error = transportdiag.Classify(err)
 		a.ErrorStage = "transport"
+		if s.raw {
+			a.ErrorDetail = err.Error()
+		}
 	}
 }
 func (s *Session) Finish(status int) {
@@ -387,6 +429,9 @@ func (s *Session) NewStream(stage string, attempt, turn int, ct string, h http.H
 		turn = s.turn
 	}
 	st := &Stream{s: s, part: Part{Name: fmt.Sprintf("%06d-%s.txt", n, stage), Stage: stage, Attempt: attempt, Turn: turn, ContentType: bounded(ct, 256), Headers: SafeHeaders(h)}, lastFlush: time.Now()}
+	if s.raw {
+		st.part.RawHeaders = RawHeaders(h)
+	}
 	s.streams[st] = struct{}{}
 	return st
 }
@@ -602,6 +647,8 @@ func (s *Session) enqueueLocked(part Part, p []byte, end bool, targets []string)
 }
 func (s *Session) snapshotLocked(r *Record) {
 	r.Meta = s.meta
+	r.ClientHeaders = s.clientHeaders
+	r.Handshakes = append([]Handshake(nil), s.handshakes...)
 	r.Turn = s.turn
 	r.Status = s.status
 	r.IsError = s.status >= 400 || s.resultError
@@ -758,7 +805,14 @@ func (m *Manager) process(e event) {
 				m.finishTarget(e.s, t)
 				continue
 			}
-			part = &partState{part: e.part, filter: newBodyFilter(e.part.ContentType, t.task.SaveMedia), charge: 24 << 10}
+			part = &partState{part: e.part, charge: 24 << 10}
+			if t.task.Raw {
+				part.filter = newRawBodyFilter()
+			} else {
+				// 同一会话可能同时命中原文与普通任务：普通任务不得带出原文头/URL。
+				part.part.RawHeaders, part.part.RawURL = nil, ""
+				part.filter = newBodyFilter(e.part.ContentType, t.task.SaveMedia)
+			}
 			r.parts[e.part.Name] = part
 		}
 		if part.ended {
@@ -848,6 +902,32 @@ func (m *Manager) finishRecord(r *recordState, t *runtimeTask, snapshot *Record)
 	r.Status, r.IsError = snapshot.Status, snapshot.IsError
 	r.ClientOutcome = snapshot.ClientOutcome
 	r.Attempts, r.Usage, r.ErrorCode = snapshot.Attempts, snapshot.Usage, snapshot.ErrorCode
+	r.Raw = t.task.Raw
+	if r.Raw {
+		r.ClientHeaders, r.Handshakes = snapshot.ClientHeaders, snapshot.Handshakes
+		seen := map[int64]bool{}
+		r.AccountIDs = nil
+		for _, a := range r.Attempts {
+			if a.AccountID > 0 && !seen[a.AccountID] {
+				seen[a.AccountID] = true
+				r.AccountIDs = append(r.AccountIDs, a.AccountID)
+			}
+		}
+		for _, h := range r.Handshakes {
+			if h.AccountID > 0 && !seen[h.AccountID] {
+				seen[h.AccountID] = true
+				r.AccountIDs = append(r.AccountIDs, h.AccountID)
+			}
+		}
+	} else {
+		// 普通任务：去除原文字段，保持原有脱敏语义。snapshot 在多个目标间
+		// 共享，先复制再清理，避免影响同会话的原文任务。
+		r.RawPath = ""
+		r.Attempts = append([]Attempt(nil), r.Attempts...)
+		for i := range r.Attempts {
+			r.Attempts[i].ErrorDetail, r.Attempts[i].ReadErrorDetail = "", ""
+		}
+	}
 	if snapshot.Partial && r.Reason == "" {
 		r.Partial, r.Reason = true, snapshot.Reason
 	}
@@ -858,7 +938,7 @@ func (m *Manager) finishRecord(r *recordState, t *runtimeTask, snapshot *Record)
 		}
 	}
 	for _, p := range r.parts {
-		if !p.ended && r.IsError {
+		if !p.ended && (r.IsError || r.Raw) {
 			tail, reason := p.filter.End()
 			p.part.Omitted = reason
 			r.Partial = true
@@ -876,7 +956,7 @@ func (m *Manager) finishRecord(r *recordState, t *runtimeTask, snapshot *Record)
 		r.Parts = append(r.Parts, p.part)
 	}
 	sort.Slice(r.Parts, func(i, j int) bool { return r.Parts[i].Name < r.Parts[j].Name })
-	if !r.IsError {
+	if !r.IsError && !r.Raw {
 		if r.Partial {
 			m.mu.Lock()
 			t.task.Skipped++
@@ -1015,7 +1095,7 @@ func (m *Manager) finishTarget(s *Session, t *runtimeTask) {
 		// A missing turn barrier must not attach a later turn's error to old data.
 		snap := snapshot
 		if r.Turn != snapshot.Turn {
-			snap = &Record{Turn: r.Turn}
+			snap = &Record{Meta: snapshot.Meta, ClientHeaders: snapshot.ClientHeaders, Turn: r.Turn}
 		}
 		m.finishRecord(r, t, snap)
 		delete(s.records, key)
@@ -1047,7 +1127,7 @@ func (b *observedBody) Read(p []byte) (int, error) {
 		if err == io.EOF {
 			b.observeIncomplete("eof_before_terminal")
 		} else {
-			b.observeReadError(readErrorClass(err))
+			b.observeReadError(readErrorClass(err), err.Error())
 		}
 	}
 	return n, err
@@ -1065,11 +1145,11 @@ func (b *observedBody) observeIncomplete(reason string) {
 	expectsTerminal, terminal := b.stream.expectsTerminal, b.stream.terminal
 	b.stream.mu.Unlock()
 	if b.stream.part.Stage == "upstream_response" && expectsTerminal && terminal == "" {
-		b.observeReadError(reason)
+		b.observeReadError(reason, "")
 	}
 }
 
-func (b *observedBody) observeReadError(class string) {
+func (b *observedBody) observeReadError(class, detail string) {
 	st := b.stream
 	st.mu.Lock()
 	outcome := responseObserver{terminal: st.terminal, failed: st.responseFailed}
@@ -1085,6 +1165,9 @@ func (b *observedBody) observeReadError(class string) {
 		a := &s.attempts[st.part.Attempt-1]
 		if a.ReadError == "" {
 			a.ReadError = class
+			if s.raw {
+				a.ReadErrorDetail = detail
+			}
 			if a.ErrorStage == "" {
 				a.ErrorStage = st.part.Stage
 			}
@@ -1140,6 +1223,9 @@ func (s *Session) ObserveHTTPRequest(req *http.Request, account int64) (int, fun
 	n := s.BeginAttempt(account)
 	st := s.NewStream("upstream_request", n, 0, req.Header.Get("Content-Type"), req.Header)
 	st.part.URL = SafeURL(req.URL.String())
+	if s.raw {
+		st.part.RawURL = req.URL.String()
+	}
 	req.Body = ObserveBody(req.Body, st)
 	return n, func(resp *http.Response, err error) {
 		_ = st.Close()
