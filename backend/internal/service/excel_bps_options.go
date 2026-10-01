@@ -18,12 +18,14 @@ const (
 
 // ExcelBPSOptions 是开启 Excel / BPS 时的子选项；Models 为 nil 表示对所有模型启用（兼容原设置）。
 type ExcelBPSOptions struct {
-	Models               *[]string `json:"models"`
-	AutoDisableOn403     bool      `json:"auto_disable_on_403"`
-	CacheCreationAsInput bool      `json:"cache_creation_as_input"`
+	Models                 *[]string `json:"models"`
+	AutoDisableOn403       bool      `json:"auto_disable_on_403"`
+	CacheCreationAsInput   bool      `json:"cache_creation_as_input"`
+	IgnoreEncryptedContent bool      `json:"ignore_encrypted_content"`
+	OmitUnsupportedTools   bool      `json:"omit_unsupported_tools"`
 }
 
-var excelBPSExtraKeys = []string{excelBPSExtraKey, excelBPSModelsExtraKey, excelBPSCacheCreationAsInputExtraKey, excelBPSAutoDisableOn403ExtraKey}
+var excelBPSExtraKeys = []string{excelBPSExtraKey, excelBPSModelsExtraKey, excelBPSCacheCreationAsInputExtraKey, excelBPSAutoDisableOn403ExtraKey, ExcelBPSIgnoreEncryptedContentKey, ExcelBPSOmitUnsupportedToolsKey}
 
 // ExcelBPSExtraKeys 返回 BPS 配置族的全部 extra 键。
 func ExcelBPSExtraKeys() []string { return append([]string{}, excelBPSExtraKeys...) }
@@ -64,6 +66,12 @@ func excelBPSExtra(options ExcelBPSOptions) map[string]any {
 	if options.CacheCreationAsInput {
 		extra[excelBPSCacheCreationAsInputExtraKey] = true
 	}
+	if options.IgnoreEncryptedContent {
+		extra[ExcelBPSIgnoreEncryptedContentKey] = true
+	}
+	if options.OmitUnsupportedTools {
+		extra[ExcelBPSOmitUnsupportedToolsKey] = true
+	}
 	return extra
 }
 
@@ -103,8 +111,10 @@ func ExcelBPSOptionsFromAccount(a *Account) *ExcelBPSOptions {
 		return nil
 	}
 	options := &ExcelBPSOptions{
-		AutoDisableOn403:     a.IsExcelBPSAutoDisableOn403Enabled(),
-		CacheCreationAsInput: a.IsExcelBPSCacheCreationAsInputEnabled(),
+		AutoDisableOn403:       a.IsExcelBPSAutoDisableOn403Enabled(),
+		CacheCreationAsInput:   a.IsExcelBPSCacheCreationAsInputEnabled(),
+		IgnoreEncryptedContent: a.IsExcelBPSIgnoreEncryptedContentEnabled(),
+		OmitUnsupportedTools:   a.IsExcelBPSOmitUnsupportedToolsEnabled(),
 	}
 	if raw, scoped := a.Extra[excelBPSModelsExtraKey]; scoped {
 		models := []string{}

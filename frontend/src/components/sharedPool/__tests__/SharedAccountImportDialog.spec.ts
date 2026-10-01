@@ -110,15 +110,19 @@ describe('shared account import', () => {
     await wrapper.get('[data-testid="shared-import-excel-bps-all-models"]').setValue(false)
     expect(wrapper.find('#shared-import-codex-ticket').exists()).toBe(false)
     await wrapper.get('[data-testid="shared-import-excel-bps-auto-disable-on-403"]').setValue(true)
+    await wrapper.get('[data-testid="shared-import-excel-bps-ignore-encrypted-content"]').setValue(true)
+    await wrapper.get('[data-testid="shared-import-excel-bps-omit-unsupported-tools"]').setValue(true)
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(importAccounts.mock.calls[0][0].defaults).toMatchObject({ excel_bps_enabled: true, excel_bps_options: {
-      models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false
+      models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false, ignore_encrypted_content: true, omit_unsupported_tools: true
     } })
     wrapper.unmount()
 
-    const options = { models: null, auto_disable_on_403: false, cache_creation_as_input: true }
+    const options = { models: null, auto_disable_on_403: false, cache_creation_as_input: true, ignore_encrypted_content: true, omit_unsupported_tools: true }
     const inherited = render({ enabled: true, concurrency: 1, protection_enabled: true, excel_bps_enabled: true, excel_bps_options: options })
     expect((inherited.get('[data-testid="shared-import-excel-bps-cache-creation-as-input"]').element as HTMLInputElement).checked).toBe(true)
+    expect((inherited.get('[data-testid="shared-import-excel-bps-ignore-encrypted-content"]').element as HTMLInputElement).checked).toBe(true)
+    expect((inherited.get('[data-testid="shared-import-excel-bps-omit-unsupported-tools"]').element as HTMLInputElement).checked).toBe(true)
     await inherited.get('textarea').setValue('{}')
     await inherited.get('form').trigger('submit'); await flushPromises()
     expect(importAccounts.mock.calls[1][0].defaults).toMatchObject({ excel_bps_enabled: true, excel_bps_options: options })

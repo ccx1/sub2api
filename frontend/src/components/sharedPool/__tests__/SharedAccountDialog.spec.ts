@@ -239,17 +239,19 @@ describe('shared account creation and edit boundaries', () => {
     expect(wrapper.find('#shared-codex-ticket').exists()).toBe(false)
     await wrapper.get('[data-testid="shared-excel-bps-auto-disable-on-403"]').setValue(true)
     await wrapper.get('[data-testid="shared-excel-bps-cache-creation-as-input"]').setValue(true)
+    await wrapper.get('[data-testid="shared-excel-bps-ignore-encrypted-content"]').setValue(true)
+    await wrapper.get('[data-testid="shared-excel-bps-omit-unsupported-tools"]').setValue(true)
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    const options = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true }
+    const options = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true, ignore_encrypted_content: true, omit_unsupported_tools: true }
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ excel_bps_enabled: true, excel_bps_options: options }))
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
     expect(wrapper.emitted('import')?.[0]?.[0]).toEqual(expect.objectContaining({ excel_bps_enabled: true, excel_bps_options: options }))
   })
 
   it('edits Excel / BPS only when the saved configuration changes', async () => {
-    const saved = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false }
+    const saved = { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: false, ignore_encrypted_content: true, omit_unsupported_tools: true }
     const wrapper = render(true, { excel_bps_enabled: true, excel_bps_options: saved })
     expect(wrapper.get('#shared-excel-bps').attributes('aria-checked')).toBe('true')
     expect((wrapper.get('[data-testid="shared-excel-bps-auto-disable-on-403"]').element as HTMLInputElement).checked).toBe(true)

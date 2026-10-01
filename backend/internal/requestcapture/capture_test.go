@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -102,7 +103,7 @@ func (s *memoryStore) Records(_ context.Context, task, rid string, errorsOnly bo
 	for _, b := range s.records {
 		var r Record
 		_ = json.Unmarshal(b, &r)
-		if r.TaskID == task && (rid == "" || r.RequestID == rid) && (!errorsOnly || (r.IsError && r.FinishedAt != nil)) {
+		if r.TaskID == task && (rid == "" || r.RequestID == rid) && (!errorsOnly || ((r.IsError || r.Raw) && r.FinishedAt != nil)) {
 			out = append(out, r)
 		}
 	}
@@ -152,7 +153,7 @@ func testManager(t *testing.T) (*Manager, *memoryStore) {
 }
 func task(t *testing.T, m *Manager, kind string, id int64, media bool) *Task {
 	t.Helper()
-	v, err := m.Create(context.Background(), CreateTask{kind, id, 10, media}, kind)
+	v, err := m.Create(context.Background(), CreateTask{TargetType: kind, TargetID: id, DurationMinutes: 10, SaveMedia: media}, kind)
 	require.NoError(t, err)
 	return v
 }
@@ -228,6 +229,56 @@ func TestFilterSSEAndMediaOptIn(t *testing.T) {
 	out = f.Write([]byte(`{"file_data":"BASE64","api_key":"SECRET"}`))
 	require.Contains(t, string(out), "BASE64")
 	require.NotContains(t, string(out), "SECRET")
+}
+func TestRawTaskKeepsSuccessAndUnredactedPackets(t *testing.T) {
+	m, _ := testManager(t)
+	v, err := m.Create(context.Background(), CreateTask{TargetType: "user", TargetID: 1, DurationMinutes: 10, Raw: true}, "admin")
+	require.NoError(t, err)
+	require.True(t, v.Raw)
+	m.SetAccountNamer(func(_ context.Context, ids []int64) map[int64]string {
+		out := map[int64]string{}
+		for _, id := range ids {
+			out[id] = fmt.Sprintf("acct-%d", id)
+		}
+		return out
+	})
+	s := m.Begin(Meta{RequestID: "raw-id", UserID: 1, APIKeyID: 5, APIKeyName: "key-five", Path: "/v1/responses", Protocol: "http"})
+	require.NotNil(t, s)
+	s.SetClientHeaders(http.Header{"Authorization": {"Bearer CLIENT-SECRET"}})
+	body := `{"model":"m","input":"hi","api_key":"BODY-SECRET","image_url":"data:image/png;base64,aGVsbG8="}`
+	s.ClientRequest([]byte(body), "application/json", nil)
+	a := s.BeginAttempt(42)
+	st := s.NewStream("upstream_request", a, 0, "application/json", http.Header{"Authorization": {"Bearer UPSTREAM-TOKEN"}})
+	_, _ = st.Write([]byte(body))
+	_ = st.Close()
+	s.Handshake(42, "wss://example/ws", http.Header{"Authorization": {"Bearer UPSTREAM-TOKEN"}}, 101, nil, nil, nil)
+	s.AttemptResponse(a, 200, nil, nil)
+	s.Finish(200)
+	drain(t, m)
+	rs, err := m.Records(context.Background(), v.ID, "", true, 20, 0)
+	require.NoError(t, err)
+	require.Len(t, rs, 1)
+	r, err := m.Record(context.Background(), v.ID, rs[0].ID)
+	require.NoError(t, err)
+	require.True(t, r.Raw)
+	require.False(t, r.IsError)
+	require.EqualValues(t, 5, r.APIKeyID)
+	require.Equal(t, []int64{42}, r.AccountIDs)
+	require.Equal(t, "acct-42", r.AccountNames[42])
+	require.Equal(t, "Bearer CLIENT-SECRET", r.ClientHeaders["Authorization"][0])
+	require.Len(t, r.Handshakes, 1)
+	require.Equal(t, "Bearer UPSTREAM-TOKEN", r.Handshakes[0].RequestHeaders["Authorization"][0])
+	text := partsText(t, m, *r)
+	require.Contains(t, text, "BODY-SECRET")
+	require.Contains(t, text, "aGVsbG8=")
+	found := false
+	for _, p := range r.Parts {
+		if p.Stage == "upstream_request" {
+			found = true
+			require.Equal(t, "Bearer UPSTREAM-TOKEN", p.RawHeaders["Authorization"][0])
+		}
+	}
+	require.True(t, found)
 }
 func TestTargetAccountAndOverlappingTasks(t *testing.T) {
 	m, _ := testManager(t)

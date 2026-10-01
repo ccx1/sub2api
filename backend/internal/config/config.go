@@ -1274,6 +1274,14 @@ type OpenAICodexTicketConfig struct {
 	WorkspaceOriginFailureThreshold int `mapstructure:"workspace_origin_failure_threshold" json:"workspace_origin_failure_threshold,omitempty"`
 	// WorkspaceOriginSilenceSeconds origin 静默时长（秒），到期后半开探测。
 	WorkspaceOriginSilenceSeconds int `mapstructure:"workspace_origin_silence_seconds" json:"workspace_origin_silence_seconds,omitempty"`
+	// UsageMode 控制业务请求如何从票池取票：immediate（默认，即取即用，按票池顺序取首张可用票）/
+	// aged（只取发布后已沉淀满 MinTicketAgeSeconds 的票，最老的优先）。只影响业务取票，不影响打票与复验。
+	UsageMode string `mapstructure:"usage_mode" json:"usage_mode,omitempty"`
+	// MinTicketAgeSeconds 仅 aged 模式生效：票据自首次采集起至少经过该秒数才允许被业务请求使用。
+	MinTicketAgeSeconds int `mapstructure:"min_ticket_age_seconds" json:"min_ticket_age_seconds,omitempty"`
+	// ConsumeAfterUse 为 true 时一票一用：业务请求取用后即标记消耗、不再发放，
+	// 并在下一次票池发布时从账号票库中删除。默认 false（票据可被重复使用直到过期）。
+	ConsumeAfterUse bool `mapstructure:"consume_after_use" json:"consume_after_use,omitempty"`
 }
 
 type CodexTicketTierRule struct {

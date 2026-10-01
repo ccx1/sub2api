@@ -2315,6 +2315,14 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if receipt := req.CodexTicketReceipt; receipt != nil && receipt.service != nil {
 		receipt.observeHandshake(ctx, receipt.service, handshakeHeaders)
 	}
+	if capture := requestcapture.FromContext(ctx); capture != nil && req.Account != nil {
+		var handshakeBody []byte
+		var handshakeErr *openAIWSHandshakeError
+		if errors.As(err, &handshakeErr) && handshakeErr != nil {
+			handshakeBody = handshakeErr.Body
+		}
+		capture.Handshake(req.Account.ID, req.WSURL, headers, status, handshakeHeaders, handshakeBody, err)
+	}
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte

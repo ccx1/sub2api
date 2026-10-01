@@ -71,6 +71,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	// 此入口走原生协议，不能继承同模型的 BPS 专用冷却。
+	ctx = WithOpenAIExcelBPSRouting(ctx, nil)
 	latest, admissionErr := s.admitOpenAITurn(
 		context.WithoutCancel(ctx),
 		c,

@@ -48,5 +48,34 @@ export default {
     success: 'Ticket issued', ticket_rejected: 'Ticket rejected by policy', model_mismatch: 'Target model mismatch', model_failed: 'Model response failed',
     upstream_error: 'Upstream error', verification_failed: 'Business verification failed', verification_deferred: 'Harvested, verification deferred',
     canceled: 'Canceled', controls_changed: 'Stopped after configuration change', failed: 'Ticket not issued'
+  },
+  codexTicketNodes: {
+    menu: 'Node capture', title: 'Node capture', refresh: 'Refresh', copyJson: 'Copy all JSON', copied: 'Node capture JSON copied',
+    rawWarning: 'Testing only: cookies, STATE, Authorization and messages below are shown raw. Do not share screenshots. Probe results are only returned in this response and are never written to the ticket pool, harvest history or quality records.',
+    loading: 'Loading node information…', failed: 'Node capture failed', overview: 'Account and egress',
+    proxyUnavailable: 'Proxy unavailable', notConfigured: 'Not configured as a ticket model', noSlots: 'No tickets', businessSelected: 'Selected for business',
+    usable: 'Usable', unusable: 'Unusable', crossRegion: 'Cross-region node', pending: 'Pending cookies',
+    connections: 'WS connection pool', noConnections: 'No WS connections', handshakeHeaders: 'Handshake response headers', truncated: 'truncated',
+    sentCookies: 'Sent cookies', receivedCookies: 'Returned cookies (Set-Cookie)', noCookies: 'No cookies',
+    excludedByMode: 'Not sent under current cookie mode', decodeError: 'Decode failed',
+    probeTitle: 'Node probe', probeHint: 'Sends real probe requests upstream from the selected source and records the sent/returned __oailb node and latency per round to check whether the node is pinned.',
+    runProbe: 'Run probe', probing: 'Probing…', businessSlot: 'Current business ticket', roundDetail: 'Round {index} details',
+    request: 'Raw request', response: 'Raw response', notRecorded: 'Not recorded', rawJson: 'Raw JSON',
+    fields: {
+      accountStatus: 'Account status', cookieMode: 'Cookie mode', proxy: 'Current egress', egressCountry: 'Egress country/region', ticketEnabled: 'Ticket / harvest / random proxy',
+      credentialMode: 'Credential/session/refresh', pool: 'Ticket pool', strategy: 'Request strategy', routeAffinity: 'Route affinity', serverTime: 'Server time',
+      model: 'Model', source: 'Source', slot: 'Ticket slot', count: 'Rounds (1–5)', slotNode: 'Ticket node', duration: 'Total duration', startedAt: 'Started at'
+    },
+    sources: { ticket: 'Replay ticket cookies', sticky_jar: 'Start empty, keep cookies', empty_jar: 'Empty cookies each round' },
+    sourceHints: {
+      ticket: 'Uses the selected ticket session and cookies (filtered by the current cookie mode) to see whether the node is kept.',
+      sticky_jar: 'Round 1 sends no cookies; later rounds reuse returned cookies to see whether upstream pins one session to one node.',
+      empty_jar: 'Every round uses a new session without cookies to observe the natural node distribution.'
+    },
+    rounds: { index: 'Round', status: 'Status', http: 'HTTP', latency: 'Header / first byte / first delta / total (ms)', node: 'Sent → returned node', outcome: 'Node change', effective: 'Effective node' },
+    outcomes: {
+      no_route: 'No node cookie', assigned: 'Newly assigned', kept: 'Not returned (kept)', cleared: 'Cleared', unparsed: 'Unparseable',
+      refreshed: 'Same node refreshed', changed: 'Node changed', no_response: 'No response', skipped: 'Skipped'
+    }
   }
 }

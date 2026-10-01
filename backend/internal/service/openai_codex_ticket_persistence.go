@@ -53,6 +53,8 @@ func (s *OpenAIGatewayService) codexTicketBindingForConfig(account *Account, cfg
 	}
 	// 采集出口独立核验，不参与业务票据或通用规则绑定。
 	cfg.HarvestProxyURL = ""
+	// 取票机制只决定业务如何取票，切换时不能让已发布票据整体失配。
+	cfg = config.WithoutCodexTicketUsagePolicy(cfg)
 	extra := make(map[string]any)
 	for _, key := range []string{ProxyModeExtraKey, OpenAICodexTicketEnabledExtraKey,
 		RandomProxyEmptyPoolPolicyExtraKey, RandomProxyPoolScopeExtraKey,

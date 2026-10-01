@@ -454,6 +454,7 @@ type OpenAIGatewayService struct {
 	excelBPSImagesMu      sync.Mutex
 	excelBPSImages        *basispoints.ImageRelay
 	excelBPSAttachments   basispoints.AttachmentCache
+	excelBPSCooldownUntil sync.Map // key: int64(accountID), value: time.Time
 	codexHarvestRunMu     sync.RWMutex
 	accountRepo           AccountRepository
 	proxyRepo             ProxyRepository

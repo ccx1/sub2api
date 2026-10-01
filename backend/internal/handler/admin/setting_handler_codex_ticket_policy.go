@@ -38,6 +38,7 @@ func (h *SettingHandler) UpdateCodexTicketSettings(c *gin.Context) {
 		return
 	}
 	middleware.SetAuditAction(c, "codex.ticket.settings.update")
-	middleware.SetAuditExtra(c, map[string]any{"enabled": updated.Enabled, "credential_mode": updated.CredentialMode, "cookie_ttl_seconds": updated.CookieTTLSeconds, "cookie_refresh_before_seconds": updated.CookieRefreshBeforeSeconds, "verify_business": config.CodexTicketBusinessVerificationEnabled(updated), "business_verification_rounds": updated.BusinessVerificationRounds, "session_mode": updated.SessionMode, "refresh_strategy": updated.RefreshStrategy, "length_mode": updated.LengthMode, "tier_rule_count": len(updated.TierRules), "models": updated.Models})
+	middleware.SetAuditExtra(c, map[string]any{"enabled": updated.Enabled, "credential_mode": updated.CredentialMode, "cookie_ttl_seconds": updated.CookieTTLSeconds, "cookie_refresh_before_seconds": updated.CookieRefreshBeforeSeconds, "verify_business": config.CodexTicketBusinessVerificationEnabled(updated), "business_verification_rounds": updated.BusinessVerificationRounds, "session_mode": updated.SessionMode, "refresh_strategy": updated.RefreshStrategy, "length_mode": updated.LengthMode, "tier_rule_count": len(updated.TierRules), "models": updated.Models,
+		"usage_mode": updated.UsageMode, "min_ticket_age_seconds": updated.MinTicketAgeSeconds, "consume_after_use": updated.ConsumeAfterUse})
 	response.Success(c, updated)
 }

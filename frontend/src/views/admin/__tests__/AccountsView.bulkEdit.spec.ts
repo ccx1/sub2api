@@ -5,6 +5,7 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
+  getById,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getBatchTodayStats,
@@ -17,6 +18,7 @@ const {
   showSuccess
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  getById: vi.fn(),
   listWithEtag: vi.fn(),
   getUpstreamBillingRatesWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
@@ -34,6 +36,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       list: listAccounts,
+      getById,
       listWithEtag,
       getUpstreamBillingRatesWithEtag,
       getBatchTodayStats,
@@ -107,10 +110,12 @@ const ProbeDataTableStub = {
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
-  emits: ['edit-filtered', 'probe-upstream-billing'],
+  emits: ['edit-selected', 'edit-filtered', 'probe-upstream-billing', 'clear'],
   template: `
     <div>
+      <button data-test="edit-selected" @click="$emit('edit-selected')">edit selected</button>
       <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
+      <button data-test="clear-selection" @click="$emit('clear')">clear</button>
       <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
     </div>
   `
@@ -122,8 +127,46 @@ const PaginationStub = {
 }
 
 const BulkEditAccountModalStub = {
-  props: ['show', 'target', 'proxies'],
+  props: ['show', 'target', 'proxies', 'accountIds'],
   template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
+}
+
+const makeAccount = (id: number, type = 'oauth') => ({
+  id, name: 'account-' + id, platform: 'openai', type, status: 'active',
+  schedulable: true, created_at: '2026-09-28T00:00:00Z', updated_at: '2026-09-28T00:00:00Z'
+})
+
+const mountBulkScope = () => mount(AccountsView, {
+  global: {
+    stubs: {
+      AppLayout: { template: '<div><slot /></div>' },
+      TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
+      DataTable: DataTableStub,
+      Pagination: PaginationStub,
+      AccountBulkActionsBar: AccountBulkActionsBarStub,
+      BulkEditAccountModal: BulkEditAccountModalStub,
+      AccountTableActions: true, AccountTableFilters: true, ConfirmDialog: true,
+      AccountActionMenu: true, ImportDataModal: true, ReAuthAccountModal: true,
+      AccountTestModal: true, AccountStatsModal: true, ScheduledTestsPanel: true,
+      SyncFromCrsModal: true, TempUnschedStatusModal: true, ErrorPassthroughRulesModal: true,
+      TLSFingerprintProfilesModal: true, CreateAccountModal: true, EditAccountModal: true,
+      PlatformTypeBadge: true, AccountCapacityCell: true, AccountStatusIndicator: true,
+      AccountTodayStatsCell: true, AccountGroupsCell: true, AccountUsageCell: true, Icon: true
+    }
+  }
+})
+
+const selectFirstPageAndNavigate = async () => {
+  listAccounts.mockImplementation(async (page: number) => ({
+    items: [makeAccount(page, page === 1 ? 'oauth' : 'apikey')],
+    total: 2, page, page_size: 1, pages: 2
+  }))
+  const wrapper = mountBulkScope()
+  await flushPromises()
+  await wrapper.get('[data-test="select-row"] input').setValue(true)
+  await wrapper.get('[data-test="next-page"]').trigger('click')
+  await flushPromises()
+  return wrapper
 }
 
 describe('admin AccountsView bulk edit scope', () => {
@@ -131,6 +174,7 @@ describe('admin AccountsView bulk edit scope', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
+    getById.mockReset()
     listWithEtag.mockReset()
     getUpstreamBillingRatesWithEtag.mockReset()
     getBatchTodayStats.mockReset()
@@ -165,6 +209,153 @@ describe('admin AccountsView bulk edit scope', () => {
     getAllGroups.mockResolvedValue([])
     probeUpstreamBilling.mockResolvedValue({})
     probeUpstreamBillingBatch.mockResolvedValue([])
+  })
+
+  it('retains the full selected OAuth target after navigating to an unselected page', async () => {
+    getById.mockResolvedValue(makeAccount(1))
+    const wrapper = await selectFirstPageAndNavigate()
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    await flushPromises()
+
+    expect(getById).toHaveBeenCalledTimes(1)
+    expect(getById).toHaveBeenCalledWith(1)
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props()).toMatchObject({
+      show: true, accountIds: [1],
+      target: { mode: 'selected', accountIds: [1], selectedPlatforms: ['openai'], selectedTypes: ['oauth'] }
+    })
+    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual([1])
+    wrapper.unmount()
+  })
+
+  it('includes off-page OAuth accounts when the selected current page contains API keys', async () => {
+    getById.mockResolvedValue(makeAccount(1))
+    const wrapper = await selectFirstPageAndNavigate()
+    await wrapper.get('[data-test="select-row"] input').setValue(true)
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    await flushPromises()
+
+    expect(getById).toHaveBeenCalledTimes(1)
+    expect(getById).toHaveBeenCalledWith(1)
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toEqual({
+      mode: 'selected', accountIds: [1, 2], selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey']
+    })
+    wrapper.unmount()
+  })
+
+  it('keeps the editor closed when an off-page account cannot be loaded', async () => {
+    getById.mockRejectedValue(new Error('detail unavailable'))
+    const wrapper = await selectFirstPageAndNavigate()
+    await wrapper.get('[data-test="select-row"] input').setValue(true)
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('show')).toBe(false)
+    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual([1, 2])
+    expect(showError).toHaveBeenCalledWith('detail unavailable')
+    wrapper.unmount()
+  })
+
+  it('ignores repeat clicks and discards metadata after the selection changes', async () => {
+    let resolveDetail!: (account: ReturnType<typeof makeAccount>) => void
+    getById.mockImplementation(() => new Promise(resolve => { resolveDetail = resolve }))
+    const wrapper = await selectFirstPageAndNavigate()
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    await wrapper.get('[data-test="clear-selection"]').trigger('click')
+    resolveDetail(makeAccount(1))
+    await flushPromises()
+
+    expect(getById).toHaveBeenCalledTimes(1)
+    expect(getById).toHaveBeenCalledWith(1)
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('show')).toBe(false)
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('classifies filtered targets using every page, including later incompatible accounts', async () => {
+    listAccounts.mockImplementation(async (page: number, pageSize: number) => pageSize === 1000
+      ? { items: page === 1 ? Array.from({ length: 1000 }, (_, index) => makeAccount(index + 1)) : [makeAccount(1001, 'apikey')], total: 1001, pages: 2 }
+      : { items: [makeAccount(1)], total: 1001, pages: 51 })
+    const wrapper = mountBulkScope()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledWith(2, 1000, expect.objectContaining({ lite: '1', include_scheduler_score: '0' }))
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toMatchObject({
+      mode: 'filtered', previewCount: 1001, selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey']
+    })
+    expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('loads missing selected accounts in batches of at most eight', async () => {
+    const selected = Array.from({ length: 9 }, (_, index) => makeAccount(index + 1))
+    listAccounts.mockImplementation(async (page: number) => ({
+      items: page === 1 ? selected : [makeAccount(10)], total: 10, pages: 2
+    }))
+    const resolves = new Map<number, (account: ReturnType<typeof makeAccount>) => void>()
+    getById.mockImplementation((id: number) => new Promise(resolve => { resolves.set(id, resolve) }))
+    const wrapper = mountBulkScope()
+    await flushPromises()
+    for (const input of wrapper.findAll('[data-test="select-row"] input')) await input.setValue(true)
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    expect(getById).toHaveBeenCalledTimes(8)
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('show')).toBe(false)
+    for (const [id, resolve] of resolves) resolve(makeAccount(id))
+    await flushPromises()
+    expect(getById).toHaveBeenCalledTimes(9)
+    resolves.get(9)!(makeAccount(9))
+    await flushPromises()
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toMatchObject({
+      accountIds: selected.map(account => account.id), selectedTypes: ['oauth']
+    })
+    wrapper.unmount()
+  })
+
+  it('discards filtered metadata when the filter changes during loading', async () => {
+    let resolvePage!: (page: { items: ReturnType<typeof makeAccount>[]; total: number; pages: number }) => void
+    listAccounts.mockImplementation((_page: number, pageSize: number) => pageSize === 1000
+      ? new Promise(resolve => { resolvePage = resolve })
+      : Promise.resolve({ items: [makeAccount(1)], total: 1, pages: 1 }))
+    const wrapper = mountBulkScope()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('update:filters', { type: 'apikey' })
+    resolvePage({ items: [makeAccount(1)], total: 1, pages: 1 })
+    await flushPromises()
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('show')).toBe(false)
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not report a pending target read failure after the view is unmounted', async () => {
+    let rejectDetail!: (reason: Error) => void
+    getById.mockImplementation(() => new Promise((_resolve, reject) => { rejectDetail = reject }))
+    const wrapper = await selectFirstPageAndNavigate()
+    await wrapper.get('[data-test="edit-selected"]').trigger('click')
+    wrapper.unmount()
+    rejectDetail(new Error('late failure'))
+    await flushPromises()
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it.each(['failure', 'incomplete'])('does not open filtered editing after a later page is %s', async scenario => {
+    listAccounts.mockImplementation(async (page: number, pageSize: number) => {
+      if (pageSize !== 1000) return { items: [makeAccount(1)], total: 2, pages: 2 }
+      if (page === 2 && scenario === 'failure') throw new Error('page unavailable')
+      return { items: page === 1 ? [makeAccount(1)] : [], total: 2, pages: 2 }
+    })
+    const wrapper = mountBulkScope()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.getComponent(BulkEditAccountModalStub).props('show')).toBe(false)
+    expect(showError).toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {

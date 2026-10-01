@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -21,6 +22,21 @@ type RequestCaptureHandler struct {
 }
 
 func NewRequestCaptureHandler(manager *requestcapture.Manager, users service.UserRepository, accounts service.AccountRepository, groups service.GroupRepository) *RequestCaptureHandler {
+	if manager != nil && accounts != nil {
+		manager.SetAccountNamer(func(ctx context.Context, ids []int64) map[int64]string {
+			rows, err := accounts.GetByIDs(ctx, ids)
+			if err != nil {
+				return nil
+			}
+			names := make(map[int64]string, len(rows))
+			for _, a := range rows {
+				if a != nil {
+					names[a.ID] = a.Name
+				}
+			}
+			return names
+		})
+	}
 	return &RequestCaptureHandler{manager, users, accounts, groups}
 }
 func (h *RequestCaptureHandler) Gate(c *gin.Context) {

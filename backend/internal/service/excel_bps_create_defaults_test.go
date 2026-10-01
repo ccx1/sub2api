@@ -82,16 +82,24 @@ func TestAccountImportSettingsExcelBPSRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, settings.ExcelBPSEnabled)
 	settings.ExcelBPSEnabled = true
+	settings.ExcelBPSOptions.IgnoreEncryptedContent = true
+	settings.ExcelBPSOptions.OmitUnsupportedTools = true
 	_, err = svc.UpdateAccountImportSettings(ctx, *settings)
 	require.NoError(t, err)
 	reread, err := svc.GetAccountImportSettings(ctx)
 	require.NoError(t, err)
 	require.True(t, reread.ExcelBPSEnabled)
+	require.True(t, reread.ExcelBPSOptions.IgnoreEncryptedContent)
+	require.True(t, reread.ExcelBPSOptions.OmitUnsupportedTools)
+	require.Contains(t, repo.raw, `"ignore_encrypted_content":true`)
+	require.Contains(t, repo.raw, `"omit_unsupported_tools":true`)
 
 	legacy := &accountImportSettingsRepoStub{raw: `{"enabled":true,"protection_enabled":true,"codex_ticket_enabled":true,"proxy_mode":"preserve","proxy_id":null,"extra":{}}`}
 	old, err := (&SettingService{settingRepo: legacy}).GetAccountImportSettings(ctx)
 	require.NoError(t, err, "旧配置缺少 excel_bps_enabled 时应按关闭读取")
 	require.False(t, old.ExcelBPSEnabled)
+	require.False(t, old.ExcelBPSOptions.IgnoreEncryptedContent)
+	require.False(t, old.ExcelBPSOptions.OmitUnsupportedTools)
 }
 
 func TestSharedPoolCreateExcelBPSSetsFlagAndRejectsIneligible(t *testing.T) {
@@ -210,7 +218,7 @@ func TestSharedPoolCreateExcelBPSOptionsKeepTicketForScopedModels(t *testing.T) 
 	models := []string{"gpt-6-astra"}
 	in := SharedPoolAccountInput{Name: "mine", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 3,
 		Credentials: map[string]any{"access_token": "test-token", "plan_type": "pro"}, ExcelBPSEnabled: &enabled,
-		ExcelBPSOptions: &ExcelBPSOptions{Models: &models, AutoDisableOn403: true}}
+		ExcelBPSOptions: &ExcelBPSOptions{Models: &models, AutoDisableOn403: true, IgnoreEncryptedContent: true, OmitUnsupportedTools: true}}
 	accounts := &sharedTicketAccounts{}
 	s := &SharedPoolService{repo: &sharedTicketCreateRepo{accounts: accounts}, accounts: accounts, earnings: sharedPoolTotalsStub{}}
 	view, err := s.Create(context.Background(), 7, in)
@@ -219,11 +227,15 @@ func TestSharedPoolCreateExcelBPSOptionsKeepTicketForScopedModels(t *testing.T) 
 	require.Equal(t, true, extra[excelBPSExtraKey])
 	require.Equal(t, []string{"gpt-6-astra"}, extra[excelBPSModelsExtraKey])
 	require.Equal(t, true, extra[excelBPSAutoDisableOn403ExtraKey])
+	require.True(t, accounts.account.IsExcelBPSIgnoreEncryptedContentEnabled())
+	require.True(t, accounts.account.IsExcelBPSOmitUnsupportedToolsEnabled())
 	require.NotContains(t, extra, excelBPSCacheCreationAsInputExtraKey)
 	require.True(t, isOpenAICodexTicketAccount(accounts.account), "仅部分模型走 BPS 时其他模型仍可打票")
 	require.NotNil(t, view.ExcelBPSOptions)
 	require.Equal(t, []string{"gpt-6-astra"}, *view.ExcelBPSOptions.Models)
 	require.True(t, view.ExcelBPSOptions.AutoDisableOn403)
+	require.True(t, view.ExcelBPSOptions.IgnoreEncryptedContent)
+	require.True(t, view.ExcelBPSOptions.OmitUnsupportedTools)
 	require.NotNil(t, view.ExcelBPSEnabled)
 	require.True(t, *view.ExcelBPSEnabled)
 }
@@ -231,7 +243,7 @@ func TestSharedPoolCreateExcelBPSOptionsKeepTicketForScopedModels(t *testing.T) 
 func TestAccountImportDefaultsExcelBPSOptions(t *testing.T) {
 	settings := excelBPSImportSettings()
 	models := []string{"gpt-6-astra"}
-	settings.ExcelBPSOptions = ExcelBPSOptions{Models: &models, AutoDisableOn403: true, CacheCreationAsInput: true}
+	settings.ExcelBPSOptions = ExcelBPSOptions{Models: &models, AutoDisableOn403: true, CacheCreationAsInput: true, IgnoreEncryptedContent: true, OmitUnsupportedTools: true}
 	svc, _ := accountImportDefaultTestService(t, settings)
 	input := accountImportDefaultTestInput()
 	input.Type = AccountTypeOAuth
@@ -241,6 +253,8 @@ func TestAccountImportDefaultsExcelBPSOptions(t *testing.T) {
 	require.Equal(t, []string{"gpt-6-astra"}, account.Extra[excelBPSModelsExtraKey])
 	require.True(t, account.IsExcelBPSAutoDisableOn403Enabled())
 	require.True(t, account.IsExcelBPSCacheCreationAsInputEnabled())
+	require.True(t, account.IsExcelBPSIgnoreEncryptedContentEnabled())
+	require.True(t, account.IsExcelBPSOmitUnsupportedToolsEnabled())
 	require.True(t, isOpenAICodexTicketAccount(account), "限定模型时其他模型保留打票")
 
 	// 导入文件显式写了任何 BPS 字段时，整组以文件为准。
@@ -252,6 +266,8 @@ func TestAccountImportDefaultsExcelBPSOptions(t *testing.T) {
 	require.NotContains(t, account.Extra, excelBPSExtraKey)
 	require.NotContains(t, account.Extra, excelBPSModelsExtraKey)
 	require.NotContains(t, account.Extra, excelBPSCacheCreationAsInputExtraKey)
+	require.NotContains(t, account.Extra, ExcelBPSIgnoreEncryptedContentKey)
+	require.NotContains(t, account.Extra, ExcelBPSOmitUnsupportedToolsKey)
 }
 
 func TestAccountImportSettingsExcelBPSOptionsNormalize(t *testing.T) {

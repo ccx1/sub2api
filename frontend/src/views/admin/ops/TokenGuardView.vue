@@ -15,6 +15,9 @@
           <button class="btn btn-primary inline-flex items-center gap-2" :disabled="running || loading" @click="run">
             <Icon name="play" size="sm" />{{ t(running ? 'tokenGuard.running' : 'tokenGuard.runNow') }}
           </button>
+          <button v-if="running && currentJob" class="btn btn-secondary" :disabled="canceling || currentJob.cancel_requested" data-testid="cancel-guard-run" @click="cancelRun">
+            {{ t(canceling || currentJob.cancel_requested ? 'tokenGuard.runCanceling' : 'common.cancel') }}
+          </button>
         </div>
       </header>
 
@@ -22,9 +25,9 @@
       <p v-if="notice" role="status" class="success-banner">{{ notice }}</p>
 
       <section class="summary-grid">
-        <article class="summary-card"><span>{{ t('tokenGuard.statsProbed') }}</span><strong>{{ remote?.runtime.stats.probed ?? 0 }}</strong><small>{{ t('tokenGuard.interval') }} {{ draft?.interval_seconds ?? 0 }}s</small></article>
+        <article class="summary-card"><span>{{ t('tokenGuard.statsProbed') }}</span><strong>{{ displayStats?.probed ?? 0 }}</strong><small data-testid="guard-progress">{{ running && currentJob ? currentJob.completed + '/' + currentJob.total : t('tokenGuard.interval') + ' ' + (draft?.interval_seconds ?? 0) + 's' }}</small></article>
         <article class="summary-card"><span>{{ t('tokenGuard.statsBad') }}</span><strong>{{ badCount }}</strong><small>{{ t('tokenGuard.failStreak') }} ≥ {{ draft?.fail_streak_threshold ?? 1 }}</small></article>
-        <article class="summary-card"><span>{{ t('tokenGuard.statsRepaired') }}</span><strong>{{ remote?.runtime.stats.repaired ?? 0 }}</strong><small>{{ t('tokenGuard.stateFixed') }} {{ remote?.runtime.stats.state_fixed ?? 0 }}</small></article>
+        <article class="summary-card"><span>{{ t('tokenGuard.statsRepaired') }}</span><strong>{{ displayStats?.repaired ?? 0 }}</strong><small>{{ t('tokenGuard.stateFixed') }} {{ displayStats?.state_fixed ?? 0 }}</small></article>
         <article class="summary-card"><span>{{ t('tokenGuard.lastRun') }}</span><strong class="text-base">{{ remote?.runtime.last_run ? date(remote.runtime.last_run) : t('tokenGuard.never') }}</strong><small>{{ remote?.runtime.last_message || '-' }}</small></article>
       </section>
 
@@ -46,7 +49,16 @@
               </div>
 
               <label class="field-label">{{ t('tokenGuard.groupIds') }}</label>
-              <input v-model="groupIdsText" class="input w-full" placeholder="1, 2" />
+              <Select
+                v-model="selectedGroupIds"
+                multiple
+                searchable
+                :options="groupOptions"
+                :placeholder="t('tokenGuard.allGroups')"
+                :aria-label="t('tokenGuard.groupIds')"
+                :disabled="groupsLoading"
+              />
+              <p v-if="groupsLoadError" class="field-hint text-amber-600 dark:text-amber-400">{{ t('tokenGuard.groupsLoadError') }}</p>
               <p class="field-hint">{{ t('tokenGuard.groupIdsHint') }}</p>
 
               <div class="grid-2">
@@ -74,7 +86,7 @@
                 <textarea v-model="reloginHeadersText" rows="3" class="input w-full" placeholder="Header-Name: value"></textarea>
                 <p class="field-hint">{{ t('tokenGuard.headersHint') }}</p>
               </template>
-              <label class="kind-option"><input v-model="draft.restore_schedulable" type="checkbox" /><span><strong>{{ t('tokenGuard.restoreSchedulable') }}</strong><small>{{ t('tokenGuard.scopeNote') }}</small></span></label>
+              <div class="kind-option" data-testid="guard-scheduling-policy"><span><strong>{{ t('tokenGuard.schedulingPolicy') }}</strong><small>{{ t('tokenGuard.schedulingPolicyHint') }}</small><small>{{ t('tokenGuard.scopeNote') }}</small></span></div>
 
               <label class="field-label">{{ t('tokenGuard.reloginAccounts') }}</label>
               <button type="button" class="creds-open" @click="openCredsModal">
@@ -227,13 +239,19 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import Icon from '@/components/icons/Icon.vue'
+import Select from '@/components/common/Select.vue'
+import { groupsAPI } from '@/api/admin/groups'
+import type { AdminGroup, SelectOption } from '@/types'
 import {
   getTokenGuardStatus,
+  getTokenGuardJob,
+  cancelTokenGuardJob,
   reloginTokenGuardAccount,
-  runTokenGuard,
+  startTokenGuardRun,
   saveTokenGuardConfig,
   type TokenGuardConfig,
   type TokenGuardEvent,
+  type TokenGuardJob,
   type TokenGuardReloginAccount,
   type TokenGuardStatus
 } from '@/api/admin/accountTokenGuard'
@@ -241,7 +259,6 @@ import {
 const { t } = useI18n()
 const remote = ref<TokenGuardStatus | null>(null)
 const draft = ref<TokenGuardConfig | null>(null)
-const groupIdsText = ref('')
 const credentials = ref<TokenGuardReloginAccount[]>([])
 const probeHeadersText = ref('')
 const credsModalOpen = ref(false)
@@ -251,12 +268,43 @@ const newCred = ref({ email: '', password: '', mfa_secret: '', expires: '' })
 const reloginHeadersText = ref('')
 const loading = ref(false), saving = ref(false), running = ref(false), reloginBusy = ref(0)
 const error = ref(''), notice = ref('')
+const groups = ref<AdminGroup[]>([])
+const groupsLoading = ref(false)
+const groupsLoadError = ref(false)
+const currentJob = ref<TokenGuardJob | null>(null)
+const canceling = ref(false)
+let runController: AbortController | null = null
+const stoppedJobs = new Set<string>()
 let timer: ReturnType<typeof setInterval> | undefined
 let alive = true
 
 const accounts = computed(() => remote.value?.accounts ?? [])
+const displayStats = computed(() => running.value && isActiveJob(currentJob.value)
+  ? currentJob.value?.stats : remote.value?.runtime.stats)
 const events = computed<TokenGuardEvent[]>(() => remote.value?.events ?? [])
 const badCount = computed(() => accounts.value.filter(item => item.probe_state === 'auth' || item.account_status === 'error').length)
+const selectedGroupIds = computed<number[]>({
+  get: () => draft.value?.group_ids ?? [],
+  set: (value) => {
+    if (draft.value) {
+      draft.value = {
+        ...draft.value,
+        group_ids: [...new Set(value.map(Number).filter(id => Number.isInteger(id) && id > 0))]
+      }
+    }
+  }
+})
+const groupOptions = computed<SelectOption[]>(() => {
+  const known = groups.value.map(group => ({
+    value: group.id,
+    label: `${group.name} (#${group.id})`
+  }))
+  const knownIds = new Set(groups.value.map(group => group.id))
+  const missing = selectedGroupIds.value
+    .filter(id => !knownIds.has(id))
+    .map(id => ({ value: id, label: `#${id}` }))
+  return [...missing, ...known]
+})
 const dirty = computed(() => {
   if (!draft.value || !remote.value) return false
   return JSON.stringify(collect()) !== JSON.stringify(normalize(remote.value.config))
@@ -268,7 +316,6 @@ const date = (value: string) => {
   return Number.isNaN(parsed.getTime()) ? value : `${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
 }
 const message = (e: unknown) => (e as { message?: string })?.message || t('qualityOps.error')
-const parseGroupIds = (raw: string) => raw.split(/[,\s;]+/).map(value => Number(value.trim())).filter(value => Number.isFinite(value) && value > 0)
 
 // 单行凭据解析：同时支持 `邮箱----密码----2FA` 与 `邮箱,密码,2FA` 两种分隔。
 function parseCredentialLine(line: string): TokenGuardReloginAccount | null {
@@ -292,7 +339,6 @@ const parseHeaders = (raw: string) => raw.split(/\r?\n/).reduce<Record<string, s
   return acc
 }, {})
 const headersTextOf = (headers: Record<string, string> | undefined) => Object.entries(headers ?? {}).map(([name, value]) => `${name}: ${value}`).join('\n')
-const groupTextOf = (config: TokenGuardConfig | null) => (config?.group_ids ?? []).join(', ')
 
 function normalizeCred(item: TokenGuardReloginAccount): TokenGuardReloginAccount {
   const out: TokenGuardReloginAccount = { email: item.email.toLowerCase(), password: item.password, mfa_secret: item.mfa_secret ?? '' }
@@ -314,7 +360,7 @@ function normalize(config: TokenGuardConfig): TokenGuardConfig {
 
 function collect(): TokenGuardConfig {
   const base = draft.value!
-  return normalize({ ...base, group_ids: parseGroupIds(groupIdsText.value), relogin_accounts: credentials.value.map(normalizeCred),
+  return normalize({ ...base, relogin_accounts: credentials.value.map(normalizeCred),
     probe_headers: parseHeaders(probeHeadersText.value), relogin_headers: parseHeaders(reloginHeadersText.value) })
 }
 
@@ -339,15 +385,29 @@ async function load(silent = false) {
     remote.value = status
     if (!preserveDraft) {
       draft.value = { ...status.config, activation_mode: status.config.activation_mode === 'builtin' ? 'builtin' : 'external' }
-      groupIdsText.value = groupTextOf(status.config)
       credentials.value = (status.config.relogin_accounts ?? []).map(item => ({ ...item }))
       probeHeadersText.value = headersTextOf(status.config.probe_headers)
       reloginHeadersText.value = headersTextOf(status.config.relogin_headers)
+    }
+    if (!running.value && isActiveJob(status.runtime.job) && !stoppedJobs.has(status.runtime.job!.id)) {
+      void followJob(status.runtime.job!)
     }
   } catch (e) {
     if (alive && !silent) error.value = message(e)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadGroups() {
+  groupsLoading.value = true
+  groupsLoadError.value = false
+  try {
+    groups.value = await groupsAPI.getAll('openai')
+  } catch {
+    groupsLoadError.value = true
+  } finally {
+    groupsLoading.value = false
   }
 }
 
@@ -358,7 +418,6 @@ async function save() {
     const saved = await saveTokenGuardConfig(collect())
     if (!alive) return
     draft.value = { ...saved, activation_mode: saved.activation_mode === 'builtin' ? 'builtin' : 'external' }
-    groupIdsText.value = groupTextOf(saved)
     credentials.value = (saved.relogin_accounts ?? []).map(item => ({ ...item }))
     probeHeadersText.value = headersTextOf(saved.probe_headers)
     reloginHeadersText.value = headersTextOf(saved.relogin_headers)
@@ -375,14 +434,83 @@ async function run() {
   if (running.value) return
   running.value = true; error.value = ''; notice.value = ''
   try {
-    const stats = await runTokenGuard()
+    const job = await startTokenGuardRun()
     if (!alive) return
-    notice.value = t('tokenGuard.runDone', { probed: stats.probed, healthy: stats.healthy, repaired: stats.repaired, state_fixed: stats.state_fixed })
-    await load(true)
+    await followJob(job)
   } catch (e) {
-    error.value = message(e)
+    if (alive) error.value = message(e)
   } finally {
     running.value = false
+  }
+}
+
+const isActiveJob = (job?: TokenGuardJob | null) => job?.status === 'pending' || job?.status === 'running'
+
+function waitForPoll(signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    const finish = () => { clearTimeout(timeout); signal.removeEventListener('abort', finish); resolve() }
+    const timeout = setTimeout(finish, 1000)
+    signal.addEventListener('abort', finish, { once: true })
+    if (signal.aborted) finish()
+  })
+}
+
+async function followJob(job: TokenGuardJob) {
+  runController?.abort()
+  const controller = new AbortController()
+  runController = controller
+  currentJob.value = job
+  running.value = true
+  let failures = 0
+  try {
+    while (alive && !controller.signal.aborted && isActiveJob(currentJob.value)) {
+      await waitForPoll(controller.signal)
+      if (!alive || controller.signal.aborted || !isActiveJob(currentJob.value)) break
+      try {
+        const polled = await getTokenGuardJob(job.id, controller.signal)
+        if (!alive || controller.signal.aborted) return
+        if (polled.id !== job.id) throw Object.assign(new Error('Job ID mismatch'), { status: 404 })
+        if (isActiveJob(currentJob.value)) {
+          currentJob.value = { ...polled, cancel_requested: currentJob.value?.cancel_requested || polled.cancel_requested }
+        }
+        failures = 0
+      } catch (e) {
+        if (controller.signal.aborted) return
+        const status = (e as { status?: number; response?: { status?: number } }).response?.status ?? (e as { status?: number }).status
+        if (status === 404) throw new Error(t('tokenGuard.jobUnavailable'))
+        if (++failures >= 3) throw new Error(t('tokenGuard.jobPollingFailed'))
+      }
+    }
+    if (!alive || controller.signal.aborted) return
+    const current = currentJob.value!
+    if (current.status === 'failed') throw new Error(current.error || t('qualityOps.error'))
+    if (current.status === 'canceled') notice.value = t('tokenGuard.runCanceled')
+    else if (current.status === 'succeeded') notice.value = t('tokenGuard.runDone', { ...current.stats })
+    else throw new Error(t('tokenGuard.jobUnavailable'))
+  } catch (e) {
+    if (alive && !controller.signal.aborted) error.value = message(e)
+  } finally {
+    if (runController === controller) {
+      stoppedJobs.add(job.id)
+      runController = null
+      running.value = false
+      if (alive) void load(true)
+    }
+  }
+}
+
+async function cancelRun() {
+  if (!currentJob.value || !isActiveJob(currentJob.value) || canceling.value || currentJob.value.cancel_requested) return
+  canceling.value = true
+  const id = currentJob.value.id
+  try {
+    const canceled = await cancelTokenGuardJob(id)
+    if (canceled.id !== id) throw new Error(t('tokenGuard.jobUnavailable'))
+    if (alive && currentJob.value?.id === id && isActiveJob(currentJob.value)) currentJob.value = canceled
+  } catch (e) {
+    if (alive) error.value = message(e)
+  } finally {
+    canceling.value = false
   }
 }
 
@@ -489,9 +617,10 @@ function credBadgeClass(cred: TokenGuardReloginAccount): string {
 
 onMounted(() => {
   void load()
+  void loadGroups()
   timer = setInterval(() => { if (document.visibilityState === 'visible') void load(true) }, 30_000)
 })
-onBeforeUnmount(() => { alive = false; if (timer) clearInterval(timer) })
+onBeforeUnmount(() => { alive = false; runController?.abort(); if (timer) clearInterval(timer) })
 </script>
 
 <style scoped>

@@ -123,6 +123,9 @@ var auditSensitiveReads = map[string]string{
 	"GET /api/v1/admin/groups/:id/api-keys":       "admin.groups.api_keys.read",
 	"GET /api/v1/admin/backups/s3-config":         "admin.backups.s3_config.read",
 	"GET /api/v1/admin/data-management/s3/config": "admin.data_management.s3_config.read",
+
+	// 节点采集快照含原始 Cookie/会话凭据。
+	"GET /api/v1/admin/accounts/:id/codex-ticket/nodes": "admin.accounts.codex_ticket_nodes.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。

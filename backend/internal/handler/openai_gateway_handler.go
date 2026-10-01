@@ -660,6 +660,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
+	c.Request = c.Request.WithContext(service.WithOpenAIExcelBPSRouting(c.Request.Context(), forwardBody))
 	seedOpenAIForwardImageIntentHint(c, channelMapping.Mapped, imageIntent)
 	forwardModel := openAIChannelForwardModel(channelMapping, reqModel)
 	c.Request = c.Request.WithContext(service.WithOpenAIForwardModel(
@@ -1328,6 +1329,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	// 解析渠道级模型映射
 	channelMappingMsg, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
+	c.Request = c.Request.WithContext(service.WithOpenAIExcelBPSRouting(c.Request.Context(), nil))
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -2691,6 +2693,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
 	ctx = service.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)
+	ctx = service.WithOpenAIExcelBPSRouting(ctx, nil)
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	profitVetoCount := 0
@@ -3645,6 +3648,13 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 			status = http.StatusServiceUnavailable
 		}
 		h.handleStreamingAwareError(c, status, "server_error", failoverErr.ClientMessage, streamStarted)
+		return
+	}
+	// BPS rejections may echo request data: keep the fixed code and message
+	// instead of passthrough rules or the upstream body.
+	if failoverErr.Reason == service.ExcelBPSRateLimitedReason {
+		service.SetOpsUpstreamError(c, failoverErr.StatusCode, failoverErr.ClientMessage, "")
+		h.handleStreamingAwareErrorWithCode(c, failoverErr.ClientStatusCode, "rate_limit_error", string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
 		return
 	}
 	statusCode := failoverErr.StatusCode

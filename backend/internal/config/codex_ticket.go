@@ -28,7 +28,50 @@ const (
 	//        半开窗口再探测恢复。
 	CodexTicketWorkspaceOriginRoutingOff   = "off"
 	CodexTicketWorkspaceOriginRoutingProbe = "probe"
+
+	// CodexTicketUsage* 控制业务请求的取票方式。
+	// immediate: 即取即用，按票池顺序取首张可用票（默认，保持既有行为）。
+	// aged:      只取首次采集后已沉淀满 MinTicketAgeSeconds 的票，最老的优先。
+	CodexTicketUsageImmediate = "immediate"
+	CodexTicketUsageAged      = "aged"
+	// MaxCodexTicketMinAgeSeconds 是 aged 模式沉淀时长的硬上限。
+	MaxCodexTicketMinAgeSeconds = 86400
 )
+
+// CodexTicketUsageAgedEnabled 报告是否启用了“只用沉淀满指定时长的票”。
+func CodexTicketUsageAgedEnabled(cfg OpenAICodexTicketConfig) bool {
+	return cfg.UsageMode == CodexTicketUsageAged && cfg.MinTicketAgeSeconds > 0
+}
+
+// WithoutCodexTicketUsagePolicy 去掉只影响业务取票的字段。
+// 取票机制不改变票据身份：票据绑定、采集配置快照和共享调度版本都不应因它变化而失效。
+func WithoutCodexTicketUsagePolicy(cfg OpenAICodexTicketConfig) OpenAICodexTicketConfig {
+	cfg.UsageMode, cfg.MinTicketAgeSeconds, cfg.ConsumeAfterUse = "", 0, false
+	return cfg
+}
+
+// ValidateCodexTicketUsage 校验并规范化取票机制；空值按即取即用处理，旧配置保持原行为。
+func ValidateCodexTicketUsage(cfg *OpenAICodexTicketConfig) error {
+	switch cfg.UsageMode {
+	case "":
+		cfg.UsageMode = CodexTicketUsageImmediate
+	case CodexTicketUsageImmediate, CodexTicketUsageAged:
+	default:
+		return fmt.Errorf("取票机制必须是 immediate 或 aged")
+	}
+	if cfg.UsageMode != CodexTicketUsageAged {
+		cfg.MinTicketAgeSeconds = 0
+		return nil
+	}
+	limit := MaxCodexTicketMinAgeSeconds
+	if cfg.TTLSeconds > 1 && cfg.TTLSeconds-1 < limit {
+		limit = cfg.TTLSeconds - 1
+	}
+	if cfg.MinTicketAgeSeconds < 1 || cfg.MinTicketAgeSeconds > limit {
+		return fmt.Errorf("min_ticket_age_seconds 必须在 1 到 %d 之间，且小于票据有效期", limit)
+	}
+	return nil
+}
 
 // CodexTicketBusinessVerificationEnabled 让未配置此开关的旧安装继续复核业务出口。
 func CodexTicketBusinessVerificationEnabled(cfg OpenAICodexTicketConfig) bool {
@@ -137,5 +180,11 @@ func NormalizeOpenAICodexTicketConfig(cfg OpenAICodexTicketConfig) OpenAICodexTi
 	if cfg.WorkspaceOriginSilenceSeconds <= 0 {
 		cfg.WorkspaceOriginSilenceSeconds = 600
 	}
+	// 取票机制默认即取即用；非法或缺失沉淀时长的 aged 回落即取即用，避免误配置把业务请求全部挡住。
+	if cfg.UsageMode != CodexTicketUsageAged || cfg.MinTicketAgeSeconds <= 0 {
+		cfg.UsageMode = CodexTicketUsageImmediate
+		cfg.MinTicketAgeSeconds = 0
+	}
+	cfg.MinTicketAgeSeconds = min(cfg.MinTicketAgeSeconds, MaxCodexTicketMinAgeSeconds)
 	return cfg
 }

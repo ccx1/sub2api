@@ -59,6 +59,18 @@ func SafeHeaders(h http.Header) map[string]string {
 	return out
 }
 
+// RawHeaders 复制全部头（原文模式），不截断、不脱敏。
+func RawHeaders(h http.Header) map[string][]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(h))
+	for k, v := range h {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
+}
+
 type containerState struct{ object, key, media bool }
 
 // jsonFilter never buffers an entire string. Escapes and redaction survive chunks.
@@ -310,6 +322,7 @@ func (f *jsonFilter) Write(p []byte) []byte {
 }
 
 type bodyFilter struct {
+	raw              bool
 	json             jsonFilter
 	framing          bodyFraming
 	sse, unsupported bool
@@ -334,8 +347,15 @@ func newBodyFilter(contentType string, media bool) *bodyFilter {
 	knownMedia := strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") || strings.HasPrefix(ct, "application/octet-stream")
 	return &bodyFilter{framing: newBodyFraming(contentType), knownMedia: knownMedia, contentType: bounded(contentType, 256), json: jsonFilter{media: media}, sse: strings.Contains(ct, "text/event-stream"), binary: media && (strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "video/") || strings.HasPrefix(ct, "application/octet-stream")), unsupported: ct != "" && !strings.Contains(ct, "json") && !strings.Contains(ct, "text/event-stream"), digest: sha256.New()}
 }
+
+// newRawBodyFilter 原文模式：字节原样落盘，不做 JSON 脱敏、媒体摘要或 SSE 过滤。
+func newRawBodyFilter() *bodyFilter { return &bodyFilter{raw: true} }
+
 func (f *bodyFilter) Write(p []byte) []byte {
 	f.bytes += int64(len(p))
+	if f.raw {
+		return p
+	}
 	_, _ = f.digest.Write(p)
 	if f.binary {
 		var out []byte
@@ -470,6 +490,9 @@ func safeEventName(s string) bool {
 	return true
 }
 func (f *bodyFilter) End() ([]byte, string) {
+	if f.raw {
+		return nil, ""
+	}
 	if f.binary {
 		out := []byte{}
 		if !f.binaryStarted {

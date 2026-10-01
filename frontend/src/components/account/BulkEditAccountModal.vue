@@ -41,6 +41,10 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.openai.excelBPSDesc') }}
             </p>
+            <p v-if="!enableExcelBPS || !excelBPSEnabled" data-testid="bulk-excel-bps-options-hint"
+              class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.excelBPSBulkOptionsHint') }}
+            </p>
           </div>
           <input v-model="enableExcelBPS" id="bulk-edit-excel-bps-enabled" type="checkbox"
             aria-controls="bulk-edit-excel-bps-body"
@@ -68,6 +72,24 @@
               <p class="input-hint">{{ t('admin.accounts.openai.excelBPSModelsHint') }}</p>
             </div>
             <p class="text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
+            <div class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSIgnoreEncryptedContent" type="checkbox"
+                  data-testid="bulk-excel-bps-ignore-encrypted-content"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContent') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContentDesc') }}</p>
+            </div>
+            <div>
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSOmitUnsupportedTools" type="checkbox"
+                  data-testid="bulk-excel-bps-omit-unsupported-tools"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
+            </div>
             <div class="mt-3">
               <label class="flex items-center gap-2">
                 <input v-model="excelBPSAutoDisableOn403" type="checkbox"
@@ -100,6 +122,15 @@
                 <span class="text-sm">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInput') }}</span>
               </label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInputDesc') }}</p>
+            </div>
+            <div>
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSIgnoreImages" type="checkbox"
+                  data-testid="bulk-excel-bps-ignore-images"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreImages') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreImagesDesc') }}</p>
             </div>
           </div>
         </fieldset>
@@ -1872,7 +1903,10 @@ const excelBPSEnabled = ref(false)
 const excelBPSAllModels = ref(false)
 const excelBPSModels = ref<string[]>([...DEFAULT_EXCEL_BPS_MODELS])
 const excelBPSCacheCreationAsInput = ref(false)
+const excelBPSIgnoreImages = ref(false)
 const excelBPSAutoDisableOn403 = ref(false)
+const excelBPSIgnoreEncryptedContent = ref(false)
+const excelBPSOmitUnsupportedTools = ref(false)
 const excelBPSAutoMoveOn403 = ref(false)
 const excelBPS403TargetGroupID = ref<number | string>('')
 const excelBPS403GroupOptions = computed(() => [
@@ -2199,7 +2233,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
       : null
     extra.openai_excel_bps_cache_creation_as_input =
       excelBPSEnabled.value && excelBPSCacheCreationAsInput.value
+    extra.openai_excel_bps_ignore_images = excelBPSEnabled.value && excelBPSIgnoreImages.value
     extra.openai_excel_bps_auto_disable_on_403 = excelBPSEnabled.value && excelBPSAutoDisableOn403.value
+    extra.openai_excel_bps_ignore_encrypted_content = excelBPSEnabled.value && excelBPSIgnoreEncryptedContent.value
+    extra.openai_excel_bps_omit_unsupported_tools = excelBPSEnabled.value && excelBPSOmitUnsupportedTools.value
     extra.openai_excel_bps_auto_move_on_403 = excelBPSEnabled.value && excelBPSAutoMoveOn403.value
     extra.openai_excel_bps_403_target_group_id = excelBPSEnabled.value && excelBPSAutoMoveOn403.value
       ? Number(excelBPS403TargetGroupID.value)
@@ -2675,7 +2712,10 @@ watch(
       excelBPSAllModels.value = false
       excelBPSModels.value = [...DEFAULT_EXCEL_BPS_MODELS]
       excelBPSCacheCreationAsInput.value = false
+      excelBPSIgnoreImages.value = false
       excelBPSAutoDisableOn403.value = false
+      excelBPSIgnoreEncryptedContent.value = false
+      excelBPSOmitUnsupportedTools.value = false
       excelBPSAutoMoveOn403.value = false
       excelBPS403TargetGroupID.value = ''
       openaiPassthroughEnabled.value = false

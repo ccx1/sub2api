@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptrace"
-	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
@@ -24,21 +22,12 @@ type excelBPSPinnedEgressKey struct{}
 // Missing trace is not evidence of safety. Preserve positive evidence from
 // body reads as well, including transports that omit net/http write callbacks.
 type excelBPSWriteEvidence struct {
-	started      atomic.Bool
-	handedToHTTP atomic.Bool
+	transportdiag.Trace
 }
 
 func (e *excelBPSWriteEvidence) request(req *http.Request) *http.Request {
-	mark := func() { e.handedToHTTP.Store(true) }
-	trace := &httptrace.ClientTrace{
-		GetConn:              func(string) { e.started.Store(true) },
-		GotConn:              func(httptrace.GotConnInfo) { mark() },
-		WroteHeaderField:     func(string, []string) { mark() },
-		WroteHeaders:         mark,
-		WroteRequest:         func(httptrace.WroteRequestInfo) { mark() },
-		GotFirstResponseByte: mark,
-	}
-	req = req.Clone(httptrace.WithClientTrace(req.Context(), trace))
+	mark := e.MarkBodyRead
+	req = e.Trace.Request(req)
 	if req.Body != nil {
 		req.Body = &excelBPSTrackedBody{ReadCloser: req.Body, mark: mark}
 	}
@@ -46,7 +35,7 @@ func (e *excelBPSWriteEvidence) request(req *http.Request) *http.Request {
 		req.GetBody = func() (io.ReadCloser, error) {
 			// Existing native fallback asks GetBody before switching egress. A read
 			// without trace callbacks must still veto replay of this POST.
-			if e.handedToHTTP.Load() {
+			if e.MayHaveBeenSent() {
 				return nil, errors.New("Excel BPS request may already have been sent")
 			}
 			body, err := getBody()
@@ -59,7 +48,7 @@ func (e *excelBPSWriteEvidence) request(req *http.Request) *http.Request {
 	return req
 }
 
-func (e *excelBPSWriteEvidence) unsent() bool { return e.started.Load() && !e.handedToHTTP.Load() }
+func (e *excelBPSWriteEvidence) unsent() bool { return e.DefinitelyUnsent() }
 
 type excelBPSTrackedBody struct {
 	io.ReadCloser
@@ -99,14 +88,22 @@ func (s *OpenAIGatewayService) doExcelBPSRequest(ctx context.Context, c *gin.Con
 	return resp, proxy, nil
 }
 
-func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account *Account, scope, _ string, err error, stage string, attempt int, retry bool) {
+func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account *Account, scope, _ string, err error, stage string, attempt int, retry bool, responses ...*http.Response) {
+	if excelBPSDiagnosticCanceled(ctx, c, err) {
+		logger.FromContext(ctx).Info("excel_bps.client_canceled", zap.Int64("account_id", account.ID), zap.String("stage", stage))
+		return
+	}
 	kind := transportdiag.Classify(err)
 	digest := sha256.Sum256([]byte(scope))
 	sessionHash := hex.EncodeToString(digest[:8])
-	detail, _ := json.Marshal(map[string]any{
+	diagnostics := map[string]any{
 		"error_kind": kind, "error_type": fmt.Sprintf("%T", err),
 		"session_hash": sessionHash, "attempt": attempt, "retry_before_send": retry,
-	})
+	}
+	if trace := excelBPSTransportDiagnosticTrace(ctx, err, responses); trace != nil {
+		diagnostics["transport"] = trace.Snapshot()
+	}
+	detail, _ := json.Marshal(diagnostics)
 	message := "Excel BPS " + stage + " failed: " + kind
 	if !retry {
 		setOpsUpstreamError(c, 0, message, string(detail))
@@ -122,5 +119,5 @@ func recordExcelBPSTransportFailure(ctx context.Context, c *gin.Context, account
 		zap.Int64("account_id", account.ID), zap.String("stage", stage),
 		zap.String("error_kind", kind), zap.String("error_type", fmt.Sprintf("%T", err)),
 		zap.String("session_hash", sessionHash), zap.Int("attempt", attempt),
-		zap.Bool("retry_before_send", retry))
+		zap.Bool("retry_before_send", retry), zap.Any("transport", diagnostics["transport"]))
 }

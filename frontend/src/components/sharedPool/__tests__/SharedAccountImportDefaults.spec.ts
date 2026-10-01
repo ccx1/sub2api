@@ -18,7 +18,7 @@ vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { p
 type GlobalDefaults = { protection_enabled: boolean; codex_ticket_enabled: boolean; excel_bps_enabled: boolean; excel_bps_options: ExcelBPSOptions }
 const configured: GlobalDefaults = {
   protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true,
-  excel_bps_options: { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true }
+  excel_bps_options: { models: ['gpt-6-astra'], auto_disable_on_403: true, cache_creation_as_input: true, ignore_encrypted_content: true, omit_unsupported_tools: true }
 }
 const editableConfigured = {
   protection_enabled: configured.protection_enabled, excel_bps_enabled: configured.excel_bps_enabled,
@@ -104,7 +104,7 @@ describe('shared account global import defaults', () => {
   })
 
   it.each([false, true])('does not apply global defaults when editing existing BPS %s', async enabled => {
-    const savedOptions = { models: null, auto_disable_on_403: false, cache_creation_as_input: false }
+    const savedOptions = { models: null, auto_disable_on_403: false, cache_creation_as_input: false, ignore_encrypted_content: false, omit_unsupported_tools: false }
     const account = { id: 7, name: 'Existing', platform: 'openai', type: 'oauth', concurrency: 4, enabled: false, protection_enabled: true, excel_bps_enabled: enabled, excel_bps_options: savedOptions } as SharedAccount
     const wrapper = creation({ ...configured, excel_bps_enabled: !enabled }, account)
     expect(wrapper.get('#shared-excel-bps').attributes('aria-checked')).toBe(String(enabled))
@@ -153,7 +153,7 @@ describe('shared account global import defaults', () => {
   })
 
   it('keeps explicit import BPS options as one configuration family', async () => {
-    const options = { models: [], auto_disable_on_403: false, cache_creation_as_input: false }
+    const options = { models: [], auto_disable_on_403: false, cache_creation_as_input: false, ignore_encrypted_content: false, omit_unsupported_tools: false }
     const wrapper = importing(configured, { concurrency: 1, enabled: true, protection_enabled: true, excel_bps_enabled: true, excel_bps_options: options })
     expect(await saveImport(wrapper)).toMatchObject({ excel_bps_enabled: true, excel_bps_options: options })
     expect(importAccounts.mock.lastCall?.[0].defaults).not.toHaveProperty('codex_ticket_enabled')
