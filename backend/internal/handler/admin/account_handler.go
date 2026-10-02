@@ -20,9 +20,15 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -2907,7 +2913,198 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.accountTestService.GetAvailableModels(c.Request.Context(), account))
+	// Handle OpenAI accounts
+	if account.IsOpenAI() {
+		// Prefer the shared, account-keyed upstream catalog. If discovery fails,
+		// retain the legacy local catalog below so the test dialog remains usable.
+		if h.accountTestService != nil {
+			if models, fetchErr := h.accountTestService.FetchOpenAIAccountModels(c.Request.Context(), account); fetchErr == nil {
+				response.Success(c, models)
+				return
+			}
+		}
+		// OpenAI 自动透传会绕过常规模型改写，测试/模型列表也应回落到默认模型集。
+		if account.IsOpenAIPassthroughEnabled() {
+			response.Success(c, openai.DefaultModels)
+			return
+		}
+
+		mapping := account.GetModelMapping()
+		if len(mapping) == 0 {
+			response.Success(c, openai.DefaultModels)
+			return
+		}
+
+		// Return mapped models
+		var models []openai.Model
+		for requestedModel := range mapping {
+			var found bool
+			for _, dm := range openai.DefaultModels {
+				if dm.ID == requestedModel {
+					models = append(models, dm)
+					found = true
+					break
+				}
+			}
+			if !found {
+				models = append(models, openai.Model{
+					ID:          requestedModel,
+					Object:      "model",
+					Type:        "model",
+					DisplayName: requestedModel,
+				})
+			}
+		}
+		response.Success(c, models)
+		return
+	}
+
+	// Handle Gemini accounts
+	if account.IsGemini() {
+		// Consumer Google One OAuth still uses the legacy Gemini CLI / Code
+		// Assist channel. Do not advertise newer 3.x or image models that the
+		// channel cannot serve.
+		if account.IsOAuth() {
+			if account.IsGeminiGoogleOne() {
+				response.Success(c, geminicli.GoogleOneModels)
+				return
+			}
+			response.Success(c, geminicli.DefaultModels)
+			return
+		}
+
+		// For API Key accounts: return models based on model_mapping
+		mapping := account.GetModelMapping()
+		if len(mapping) == 0 {
+			response.Success(c, geminicli.DefaultModels)
+			return
+		}
+
+		var models []geminicli.Model
+		for requestedModel := range mapping {
+			var found bool
+			for _, dm := range geminicli.DefaultModels {
+				if dm.ID == requestedModel {
+					models = append(models, dm)
+					found = true
+					break
+				}
+			}
+			if !found {
+				models = append(models, geminicli.Model{
+					ID:          requestedModel,
+					Type:        "model",
+					DisplayName: requestedModel,
+					CreatedAt:   "",
+				})
+			}
+		}
+		response.Success(c, models)
+		return
+	}
+
+	// Handle Antigravity accounts: return Claude + Gemini models
+	if account.Platform == service.PlatformAntigravity {
+		// 直接复用 antigravity.DefaultModels()，与 /v1/models 端点保持同步
+		response.Success(c, antigravity.DefaultModels())
+		return
+	}
+
+	// Handle Grok accounts
+	if account.Platform == service.PlatformGrok {
+		defaultModels := xai.DefaultModels()
+
+		hasExplicitMapping := false
+		switch rawMapping := account.Credentials["model_mapping"].(type) {
+		case map[string]any:
+			hasExplicitMapping = len(rawMapping) > 0
+		case map[string]string:
+			hasExplicitMapping = len(rawMapping) > 0
+		}
+		if !hasExplicitMapping {
+			response.Success(c, defaultModels)
+			return
+		}
+
+		mapping := account.GetModelMapping()
+		if len(mapping) == 0 {
+			response.Success(c, defaultModels)
+			return
+		}
+
+		defaultByID := make(map[string]xai.Model, len(defaultModels))
+		for _, model := range defaultModels {
+			defaultByID[model.ID] = model
+		}
+
+		requestedModels := make([]string, 0, len(mapping))
+		for requestedModel := range mapping {
+			requestedModels = append(requestedModels, requestedModel)
+		}
+		sort.Strings(requestedModels)
+
+		var models []xai.Model
+		for _, requestedModel := range requestedModels {
+			if defaultModel, found := defaultByID[requestedModel]; found {
+				models = append(models, defaultModel)
+				continue
+			}
+			models = append(models, xai.Model{
+				ID:          requestedModel,
+				Object:      "model",
+				OwnedBy:     "xai",
+				DisplayName: requestedModel,
+			})
+		}
+		response.Success(c, models)
+		return
+	}
+
+	// TypeSafe accounts serve only the native System One model.
+	if account.IsTypeSafe() {
+		response.Success(c, []claude.Model{{ID: typesafe.JevLatestModel, Type: "model", DisplayName: typesafe.JevLatestModel}})
+		return
+	}
+
+	// Handle Claude/Anthropic accounts
+	// For OAuth and Setup-Token accounts: return default models
+	if account.IsOAuth() {
+		response.Success(c, claude.DefaultModels)
+		return
+	}
+
+	// For API Key accounts: return models based on model_mapping
+	mapping := account.GetModelMapping()
+	if len(mapping) == 0 {
+		// No mapping configured, return default models
+		response.Success(c, claude.DefaultModels)
+		return
+	}
+
+	// Return mapped models (keys of the mapping are the available model IDs)
+	var models []claude.Model
+	for requestedModel := range mapping {
+		// Try to find display info from default models
+		var found bool
+		for _, dm := range claude.DefaultModels {
+			if dm.ID == requestedModel {
+				models = append(models, dm)
+				found = true
+				break
+			}
+		}
+		// If not found in defaults, create a basic entry
+		if !found {
+			models = append(models, claude.Model{
+				ID:          requestedModel,
+				Type:        "model",
+				DisplayName: requestedModel,
+				CreatedAt:   "",
+			})
+		}
+	}
+
+	response.Success(c, models)
 }
 
 // SyncUpstreamModels handles syncing live supported models from an account's upstream.
