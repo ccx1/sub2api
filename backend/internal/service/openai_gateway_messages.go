@@ -274,7 +274,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if codexResult.PromptCacheKey != "" {
 			promptCacheKey = codexResult.PromptCacheKey
 		}
-		s.applyCodexAccountIdentityOrHarvestPinMap(ctx, account, codexAccountIdentitySource(c, account), apiKeyID, upstreamModel, reqBody)
+		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), apiKeyID)
 		delete(reqBody, "prompt_cache_key")
 		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 			compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
@@ -418,7 +418,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err := s.applyOpenAICodexTicketRequest(account, upstreamModel, upstreamReq); err != nil {
 		return nil, err
 	}
-	s.pinBoundCodexTicketHarvestIdentity(upstreamReq, account)
 
 	// 7. Send request
 	proxyURL := ""

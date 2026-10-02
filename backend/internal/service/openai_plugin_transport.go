@@ -78,7 +78,7 @@ func openAIPluginBypassed(ctx context.Context) bool {
 	return bypassed
 }
 
-// codexTicketRequestBound 报告请求是否携带已注入的原生票据快照。
+// codexTicketRequestBound 使用已注入的不可变快照，不依赖票池中的后续状态。
 func (s *OpenAIGatewayService) codexTicketRequestBound(req *http.Request, _ *Account) bool {
 	if req == nil {
 		return false
@@ -87,8 +87,7 @@ func (s *OpenAIGatewayService) codexTicketRequestBound(req *http.Request, _ *Acc
 	return receipt != nil && receipt.ticket.matchesHeaders(req.Header)
 }
 
-// codexTicketPinsEgress：票据与签发时的出口绑定（accountCompatible 校验 Egress），
-// 运行时代理回退会换出口，因此携带票据快照的请求不参与回退。
+// 票据绑定签发出口，业务请求不能通过代理回退切换出口。
 func (s *OpenAIGatewayService) codexTicketPinsEgress(req *http.Request, account *Account) bool {
 	return s.codexTicketRequestBound(req, account)
 }

@@ -181,18 +181,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 
-		harvestModel := extractOpenAICodexTicketModel(body)
-		if harvestModel == "" {
-			harvestModel = normalizeOpenAICodexTicketModel(reqModel)
-		}
-		if s.harvestPinsCodexIdentity(ctx, account, harvestModel) {
-			stageCodexFingerprintIDs(c, nil)
-			pinnedBody, pinErr := s.pinHarvestIdentityBodyForModel(ctx, account, harvestModel, body)
-			if pinErr != nil {
-				return nil, pinErr
-			}
-			body = pinnedBody
-		} else {
+		{
 			accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
 			if scopeErr != nil {
 				return nil, scopeErr
@@ -295,7 +284,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		attemptImageIntentInvalidated,
 		IsImageGenerationIntent,
 	)
-	if imageIntent && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
+	if imageIntent && !GroupAllowsImageGenerationLatest(c.Request.Context(), apiKeyGroup(apiKey)) {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusForbidden, gin.H{
 			"error": gin.H{
@@ -810,7 +799,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 	}
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
-	s.pinBoundCodexTicketHarvestIdentity(req, account)
 
 	if account.IsCopilotSDKEnabled() {
 		return req, nil

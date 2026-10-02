@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -419,10 +419,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	apiKey := getAPIKeyFromContext(c)
-	imageGenerationAllowed := GroupAllowsImageGeneration(nil)
-	if apiKey != nil {
-		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
-	}
+	// Prefer the freshest revalidated image permission over the handshake Group
+	// snapshot so a mid-wait relaxation or revocation is honored.
+	imageGenerationAllowed := GroupAllowsImageGenerationLatest(c.Request.Context(), apiKeyGroup(apiKey))
 	codexImageGenerationBridgeEnabled := isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
@@ -642,9 +641,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
-		}
-		if s.pinHarvestIdentityMapsForModel(ctx, account, upstreamModel, decoded) {
-			markDecodedModified()
 		}
 		if strings.TrimSpace(clientPromptCacheKey) != "" {
 			// The body now carries an account-scoped value. Keep the original here
@@ -1827,7 +1823,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
-	s.pinBoundCodexTicketHarvestIdentity(req, account)
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err

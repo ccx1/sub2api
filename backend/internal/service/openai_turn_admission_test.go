@@ -112,7 +112,7 @@ func TestOpenAITurnAdmissionExplicitGroupRejectsRemovedMembership(t *testing.T) 
 	repo := &turnAdmissionRepo{account: &latest}
 	s := &OpenAIGatewayService{accountRepo: repo}
 
-	_, err := s.admitOpenAITurnForGroup(context.Background(), 9, selected, "gpt-5.5")
+	_, err := s.admitOpenAITurnWithGroup(context.Background(), selected, "gpt-5.5", 9, true)
 
 	require.True(t, IsOpenAITurnAdmissionError(err), "%v", err)
 	var denied *OpenAITurnAdmissionError

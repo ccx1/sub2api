@@ -9,7 +9,8 @@ import zhSettings from "@/i18n/locales/zh/admin/settings";
 import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
 import SettingsView from "../SettingsView.vue";
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ hash: '' }),
+  useRoute: () => ({ hash: '', query: {} }),
+  useRouter: () => ({ replace: vi.fn() }),
   RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
 }));
 

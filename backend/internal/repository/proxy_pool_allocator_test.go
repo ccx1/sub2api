@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -29,8 +30,15 @@ func newProxyPoolAllocatorTest(t *testing.T, limit int, candidates ...proxyPoolC
 	rdb := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
 	t.Cleanup(func() { _ = rdb.Close() })
 	a := &ProxyPoolAllocator{rdb: rdb, latencyCache: NewProxyLatencyCache(rdb), settings: proxyPoolSettingsStub{limit: limit}}
-	a.loadCandidates = func(context.Context, service.ProxyPoolSelection) ([]proxyPoolCandidate, error) {
-		return append([]proxyPoolCandidate{}, candidates...), nil
+	a.loadCandidates = func(_ context.Context, selection service.ProxyPoolSelection) ([]proxyPoolCandidate, error) {
+		loaded := make([]proxyPoolCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if selection.Restricted && !slices.Contains(selection.IDs, candidate.proxy.ID) {
+				continue
+			}
+			loaded = append(loaded, candidate)
+		}
+		return loaded, nil
 	}
 	return a, server
 }

@@ -86,7 +86,7 @@ func codexTicketConfigGatesModel(cfg config.OpenAICodexTicketConfig, model strin
 
 func (ticket *openAICodexTicket) usable(now time.Time, account *Account, cfg config.OpenAICodexTicketConfig) bool {
 	cfg = resolveCodexTicketCredentialConfig(account, cfg)
-	if ticket == nil || !ticket.accountCompatible(account) ||
+	if ticket == nil || ticket.consumed || !ticket.accountCompatible(account) ||
 		(ticket.VerificationSkipped && config.CodexTicketBusinessVerificationEnabled(cfg)) {
 		return false
 	}

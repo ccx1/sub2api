@@ -203,6 +203,7 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 		if account != nil && account.Extra != nil {
 			ticket = parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
 		}
+		markCodexTicketSlotsConsumed(ticket, codexTicketConsumptionLedgerFromAccount(account, now))
 		out = append(out, codexTicketPoolStatus(model, ticket, account, cfg, now))
 	}
 	return out
@@ -394,7 +395,7 @@ func (s *OpenAIGatewayService) openAICodexTicketOutboundModel(account *Account, 
 // outboundModel 必须是真正会发给上游的模型名（openAICodexTicketOutboundModel），
 // 不是客户端原始模型：注入侧读的是出站 body.model，两侧口径必须一致。
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, outboundModel string) bool {
-	return s.openAICodexTicketBlocksAccountContext(context.Background(), account, outboundModel)
+	return s.openAICodexTicketBlocksAccountContext(withCodexTicketTurnAdmission(context.Background()), account, outboundModel)
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccountContext(ctx context.Context, account *Account, outboundModel string) bool {
@@ -427,6 +428,10 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccountContext(ctx context
 		return true
 	}
 	if !OpenAICodexTicketAccountEnabled(account) || !isOpenAICodexTicketAccount(account, model) {
+		return false
+	}
+	// 逐轮准入由发送时的原子领取判定，允许本轮发送刚领取的最后一张票。
+	if cfg.ConsumeAfterUse && codexTicketTurnAdmission(ctx) {
 		return false
 	}
 	ticket := s.lookupOpenAICodexTicketForUse(account, model, cfg)

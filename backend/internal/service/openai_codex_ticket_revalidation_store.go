@@ -15,7 +15,7 @@ func (s *OpenAIGatewayService) replaceRevalidatedCodexTicket(ctx context.Context
 	lock.Lock()
 	defer lock.Unlock()
 	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, old.Model))
-	if !codexTicketInventoryContains(inventory, old) || s.codexTicketRevoked(key, old) {
+	if !codexTicketInventoryContains(inventory, old) || codexTicketInventoryConsumed(inventory, old) || s.codexTicketRevoked(key, old) {
 		return false
 	}
 	queued, _ := s.openaiCodexTicketPending.Load(key)

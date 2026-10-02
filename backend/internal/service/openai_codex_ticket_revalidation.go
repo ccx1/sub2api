@@ -145,12 +145,12 @@ func (s *OpenAIGatewayService) codexTicketRevalidationTarget(account *Account, m
 	lock.Lock()
 	defer lock.Unlock()
 	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
-	if pending := s.pendingCodexTicketCookies(account.ID, model); pending != nil && codexTicketInventoryContains(inventory, pending.Ticket) && !s.codexTicketRevoked(key, pending.Ticket) {
+	if pending := s.pendingCodexTicketCookies(account.ID, model); pending != nil && codexTicketInventoryContains(inventory, pending.Ticket) && !codexTicketInventoryConsumed(inventory, pending.Ticket) && !s.codexTicketRevoked(key, pending.Ticket) {
 		return codexTicketLeaf(pending.Ticket), pending
 	}
 	hydrateCodexTicketSoftRevalidate(inventory, cfg)
 	for _, slot := range codexTicketSlots(inventory) {
-		if slot.Revoked || !slot.accountCompatible(account) || !slot.Verified && !slot.VerificationSkipped {
+		if slot.Revoked || slot.consumed || !slot.accountCompatible(account) || !slot.Verified && !slot.VerificationSkipped {
 			continue
 		}
 		if slot.needsRefresh(time.Now(), time.Duration(cfg.RefreshBeforeSeconds)*time.Second) {

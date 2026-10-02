@@ -1041,10 +1041,13 @@ func (s *AccountTestService) testExcelBPSAccountConnection(c *gin.Context, accou
 	if scope, _ := resolveOpenAIWSExecutionScope(probeCtx, body, 0); scope == "" {
 		probeCtx.Request.Header.Set("Session-Id", "account-test-"+uuid.NewString())
 	}
-	// Call the BPS forwarder directly: Forward's pre-send turn admission requires
-	// the account to be schedulable, so paused/limited accounts could never be
-	// tested and failed with "request admission denied: account_ineligible".
-	result, err := s.openaiGatewayService.forwardExcelBPS(probeCtx, probeCtx, account, body, time.Now())
+	var result *OpenAIForwardResult
+	if account.isExcelBPSUpstreamModelEnabled(model) {
+		// BPS 手动测试允许暂停账号，范围外模型仍使用原生转发链路。
+		result, err = s.openaiGatewayService.forwardExcelBPS(probeCtx, probeCtx, account, body, time.Now())
+	} else {
+		result, err = s.openaiGatewayService.Forward(probeCtx.Request.Context(), probeCtx, account, body)
+	}
 	recordPelicanTestSSE(c.Request.Context(), "openai", model, probe.Body.Bytes())
 	if err != nil {
 		// A single-account test has no other account to fail over to.

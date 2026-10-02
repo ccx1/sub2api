@@ -1179,7 +1179,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 		if err == nil && result != nil && result.Acquired {
-			selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
+			selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc, result.RequestID)
 			return markStickySessionHit(selection, stickyHit), selectErr
 		}
 		if stickyAccountID > 0 && stickyAccountID == account.ID && s.concurrencyService != nil {
@@ -1249,7 +1249,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else {
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 						if err == nil && result != nil && result.Acquired {
-							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
+							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc, result.RequestID)
 							if selectErr != nil {
 								return nil, selectErr
 							}
@@ -1419,7 +1419,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err == nil && result != nil && result.Acquired {
-				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
+				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc, result.RequestID)
 				if selectErr != nil {
 					return nil, true, selectErr
 				}
@@ -1458,7 +1458,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err == nil && result != nil && result.Acquired {
-				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
+				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc, result.RequestID)
 				if selectErr != nil {
 					return nil, selectErr
 				}
@@ -1811,8 +1811,12 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 	}), nil
 }
 
-func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {
-	return s.newSelectionResult(ctx, account, true, release, nil)
+func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func(), requestID string) (*AccountSelectionResult, error) {
+	selection, err := s.newSelectionResult(ctx, account, true, release, nil)
+	if selection != nil {
+		selection.AccountRequestID = requestID
+	}
+	return selection, err
 }
 
 // markStickySessionHit 在选号结果上记录账号是否来自会话粘性命中。

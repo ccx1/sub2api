@@ -422,8 +422,12 @@ func openAIWSPayloadCodexWindowID(payload []byte) string {
 func normalizeOpenAIWSContextWindowBoundary(
 	payload []byte,
 	previousWindowID string,
+	clientWindowID ...string,
 ) ([]byte, openAIWSContextWindowBoundary, error) {
 	currentWindowID := openAIWSPayloadCodexWindowID(payload)
+	if len(clientWindowID) > 0 {
+		currentWindowID = strings.TrimSpace(clientWindowID[0])
+	}
 	boundary := openAIWSContextWindowBoundary{WindowID: currentWindowID}
 	if previousWindowID == "" || currentWindowID == "" || currentWindowID == previousWindowID {
 		return payload, boundary, nil

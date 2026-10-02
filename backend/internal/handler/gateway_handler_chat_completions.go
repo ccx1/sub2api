@@ -101,14 +101,19 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
 	c.Request = c.Request.WithContext(pricingCtx)
 
-	// Claude Code only restriction
+	// Claude Code only restriction: /v1/chat/completions is never a Claude Code
+	// endpoint. With a fallback group the request continues and account selection
+	// (checkClaudeCodeRestriction) schedules it in the fallback group; without one
+	// it is rejected here.
 	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly && apiKey.Group.FallbackGroupID == nil {
 		h.chatCompletionsErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
-
-	// 渠道映射须与调度使用的降级分组一致，计费仍保留原 API key 分组。
+	if apiKey.Group != nil {
+		requireAPIKeyQueueCapability(c, service.APIKeyQueueCapabilityForbiddenWhenClaudeCodeOnly)
+	}
+	// 渠道映射与调度使用同一降级分组；计费保留原 API key 分组。
 	mappingGroupID := apiKey.GroupID
 	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly {
 		mappingGroupID = apiKey.Group.FallbackGroupID
@@ -129,7 +134,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, apiKey.ID, apiKey.ConcurrencyLimit, reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.cc.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -150,8 +155,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		h.chatCompletionsErrorResponse(c, status, code, message)
 		return
 	}
-
-	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
+	// 预留引用由异步计费任务接管，余额扣减后才释放。
 	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
 	if err != nil {
 		reqLog.Info("gateway.cc.inflight_reservation_rejected", zap.Error(err))

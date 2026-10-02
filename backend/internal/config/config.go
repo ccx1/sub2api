@@ -1052,6 +1052,7 @@ type GatewayConfig struct {
 	OpenAIProxyStreamCircuit GatewayOpenAIProxyStreamCircuitConfig `mapstructure:"openai_proxy_stream_circuit"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
 	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
+	APIKeyQueue      APIKeyQueueConfig      `mapstructure:"api_key_queue"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -1943,6 +1944,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	}
 
+	apiKeyQueueConfig, err := loadAPIKeyQueueConfig()
+	if err != nil {
+		return nil, fmt.Errorf("validate config error: %w", err)
+	}
+	cfg.Gateway.APIKeyQueue = apiKeyQueueConfig
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
@@ -2529,6 +2535,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_codex_ticket.rate_limit_cooldown_seconds", ticketDefaults.RateLimitCooldownSeconds)
 	viper.SetDefault("gateway.openai_codex_ticket.respect_retry_after", ticketDefaults.RespectRetryAfter)
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
+	viper.SetDefault("gateway.api_key_queue.max_waiting", defaultAPIKeyQueueMaxWaiting)
+	viper.SetDefault("gateway.api_key_queue.timeout_seconds", defaultAPIKeyQueueTimeoutSeconds)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)

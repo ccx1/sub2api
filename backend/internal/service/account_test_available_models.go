@@ -8,12 +8,16 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 // GetAvailableModels 让管理员和账号所有者的测试弹窗共用模型目录。
 // 上游发现失败时保留本地回退，仅返回模型信息，不返回账号凭证。
 func (s *AccountTestService) GetAvailableModels(ctx context.Context, account *Account) any {
+	if account.IsTypeSafe() {
+		return []claude.Model{{ID: typesafe.JevLatestModel, Type: "model", DisplayName: typesafe.JevLatestModel}}
+	}
 	if account.IsOpenAI() {
 		if models, err := s.FetchOpenAIAccountModels(ctx, account); err == nil {
 			return models

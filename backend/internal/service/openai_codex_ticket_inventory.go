@@ -106,13 +106,8 @@ func codexTicketInventoryTime(inventory *openAICodexTicket) time.Time {
 
 // 只返回实际发送的叶票，receipt 不能携带之后可能变化的库存关系。
 func selectOpenAICodexTicket(inventory *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) *openAICodexTicket {
-	for _, slot := range codexTicketSlots(inventory) {
-		if slot == nil || slot.consumed {
-			continue
-		}
-		if slot.usable(now, account, cfg) {
-			return codexTicketLeaf(slot)
-		}
+	for _, slot := range codexTicketUsageCandidates(inventory, account, cfg, now) {
+		return codexTicketLeaf(slot)
 	}
 	return nil
 }

@@ -759,6 +759,8 @@ export interface ApiKey {
   created_at: string
   updated_at: string
   current_concurrency: number
+  /** Per-key concurrency cap; zero means no additional cap. */
+  concurrency_limit: number
   group?: Group
   rate_limit_5h: number
   rate_limit_1d: number
@@ -889,6 +891,8 @@ export interface ProxyQualityGuardRunResult {
 
 export interface CreateApiKeyRequest {
   name: string
+  /** Per-key concurrency cap; zero means no additional cap. */
+  concurrency_limit?: number
   group_id?: number | null
   custom_key?: string // Optional custom API Key
   ip_whitelist?: string[]
@@ -902,6 +906,8 @@ export interface CreateApiKeyRequest {
 
 export interface UpdateApiKeyRequest {
   name?: string
+  /** Per-key concurrency cap; zero means no additional cap. */
+  concurrency_limit?: number
   group_id?: number | null
   status?: 'active' | 'inactive'
   ip_whitelist?: string[]
@@ -913,6 +919,22 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+}
+
+export interface ApiKeyConcurrencyQueuePolicy {
+  max_waiting: number
+  timeout_seconds: number
+}
+
+export interface ApiKeyConcurrencyItem {
+  id: number
+  current_concurrency: number
+  current_waiting: number
+}
+
+export interface ApiKeyConcurrencySnapshot {
+  queue_policy: ApiKeyConcurrencyQueuePolicy
+  items: ApiKeyConcurrencyItem[]
 }
 
 export interface CreateGroupRequest {
