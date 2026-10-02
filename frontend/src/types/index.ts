@@ -1261,6 +1261,7 @@ export interface UpstreamBillingProbeResult {
 }
 
 export interface UpstreamBillingRateSnapshotItem {
+  cost_multiplier?: number
   account_id: number
   snapshot?: UpstreamBillingProbeSnapshot | null
 }
@@ -2729,14 +2730,35 @@ export interface QualityJudgment {
 export interface QualityPolicy {
   judge?: QualityJudgeConfig
   expected_answer: string
-  action: 'remove_groups' | 'disable_scheduling'
+  action: 'remove_groups' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
   remove_group_ids: number[]
   auto_restore: boolean
+  bps?: QualityBPSPolicy
+}
+
+export interface QualityBPSPolicy {
+  failure_threshold: number
+  usage_percent: number
+  require_all: boolean
+  all_models: boolean
+  models: string[]
+  omit_unsupported_tools: boolean
+  ignore_images: boolean
+  ignore_encrypted_content: boolean
+  auto_disable_on_403: boolean
+  auto_move_on_403: boolean
+  target_group_id: number
+  session_proxy: boolean
+  proxy_source: string
+  cache_creation_as_input: boolean
+  pass_threshold: number
+  hold_on_usage: boolean
 }
 
 export interface PelicanTestConfig {
   quality?: QualityPolicy
-  question_kind?: 'candy' | 'pelican'
+  question_kind?: 'candy' | 'pelican' | 'state_probe'
+  test_channel?: string
   prompt: string
   reasoning_effort: string
   parallel_count: number

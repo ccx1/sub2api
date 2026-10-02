@@ -146,6 +146,9 @@ func codexTicketPrimaryReason(ticket *openAICodexTicket, account *Account, cfg c
 	if ticket.Revoked {
 		return "revoked"
 	}
+	if ticket.consumed {
+		return "consumed"
+	}
 	if !ticket.accountCompatible(account) {
 		return "binding"
 	}

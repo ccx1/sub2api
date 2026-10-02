@@ -36,7 +36,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	defer requesttiming.Observe(ctx, "forward_attempt")()
 	latest, admissionErr := s.admitOpenAITurn(ctx, c, account, extractOpenAICodexTicketModel(body))
 	if admissionErr != nil {
-		return nil, admissionErr
+		return nil, markOpenAIInitialAdmissionError(admissionErr)
 	}
 	account = latest
 	stageMode1Request(c, account, body)
@@ -166,8 +166,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
-	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
+	// HTTP SSE may opt into the native WS pool on ordinary OAuth accounts.
+	wsDecision = s.resolveOpenAIHTTPWSSSEDecision(c, account, body, wsDecision)
+	accelerateHTTPSSE := wsDecision.Reason == openAIOAuthWSSSEAccelerationReason
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	requestStrategyScope := CodexRequestStrategyScopeDedicated
 	if passthroughEnabled {
@@ -868,7 +869,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
 
-	// 命中 WS 时仅走 WebSocket Mode；不再自动回退 HTTP。
+	// Native WS keeps its retry policy. HTTP SSE acceleration may fall back
+	// only when the handshake failed before response.create was sent.
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
 		// WS 分支需要结构化 payload 与重连恢复，命中后再触发 full-map decode。
 		wsReqBody, err := ensureReqBody()
@@ -997,6 +999,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
 			}
+			if accelerateHTTPSSE {
+				break
+			}
 			var taskRecoveredErr *agentIdentityTaskRecoveredError
 			if errors.As(wsErr, &taskRecoveredErr) {
 				continue
@@ -1102,8 +1107,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return wsResult, nil
 		}
-		s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
-		return nil, wsErr
+		if !accelerateHTTPSSE || !canFallbackOpenAIWSSSEHandshake(ctx, c, wsErr) {
+			s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
+			return nil, wsErr
+		}
+		c.Set("openai_ws_transport_decision", string(OpenAIUpstreamTransportHTTPSSE))
+		c.Set("openai_ws_transport_reason", "oauth_ws_sse_handshake_fallback")
 	}
 
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
@@ -1141,7 +1150,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout),
 			)
 		}
-		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
+		// WS/SSE 握手失败后回退到 HTTP 时，buildUpstreamRequest 和发送前
+		// 的票据注入都必须复用握手已领取的票，不能让内层构造再领取一张。
+		ticketReuseCtx := upstreamCtx
+		if raw, exists := c.Get("openai_ws_sse_ticket_reuse"); exists {
+			if receipt, ok := raw.(*openAICodexTicketReceipt); ok && receipt.claimed != nil && receipt.account != nil {
+				ticketReuseCtx = withOpenAICodexTicketReuse(ticketReuseCtx, receipt.account.ID, receipt.claimed)
+			}
+		}
+		upstreamReq, err := s.buildUpstreamRequest(ticketReuseCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
 		if headerGuard == nil {
 			releaseUpstreamCtx()
 		}
@@ -1159,7 +1176,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 
 		// Send request
-		if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(body), upstreamReq.Header); err != nil {
+		ticketCtx := ticketReuseCtx
+		if err := s.applyOpenAICodexTicket(ticketCtx, account, extractOpenAICodexTicketModel(body), upstreamReq.Header); err != nil {
 			if headerGuard != nil {
 				headerGuard.close()
 			}

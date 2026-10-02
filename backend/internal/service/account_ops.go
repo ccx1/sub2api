@@ -155,6 +155,11 @@ func (s *AccountOpsService) Observe(account *Account, status int, headers http.H
 	}
 }
 func (s *AccountOpsService) Start() {
+	s.start(true)
+}
+
+// Request observations must drain on every replica; only the primary delivers notifications.
+func (s *AccountOpsService) start(deliverNotifications bool) {
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
 	if s.cancel != nil {
@@ -183,7 +188,7 @@ func (s *AccountOpsService) Start() {
 					s.failures.Add(1)
 				}
 			case <-ticker.C:
-				if s.refreshConfig(ctx) {
+				if s.refreshConfig(ctx) && deliverNotifications {
 					s.deliver(ctx)
 				}
 			}

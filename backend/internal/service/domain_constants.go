@@ -242,6 +242,7 @@ const (
 	SettingKeyRiskControlEnabled                  = "risk_control_enabled"                  // 是否启用风控中心入口与审计链路
 	SettingKeyContentModerationConfig             = "content_moderation_config"             // 内容审计配置（JSON）
 	SettingKeyCyberSessionBlockEnabled            = "cyber_session_block_enabled"           // cyber 命中后会话级自动屏蔽总开关(默认关)
+	SettingKeyCyberPolicyUserAllowlist            = "cyber_policy_user_allowlist"           // 风控仅记录而不自动封禁的平台用户 ID
 	SettingKeyCyberSessionBlockTTLSeconds         = "cyber_session_block_ttl_seconds"       // 会话屏蔽 TTL 秒数(默认 3600)
 	SettingKeyCyberSessionIdentityStrictEnabled   = "cyber_session_identity_strict_enabled" // 要求可信显式会话身份(默认关，仅会话屏蔽开启时生效)
 	SettingKeyLoginAgreementEnabled               = "login_agreement_enabled"               // 登录前是否要求同意条款

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"math"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -147,35 +146,4 @@ func (u *pelicanTestUsage) read(raw string) {
 		u.tokens.InputTokens = max(0, u.input-u.tokens.CacheReadTokens-u.tokens.CacheCreationTokens)
 	}
 	u.tokens.OutputTokens = u.output + u.thoughts
-}
-
-// Return a cost snapshot, not a debit. Use the account's upstream cost multiplier,
-// never the customer/group selling multiplier. Missing usage/pricing remains
-// unknown; a partially metered attempt must not discard other known costs.
-func (c *pelicanTestUsageCollector) cost(billing *BillingService, account *Account) (*float64, bool) {
-	var total float64
-	priced, incomplete := false, len(c.requests) == 0
-	for _, u := range c.requests {
-		if !u.seen || billing == nil {
-			incomplete = true
-			continue
-		}
-		cost, err := billing.CalculateCostWithServiceTier(u.model, u.tokens, 1, u.serviceTier)
-		if err != nil || cost == nil {
-			incomplete = true
-			continue
-		}
-		amount := cost.TotalCost * account.CostMultiplier()
-		if math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 {
-			incomplete = true
-			continue
-		}
-		total += amount
-		priced = true
-		incomplete = incomplete || !u.complete || !u.inputSeen || !u.outputSeen
-	}
-	if !priced {
-		return nil, true
-	}
-	return &total, incomplete
 }

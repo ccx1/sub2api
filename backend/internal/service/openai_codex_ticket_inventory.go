@@ -107,6 +107,9 @@ func codexTicketInventoryTime(inventory *openAICodexTicket) time.Time {
 // 只返回实际发送的叶票，receipt 不能携带之后可能变化的库存关系。
 func selectOpenAICodexTicket(inventory *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) *openAICodexTicket {
 	for _, slot := range codexTicketSlots(inventory) {
+		if slot == nil || slot.consumed {
+			continue
+		}
 		if slot.usable(now, account, cfg) {
 			return codexTicketLeaf(slot)
 		}
@@ -159,6 +162,10 @@ func (s *OpenAIGatewayService) codexTicketInventoryLocked(account *Account, mode
 		current = extra
 	}
 	current = cloneCodexTicketInventory(current)
+	s.mergeCodexTicketConsumptionLedger(account)
+	if current != nil {
+		markCodexTicketSlotsConsumed(current, codexTicketConsumptionLedgerFromAccount(account, time.Now()))
+	}
 	refreshCodexTicketAccountBindings(current, extra, account)
 	for _, source := range []*openAICodexTicket{mem, extra} {
 		for _, old := range codexTicketSlots(source) {
@@ -199,6 +206,17 @@ func (s *OpenAIGatewayService) availableCodexTicketInventory(key string, invento
 	for _, slot := range codexTicketSlots(copy) {
 		if slot != nil && s.codexTicketRevoked(key, slot) {
 			slot.Revoked = true
+		}
+	}
+	if accountID, ok := codexTicketKeyAccountID(key); ok {
+		if index := s.codexTicketConsumptionIndex(accountID, false); index != nil {
+			index.mu.Lock()
+			for _, slot := range codexTicketSlots(copy) {
+				if index.consumedLocked(codexTicketConsumptionID(slot), time.Now()) {
+					slot.consumed = true
+				}
+			}
+			index.mu.Unlock()
 		}
 	}
 	return copy

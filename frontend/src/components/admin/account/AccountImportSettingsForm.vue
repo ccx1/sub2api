@@ -16,7 +16,7 @@
     </div>
     <p class="input-hint">{{ t('admin.accountImportSettings.protectionHint') }}</p>
     <p class="input-hint">{{ t('admin.accountImportSettings.excelBPSHint') }}</p>
-    <ExcelBPSOptionsFields v-if="settings.excel_bps_enabled" v-model="excelBPSOptions" :disabled="disabled" test-id-prefix="import-settings-excel-bps"
+    <ExcelBPSOptionsFields v-if="settings.excel_bps_enabled" v-model="excelBPSOptions" :disabled="disabled" test-id-prefix="import-settings-excel-bps" allow-group-move :groups="groups"
       class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" />
     <label class="block">
       <span class="input-label">{{ t('admin.accountImportSettings.proxyMode') }}</span>
@@ -56,7 +56,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Proxy } from '@/types'
+import type { Group, Proxy } from '@/types'
 import type { AccountImportSettings } from '@/api/admin/accountImportSettings'
 import Toggle from '@/components/common/Toggle.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -69,7 +69,7 @@ import { accountProxyRegionExtra, accountProxyRegionValidationError, BILLING_CUR
 import { codexTicketProxyExtra, codexTicketProxyValidationError, isAvailableCodexTicketProxy, readCodexTicketProxy } from '@/utils/codexTicketProxy'
 import { isValidRandomProxyReuseMinutes, normalizeRandomProxyEmptyPoolPolicy, normalizeRandomProxyGroupId, normalizeRandomProxyPoolIds, normalizeRandomProxyPoolScope, normalizeRandomProxyRegionFallback, type RandomProxyRegionFallback } from '@/utils/randomProxy'
 
-const props = defineProps<{ proxies: Proxy[]; disabled?: boolean }>()
+const props = withDefaults(defineProps<{ proxies: Proxy[]; groups?: Group[]; disabled?: boolean }>(), { groups: () => [] })
 const settings = defineModel<AccountImportSettings>({ required: true })
 const validationError = defineModel<string | null>('validationError', { default: null })
 const { t } = useI18n()
@@ -144,6 +144,10 @@ const ticketConfigured = computed({
   set: value => { if (value) updateExtra(codexTicketProxyExtra(readCodexTicketProxy())); else clearExtra('codex_ticket_proxy_') }
 })
 const error = computed(() => {
+  if (settings.value.excel_bps_enabled && excelBPSOptions.value.auto_move_on_403) {
+    const target = excelBPSOptions.value.target_group_id
+    if (target === null || (target !== 0 && !props.groups.some(group => group.id === target && group.platform === 'openai'))) return 'admin.accounts.openai.excelBPS403SelectTarget'
+  }
   if (settings.value.proxy_mode === 'fixed' && !availableProxies.value.some(proxy => proxy.id === settings.value.proxy_id)) return 'admin.accountImportSettings.fixedProxyRequired'
   if (randomEnabled.value && !isValidRandomProxyReuseMinutes(randomReuseMinutes.value)) return 'admin.accounts.randomProxyMaxReuseInvalid'
   if (randomEnabled.value && randomScope.value === 'selected' && !randomIds.value.length) return 'admin.accounts.randomProxyPoolRequired'

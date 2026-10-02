@@ -447,6 +447,11 @@ func ProvideOllamaCloudUsageService(
 }
 
 func (s *OllamaCloudUsageService) Start() {
+	s.start(true)
+}
+
+// Per-request probe work stays local; periodic account scans belong to full nodes.
+func (s *OllamaCloudUsageService) start(background bool) {
 	if s == nil {
 		return
 	}
@@ -456,9 +461,14 @@ func (s *OllamaCloudUsageService) Start() {
 		return
 	}
 	s.started = true
-	s.wg.Add(2)
+	s.wg.Add(1)
+	if background {
+		s.wg.Add(1)
+	}
 	s.mu.Unlock()
-	go s.runLoop()
+	if background {
+		go s.runLoop()
+	}
 	go s.probeLoop()
 }
 

@@ -17,6 +17,7 @@ import (
 type openAICodexTicketWSReceipt struct {
 	account *Account
 	ticket  openAICodexTicket
+	claimed *openAICodexTicket
 	config  config.OpenAICodexTicketConfig
 	service *OpenAIGatewayService
 	once    sync.Once
@@ -26,7 +27,7 @@ func codexTicketWSReceiptFromSnapshot(receipt *openAICodexTicketReceipt) *openAI
 	if receipt == nil {
 		return nil
 	}
-	return &openAICodexTicketWSReceipt{account: receipt.account, ticket: receipt.ticket, config: receipt.config, service: receipt.service}
+	return &openAICodexTicketWSReceipt{account: receipt.account, ticket: receipt.ticket, claimed: receipt.claimed, config: receipt.config, service: receipt.service}
 }
 
 func (r *openAICodexTicketWSReceipt) invalidate(ctx context.Context, s *OpenAIGatewayService, detail *CodexTicketInvalidation) {

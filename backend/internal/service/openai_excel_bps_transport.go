@@ -19,6 +19,14 @@ import (
 
 type excelBPSPinnedEgressKey struct{}
 
+type excelBPSForwardError struct {
+	code  string
+	cause error
+}
+
+func (e *excelBPSForwardError) Error() string { return "excel BPS: " + e.code }
+func (e *excelBPSForwardError) Unwrap() error { return e.cause }
+
 // Missing trace is not evidence of safety. Preserve positive evidence from
 // body reads as well, including transports that omit net/http write callbacks.
 type excelBPSWriteEvidence struct {

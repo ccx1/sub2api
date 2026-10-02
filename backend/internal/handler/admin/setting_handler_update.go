@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -377,9 +378,10 @@ type UpdateSettingsRequest struct {
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
-	CyberSessionBlockEnabled          *bool `json:"cyber_session_block_enabled"`
-	CyberSessionBlockTTLSeconds       *int  `json:"cyber_session_block_ttl_seconds"`
-	CyberSessionIdentityStrictEnabled *bool `json:"cyber_session_identity_strict_enabled"`
+	CyberSessionBlockEnabled          *bool   `json:"cyber_session_block_enabled"`
+	CyberPolicyUserAllowlist          *string `json:"cyber_policy_user_allowlist"`
+	CyberSessionBlockTTLSeconds       *int    `json:"cyber_session_block_ttl_seconds"`
+	CyberSessionIdentityStrictEnabled *bool   `json:"cyber_session_identity_strict_enabled"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
 	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -534,40 +536,40 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Capture retention must be 1-30 days")
 		return
 	}
-	if req.ExcelBPSImageMaxImageMiB != nil && (*req.ExcelBPSImageMaxImageMiB < 1 || *req.ExcelBPSImageMaxImageMiB > 128) {
-		response.BadRequest(c, "Image relay max_image_mib must be 1-128")
+	if req.ExcelBPSImageMaxImageMiB != nil && (*req.ExcelBPSImageMaxImageMiB < 1 || *req.ExcelBPSImageMaxImageMiB > basispoints.MaxRelayImageMiB) {
+		response.BadRequest(c, "Image relay max_image_mib must be 1-"+strconv.FormatInt(basispoints.MaxRelayImageMiB, 10))
 		return
 	}
-	if req.ExcelBPSImageMaxImages != nil && (*req.ExcelBPSImageMaxImages < 1 || *req.ExcelBPSImageMaxImages > 4096) {
-		response.BadRequest(c, "Image relay max_images must be 1-4096")
+	if req.ExcelBPSImageMaxImages != nil && (*req.ExcelBPSImageMaxImages < 1 || *req.ExcelBPSImageMaxImages > basispoints.MaxRelayImages) {
+		response.BadRequest(c, "Image relay max_images must be 1-"+strconv.FormatInt(basispoints.MaxRelayImages, 10))
 		return
 	}
-	if req.ExcelBPSImageMaxTotalMiB != nil && (*req.ExcelBPSImageMaxTotalMiB < 1 || *req.ExcelBPSImageMaxTotalMiB > 128) {
-		response.BadRequest(c, "Image relay max_total_mib must be 1-128")
+	if req.ExcelBPSImageMaxTotalMiB != nil && (*req.ExcelBPSImageMaxTotalMiB < 1 || *req.ExcelBPSImageMaxTotalMiB > basispoints.MaxRelayRequestMiB) {
+		response.BadRequest(c, "Image relay max_total_mib must be 1-"+strconv.FormatInt(basispoints.MaxRelayRequestMiB, 10))
 		return
 	}
-	if req.ExcelBPSImageStorageMiB != nil && (*req.ExcelBPSImageStorageMiB < 1 || *req.ExcelBPSImageStorageMiB > 16384) {
-		response.BadRequest(c, "Image relay storage_mib must be 1-16384")
+	if req.ExcelBPSImageStorageMiB != nil && (*req.ExcelBPSImageStorageMiB < 1 || *req.ExcelBPSImageStorageMiB > basispoints.MaxRelayStorageMiB) {
+		response.BadRequest(c, "Image relay storage_mib must be 1-"+strconv.FormatInt(basispoints.MaxRelayStorageMiB, 10))
 		return
 	}
-	if req.ExcelBPSImageStorageEntries != nil && (*req.ExcelBPSImageStorageEntries < 1 || *req.ExcelBPSImageStorageEntries > 65536) {
-		response.BadRequest(c, "Image relay storage_entries must be 1-65536")
+	if req.ExcelBPSImageStorageEntries != nil && (*req.ExcelBPSImageStorageEntries < 1 || *req.ExcelBPSImageStorageEntries > basispoints.MaxRelayStorageEntries) {
+		response.BadRequest(c, "Image relay storage_entries must be 1-"+strconv.FormatInt(basispoints.MaxRelayStorageEntries, 10))
 		return
 	}
-	if req.ExcelBPSImageTTLMinutes != nil && (*req.ExcelBPSImageTTLMinutes < 1 || *req.ExcelBPSImageTTLMinutes > 1440) {
-		response.BadRequest(c, "Image relay ttl_minutes must be 1-1440")
+	if req.ExcelBPSImageTTLMinutes != nil && (*req.ExcelBPSImageTTLMinutes < 1 || *req.ExcelBPSImageTTLMinutes > basispoints.MaxRelayTTLMinutes) {
+		response.BadRequest(c, "Image relay ttl_minutes must be 1-"+strconv.FormatInt(basispoints.MaxRelayTTLMinutes, 10))
 		return
 	}
-	if req.ExcelBPSImageBodyLimitMiB != nil && (*req.ExcelBPSImageBodyLimitMiB < 1 || *req.ExcelBPSImageBodyLimitMiB > 128) {
-		response.BadRequest(c, "Image request body limit must be 1-128 MiB")
+	if req.ExcelBPSImageBodyLimitMiB != nil && (*req.ExcelBPSImageBodyLimitMiB < 1 || *req.ExcelBPSImageBodyLimitMiB > basispoints.MaxImageBodyMiB) {
+		response.BadRequest(c, "Image request body limit must be 1-"+strconv.FormatInt(basispoints.MaxImageBodyMiB, 10)+" MiB")
 		return
 	}
-	if req.ExcelBPSImageBudgetMiB != nil && (*req.ExcelBPSImageBudgetMiB < 512 || *req.ExcelBPSImageBudgetMiB > 2048) {
-		response.BadRequest(c, "Image request budget must be 512-2048 MiB")
+	if req.ExcelBPSImageBudgetMiB != nil && (*req.ExcelBPSImageBudgetMiB < basispoints.MinImageBudgetMiB || *req.ExcelBPSImageBudgetMiB > basispoints.MaxImageBudgetMiB) {
+		response.BadRequest(c, "Image request budget must be "+strconv.FormatInt(basispoints.MinImageBudgetMiB, 10)+"-"+strconv.FormatInt(basispoints.MaxImageBudgetMiB, 10)+" MiB")
 		return
 	}
-	if req.ExcelBPSImageMaxRequests != nil && (*req.ExcelBPSImageMaxRequests < 1 || *req.ExcelBPSImageMaxRequests > 512) {
-		response.BadRequest(c, "Image concurrent requests must be 1-512")
+	if req.ExcelBPSImageMaxRequests != nil && (*req.ExcelBPSImageMaxRequests < 1 || *req.ExcelBPSImageMaxRequests > basispoints.MaxImageRequests) {
+		response.BadRequest(c, "Image concurrent requests must be 1-"+strconv.FormatInt(basispoints.MaxImageRequests, 10))
 		return
 	}
 	auditReq := settingsAuditRequest(req)
@@ -1593,6 +1595,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	if req.CyberPolicyUserAllowlist != nil {
+		if _, err := service.ParseCyberPolicyUserAllowlist(*req.CyberPolicyUserAllowlist); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+
 	// cyber 会话屏蔽 TTL 校验：提供时必须 > 0
 	if req.CyberSessionBlockTTLSeconds != nil && *req.CyberSessionBlockTTLSeconds <= 0 {
 		response.BadRequest(c, "cyber_session_block_ttl_seconds must be > 0")
@@ -2249,6 +2258,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.RiskControlEnabled
 		}(),
+		CyberPolicyUserAllowlist: func() string {
+			if req.CyberPolicyUserAllowlist != nil {
+				return *req.CyberPolicyUserAllowlist
+			}
+			return previousSettings.CyberPolicyUserAllowlist
+		}(),
 		CyberSessionBlockEnabled: func() bool {
 			if req.CyberSessionBlockEnabled != nil {
 				return *req.CyberSessionBlockEnabled
@@ -2686,6 +2701,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		RiskControlEnabled:                updatedSettings.RiskControlEnabled,
 		CyberSessionBlockEnabled:          updatedSettings.CyberSessionBlockEnabled,
+		CyberPolicyUserAllowlist:          updatedSettings.CyberPolicyUserAllowlist,
 		CyberSessionBlockTTLSeconds:       updatedSettings.CyberSessionBlockTTLSeconds,
 		CyberSessionIdentityStrictEnabled: updatedSettings.CyberSessionIdentityStrictEnabled,
 		AccountSchedulingThresholds:       updatedSettings.AccountSchedulingThresholds,

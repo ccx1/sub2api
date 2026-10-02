@@ -39,11 +39,13 @@ func prepareCodexTicketInvalidation(key string, used, expected codexTicketRevoca
 	}
 	switch event.Reason {
 	case "response_model_mismatch", "response_ticket_rejected", "cookie_changed", "model_quality_capability_failed", "model_quality_canary_failed", "model_quality_model_mismatch", "model_quality_quarantine_persist_failed":
+	case service.CodexTicketVaultInvalidationReason:
 	default:
 		event.Reason = "unknown"
 	}
 	switch event.Source {
 	case "http", "websocket", "websocket_handshake", "websocket_prewarm", "model_quality":
+	case service.CodexTicketVaultInvalidationSource:
 	default:
 		event.Source = "unknown"
 	}

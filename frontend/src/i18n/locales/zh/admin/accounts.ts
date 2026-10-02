@@ -1,4 +1,5 @@
 import codexTicketTools from '../codexTicketTools'
+import codexTicketVault from '../codexTicketVault'
 
 export default {
     accounts: {
@@ -6,6 +7,7 @@ export default {
       randomProxyRegionFallbackHint: '优先选择与账号地区匹配的代理；地区没有可用代理时，可回退到当前随机代理池。',
       randomProxyRegionFallbackOptions: { none: '仅使用账号地区代理', pool: '地区无可用时回退到当前代理池' },
       ...codexTicketTools,
+      ...codexTicketVault,
       codexModelQualityRecord: '模型质量检测记录',
       codexModelQualityMenu: '质量记录',
       codexTicketCredential: {
@@ -1023,6 +1025,7 @@ export default {
         excelBPSAutoMoveOn403Desc: '默认关闭. 触发条件与自动关闭协议相同, 两项可独立或同时勾选. 移入目标分组时会退出其他所有分组, 也可选择退出全部分组. 不禁用账号, 不重试当前请求. 目标分组失效或配置已变更时不调整分组. 自动调整后, 账号列表的名称下方显示「BPS 403疑似被封excel」标签, 再次调整该账号的分组后消失.',
         excelBPS403TargetGroup: '触发后的分组',
         excelBPS403SelectTarget: '请选择目标分组, 或选择退出所有分组',
+        excelBPSFreeUnsupported: 'Free 计划账号不支持 Excel / BPS。',
         excelBPS403LeaveAllGroups: '退出所有分组',
         excelBPSAutoDisableOn403Desc: '默认关闭. 勾选后, 当 Excel / BPS 上游返回 HTTP 403 且错误为 basispoints_upstream_error 时, 自动关闭此账号的 Excel / BPS 协议. 不禁用账号, 不重试当前请求. 模型权限错误不触发, 403 也不代表已确认封禁. 自动关闭后, 账号列表的名称下方显示「BPS 403疑似被封excel」标签, 重新开启协议后消失.',
         excelBPS403Badge: 'BPS 403疑似被封excel',
@@ -1054,6 +1057,9 @@ export default {
         responsesWebsocketsV2Desc:
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',
         wsMode: 'WS mode',
+        wsSseAcceleration: 'HTTP 流式 WS 加速',
+        wsSseAccelerationDesc:
+          '默认关闭。普通 OAuth 账号的流式 Responses 可通过上游 WS 连接池返回 SSE，并立即发送前置事件。建议选择上下文池模式，需关闭自动透传；全局 WS 开关仍生效，已绑定的传输插件优先。仅握手失败时回退 HTTP，请求发送后不自动重放。前置事件不代表正文已开始生成。',
         wsModeDesc:
           '仅对当前 OpenAI 账号类型生效。选择“关闭”可禁用 WS；其余模式需全局 gateway.openai_ws.mode_router_v2_enabled=true 才按所选方式连接，未开启时统一使用上下文池。',
         wsModeOff: '关闭（off）',
@@ -1336,6 +1342,7 @@ export default {
       enterCustomModelName: '输入自定义模型名称',
       addModel: '填入',
       modelExists: '该模型已存在',
+      modelMappingConflict: '该模型已配置映射 {from} → {to}，请在模型映射中修改或删除后再添加白名单模型',
       modelCount: '{count} 个模型',
       poolMode: '池模式',
       poolModeHint: '上游为账号池时启用，错误不标记本地账号状态',
@@ -1429,13 +1436,53 @@ export default {
 	  autoPause5hDisabled: '禁用 5h 自动暂停',
 	  autoPause7dDisabled: '禁用 7d 自动暂停',
 	  autoPauseDisabledHint: '开启后该账号永不进入自动暂停（即使全局默认阈值已配置）。',
-	  autoResetCredit: {
+	  claudeResetCredits: {
+	    count: '次数',
+	    countTooltipLoad: '点击查询 Claude 剩余重置次数（只读，不会消耗）',
+	    countTooltipRefresh: '点击刷新 Claude 剩余重置次数（只读，不会消耗）',
+	    fetched: '查询时间：{time}',
+	    error: '无法查询重置次数',
+	    ineligible: '此账号当前不可使用重置',
+	    cooldown: '冷却至 {time}',
+	    expiresAt: '到期 {time}',
+	    expiresAtFull: '重置次数到期时间：{time}',
+	    clears: '可清除窗口：{windows}',
+	    notUsableNow: '暂不可用',
+	    requiresLimit: '需达到限额后才能使用',
+	    reset: '重置',
+	    resetTooltipNeedQuery: '请先点「次数」查询；查询到可用的重置后才能使用',
+	    resetTooltipNone: '当前没有可立即使用的重置',
+	    resetTooltipReady: '消耗 1 次重置，清除限额窗口（需确认）',
+	    confirmTitle: '确认使用 Claude 重置',
+	    confirmMessage: '将消耗 1 次重置次数，立即恢复 {windows} 窗口，剩余 {count} 次。此操作不可撤销，确定继续吗？',
+	    windows: {
+	      fiveHour: '5h',
+	      sevenDay: '7d',
+	      sevenDayOverage: '7d 超额'
+	    },
+	    outcome: {
+	      reset: '重置成功，已清除：{windows}',
+	      alreadyUsed: '该重置已被使用，正在刷新确认',
+	      cooldown: '重置处于冷却中，请稍后再试',
+	      cooldownUntil: '重置处于冷却中，冷却至 {time}',
+	      notLimited: '当前未达到限额，无需重置，未消耗次数',
+	      ineligible: '此账号当前不可使用重置',
+	      unknown: '结果未确认，已阻止再次兑换，请稍后查询',
+	      unavailable: '重置服务暂时不可用，未确认消耗，请稍后再试',
+	      inProgress: '该重置请求仍在处理中，请稍后查询结果',
+	      retryBackoff: '该重置请求刚刚失败，请稍后再试',
+	      busy: '另一个重置正在进行中，请稍后再试',
+	      notAvailable: '当前没有可立即使用的重置，未消耗次数',
+	      failed: '重置请求失败'
+	    }
+	  },
+      autoResetCredit: {
 	    title: '自动使用重置卡',
 	    hint: '仅在实际用量达到阈值时使用最早到期的可用卡；默认关闭。无卡或失败时账号保持暂停。',
 	    threshold5h: '5h 自动用卡阈值(%)',
 	    threshold7d: '7d 自动用卡阈值(%)',
-	    thresholdHint: '两个窗口独立判断，任一达到自身阈值即触发。可填写 0.1–100，默认均为 100。',
-	    thresholdInvalid: '自动使用重置卡阈值必须在 0.1% 到 100% 之间。'
+	    thresholdHint: '填 0 表示忽略该窗口；启用的窗口任一达到自身阈值即触发。可填写 0 或 0.1–100，默认均为 100。例如 5h 填 0、7d 填 90，仅在 7d 用量达到 90% 时用卡。普通自动暂停规则不受影响。',
+	    thresholdInvalid: '自动使用重置卡阈值必须为 0（忽略该窗口），或在 0.1% 到 100% 之间。'
 	  },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {

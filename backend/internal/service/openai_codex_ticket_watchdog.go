@@ -16,12 +16,14 @@ type openAICodexTicketReceiptKey struct{}
 type openAICodexTicketReceipt struct {
 	account *Account
 	ticket  openAICodexTicket
+	claimed *openAICodexTicket
 	config  config.OpenAICodexTicketConfig
 	service *OpenAIGatewayService
 }
 
 func (s *OpenAIGatewayService) applyOpenAICodexTicketRequest(account *Account, model string, req *http.Request) error {
-	receipt, err := s.applyOpenAICodexTicketSnapshot(req.Context(), account, model, req.Header)
+	ctx := withOpenAICodexTicketTargetURL(req.Context(), req.URL)
+	receipt, err := s.applyOpenAICodexTicketSnapshot(ctx, account, model, req.Header)
 	if err != nil {
 		return err
 	}

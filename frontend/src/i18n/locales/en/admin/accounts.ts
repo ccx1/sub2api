@@ -1,4 +1,5 @@
 import codexTicketTools from '../codexTicketTools'
+import codexTicketVault from '../codexTicketVault'
 
 export default {
     accounts: {
@@ -55,6 +56,7 @@ export default {
       randomProxyRegionFallbackHint: 'Prefer proxies matching the account region; fall back to the current random proxy pool when none are available.',
       randomProxyRegionFallbackOptions: { none: 'Account region only', pool: 'Fall back to current proxy pool' },
       ...codexTicketTools,
+      ...codexTicketVault,
       codexModelQualityRecord: 'Model quality test records',
       codexModelQualityMenu: 'Quality records',
       codexTicketCredential: {
@@ -905,6 +907,7 @@ export default {
         excelBPSAutoMoveOn403Desc: 'Disabled by default. Uses the same trigger as disabling BPS; both options work independently or together. Move to the selected group and leave all other groups, or leave every group. The account stays enabled and the request is not retried. Invalid destinations or changed settings leave memberships unchanged. After an automatic move, the account list shows a “BPS 403: Excel possibly banned” badge under the account name until the account’s groups change again.',
         excelBPS403TargetGroup: 'Group action after a 403',
         excelBPS403SelectTarget: 'Select a destination group or leave all groups',
+        excelBPSFreeUnsupported: 'Free plan accounts cannot use Excel / BPS.',
         excelBPS403LeaveAllGroups: 'Leave all groups',
         excelBPSAutoDisableOn403Desc: 'Disabled by default. Turn off this account’s Excel / BPS protocol when the BPS upstream returns HTTP 403 mapped to basispoints_upstream_error. The account stays enabled and the current request is not retried. Model access errors do not trigger this option, and a 403 does not confirm a ban. After an automatic shutdown, the account list shows a “BPS 403: Excel possibly banned” badge under the account name until the protocol is turned back on.',
         excelBPS403Badge: 'BPS 403: Excel possibly banned',
@@ -937,6 +940,9 @@ export default {
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
         wsMode: 'WS mode',
+        wsSseAcceleration: 'HTTP streaming over WS',
+        wsSseAccelerationDesc:
+          'Off by default. Stream Responses through the upstream WS pool for ordinary OAuth accounts, delivering early SSE events immediately. Use Context Pool mode and disable automatic passthrough. Global WS gates still apply and bound transport plugins take precedence. Only handshake failures fall back to HTTP; sent requests are not replayed. Early events do not mean text generation has started.',
         wsModeDesc:
           'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
         wsModeOff: 'Off (off)',
@@ -1231,6 +1237,7 @@ export default {
       enterCustomModelName: 'Enter custom model name',
       addModel: 'Add',
       modelExists: 'Model already exists',
+      modelMappingConflict: 'A mapping already exists for {from} → {to}. Modify or remove it under Model Mapping before adding this whitelist model',
       modelCount: '{count} models',
       poolMode: 'Pool Mode',
       poolModeHint: 'Enable when upstream is an account pool; errors won\'t mark local account status',
@@ -1328,13 +1335,53 @@ export default {
 	  autoPause5hDisabled: 'Disable 5h auto-pause',
 	  autoPause7dDisabled: 'Disable 7d auto-pause',
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
-	  autoResetCredit: {
+	  claudeResetCredits: {
+	    count: 'Resets',
+	    countTooltipLoad: 'Check remaining Claude resets (read-only, never consumes one)',
+	    countTooltipRefresh: 'Refresh remaining Claude resets (read-only, never consumes one)',
+	    fetched: 'Checked at {time}',
+	    error: 'Could not check reset credits',
+	    ineligible: 'This account cannot use resets right now',
+	    cooldown: 'Cooldown until {time}',
+	    expiresAt: 'Expires {time}',
+	    expiresAtFull: 'Reset credit expires at: {time}',
+	    clears: 'Clears windows: {windows}',
+	    notUsableNow: 'Not usable now',
+	    requiresLimit: 'Usable only after hitting a limit',
+	    reset: 'Reset',
+	    resetTooltipNeedQuery: 'Check the count first; reset is available once a usable credit is found',
+	    resetTooltipNone: 'No reset can be used right now',
+	    resetTooltipReady: 'Consume 1 reset to clear limit windows (asks for confirmation)',
+	    confirmTitle: 'Confirm Claude Reset',
+	    confirmMessage: 'This will consume 1 reset credit to immediately restore the {windows} window(s) ({count} remaining). This action cannot be undone. Continue?',
+	    windows: {
+	      fiveHour: '5h',
+	      sevenDay: '7d',
+	      sevenDayOverage: '7d overage'
+	    },
+	    outcome: {
+	      reset: 'Reset applied; cleared: {windows}',
+	      alreadyUsed: 'This reset was already used; refreshing to confirm',
+	      cooldown: 'Resets are cooling down; try again later',
+	      cooldownUntil: 'Resets are cooling down until {time}',
+	      notLimited: 'Not at a limit, so nothing was reset and no credit was used',
+	      ineligible: 'This account cannot use resets right now',
+	      unknown: 'Result unconfirmed; further redemption is blocked for now. Check again later',
+	      unavailable: 'Reset service is temporarily unavailable; retry after a while',
+	      inProgress: 'This reset request is still processing; check again shortly',
+	      retryBackoff: 'This reset request just failed; retry after a moment',
+	      busy: 'Another reset is in progress; try again later',
+	      notAvailable: 'No reset can be used right now; no credit was used',
+	      failed: 'Reset request failed'
+	    }
+	  },
+      autoResetCredit: {
 	    title: 'Automatically use reset credits',
 	    hint: 'Uses the earliest-expiring available credit only when actual usage reaches a threshold. Off by default; the account remains paused if no credit is available or reset fails.',
 	    threshold5h: '5h auto-reset threshold (%)',
 	    threshold7d: '7d auto-reset threshold (%)',
-	    thresholdHint: 'Each window is evaluated independently. Enter 0.1–100; both default to 100.',
-	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.'
+	    thresholdHint: 'Set 0 to ignore a window. Any enabled window reaching its threshold triggers a reset. Enter 0 or 0.1–100; both default to 100. For example, 5h = 0 and 7d = 90 uses credits only at 90% weekly usage. Normal auto-pause rules still apply.',
+	    thresholdInvalid: 'Automatic reset-credit thresholds must be 0 (ignore this window) or between 0.1% and 100%.'
 	  },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {

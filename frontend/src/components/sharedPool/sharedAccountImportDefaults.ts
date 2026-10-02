@@ -1,5 +1,5 @@
 import type { SharedAccountImportDefaults, SharedImportDefaults } from '@/api/sharedPool'
-import { defaultExcelBPSOptions, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
+import { defaultExcelBPSOptions, sharedExcelBPSOptions } from '@/utils/excelBPSOptions'
 
 export function resolveSharedAccountImportDefaults(
   globalDefaults?: SharedAccountImportDefaults,
@@ -11,6 +11,6 @@ export function resolveSharedAccountImportDefaults(
   return {
     protection_enabled: overrides.protection_enabled ?? globalDefaults?.protection_enabled ?? true,
     excel_bps_enabled: bps?.excel_bps_enabled ?? false,
-    excel_bps_options: normalizeExcelBPSOptions(bps?.excel_bps_options ?? defaultExcelBPSOptions())
+    excel_bps_options: sharedExcelBPSOptions(bps?.excel_bps_options ?? defaultExcelBPSOptions())
   }
 }

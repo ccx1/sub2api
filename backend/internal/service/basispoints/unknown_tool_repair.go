@@ -105,8 +105,14 @@ func readRepairResponse(reader io.Reader) (object, error) {
 			}
 		}
 		switch kind {
-		case "response.completed", "response.incomplete", "response.failed":
+		case "response.completed", "response.incomplete", "response.failed", "response.cancelled":
 			response, _ = event["response"].(object)
+			if failure := classifyUpstreamFailure(kind, event); failure != nil {
+				if response != nil {
+					response["status"] = "failed"
+				}
+				return failure
+			}
 			if response == nil {
 				return fmt.Errorf("missing Basispoints correction response")
 			}
@@ -127,7 +133,7 @@ func readRepairResponse(reader io.Reader) (object, error) {
 			}
 			return io.EOF
 		case "error":
-			return fmt.Errorf("basispoints correction returned an error")
+			return classifyUpstreamFailure(kind, event)
 		}
 		return nil
 	})

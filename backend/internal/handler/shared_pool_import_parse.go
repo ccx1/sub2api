@@ -180,6 +180,11 @@ func normalizeSharedImportEntry(value any, defaults sharedImportDefaults, index 
 			entry.input.ExcelBPSOptions = &options
 		}
 	}
+	if objectValue && hasCredentials && entry.item.Message == "" {
+		if err := applySharedImportFileBPS(&entry.input, object); err != nil {
+			entry.item.Message = "文件中的 Excel / BPS 配置无效"
+		}
+	}
 	for i, warning := range entry.warnings {
 		entry.warnings[i] = fmt.Sprintf("第 %d 个账号：%s", index, warning)
 	}

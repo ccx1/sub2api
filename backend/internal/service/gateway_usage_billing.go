@@ -471,6 +471,7 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 		return
 	}
 	if result != nil && result.NewBalance != nil && deps.billingCacheService.balanceBelowEligibilityThreshold(*result.NewBalance) {
+		InflightReservationFromContext(ctx).RetainUntilExpiry()
 		if err := deps.billingCacheService.InvalidateUserBalance(ctx, p.User.ID); err != nil {
 			slog.Warn("invalidate balance cache after exhausted deduction failed",
 				"user_id", p.User.ID,
@@ -478,6 +479,24 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 				"balance_overdrafted", result.BalanceOverdrafted,
 				"error", err,
 			)
+		}
+		return
+	}
+	if deps.billingCacheService.InflightReservationEnabled() {
+		// 在途预留开启时同步扣减余额缓存：计费任务结束后才会释放预留，
+		// 必须保证此时准入读取的缓存余额已反映本次扣费，否则释放与扣减之间
+		// 仍存在「在途=0 且余额未扣」的窗口。本函数运行在计费 worker 中，不在请求热路径。
+		err := deps.billingCacheService.DeductBalanceCache(ctx, p.User.ID, p.Cost.ActualCost)
+		if err == nil {
+			return
+		}
+		// A timeout may mean Redis already applied the deduction. Never retry an
+		// additive update or release the reservation against an unchanged cache.
+		InflightReservationFromContext(ctx).RetainUntilExpiry()
+		if invalidateErr := deps.billingCacheService.InvalidateUserBalance(ctx, p.User.ID); invalidateErr != nil {
+			logger.LegacyPrintf("service.gateway", "ALERT: sync deduct and invalidate balance cache failed for user %d: deduct=%v invalidate=%v", p.User.ID, err, invalidateErr)
+		} else {
+			logger.LegacyPrintf("service.gateway", "Warning: sync deduct balance cache failed for user %d; invalidated cache: %v", p.User.ID, err)
 		}
 		return
 	}
@@ -729,7 +748,8 @@ func responseModelBillingAdoptable(baseline, response *CostBreakdown, baselineCh
 	if baseline == nil || response == nil {
 		return false
 	}
-	if response.TotalCost > baseline.TotalCost+responseModelBillingCostEpsilon {
+	if response.TotalCost > baseline.TotalCost+responseModelBillingCostEpsilon ||
+		response.ActualCost > baseline.ActualCost+responseModelBillingCostEpsilon {
 		return false
 	}
 	if response.TotalCost <= 0 && baseline.TotalCost > 0 {

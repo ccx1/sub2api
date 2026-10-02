@@ -508,6 +508,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
 	updates[SettingKeyCyberSessionIdentityStrictEnabled] = strconv.FormatBool(settings.CyberSessionIdentityStrictEnabled)
+	if _, err := ParseCyberPolicyUserAllowlist(settings.CyberPolicyUserAllowlist); err != nil {
+		return nil, err
+	}
+	updates[SettingKeyCyberPolicyUserAllowlist] = settings.CyberPolicyUserAllowlist
 	if settings.CyberSessionBlockTTLSeconds > 0 {
 		updates[SettingKeyCyberSessionBlockTTLSeconds] = strconv.Itoa(settings.CyberSessionBlockTTLSeconds)
 	}
@@ -930,7 +934,11 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// Cyber 会话屏蔽与严格身份门控必须在后台保存后立即生效，不能继续
 	// 使用最长 60 秒的旧开关快照。
 	s.cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
-	s.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{expiresAt: 0})
+	// 保留成功保存的白名单，避免下次数据库刷新失败丢失例外配置。
+	s.cyberSessionBlockRuntimeMu.Lock()
+	allowlistedUsers, _ := ParseCyberPolicyUserAllowlist(settings.CyberPolicyUserAllowlist)
+	s.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{allowlistedUsers: allowlistedUsers, expiresAt: 0})
+	s.cyberSessionBlockRuntimeMu.Unlock()
 	if s.requestCapture != nil {
 		s.requestCapture.ApplyConfig(settings.requestCaptureConfig())
 	}

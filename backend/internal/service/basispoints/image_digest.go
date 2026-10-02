@@ -274,6 +274,10 @@ func ReadImageDigestResponse(reader io.Reader) (string, []byte, error) {
 		usage, _ = json.Marshal(object{"usage": response["usage"]})
 	}
 	if err != nil {
+		var failure *UpstreamFailure
+		if errors.As(err, &failure) {
+			return "", usage, fmt.Errorf("basispoints image description did not complete: %w", failure)
+		}
 		return "", usage, fmt.Errorf("basispoints image description did not complete")
 	}
 	var answer bytes.Buffer

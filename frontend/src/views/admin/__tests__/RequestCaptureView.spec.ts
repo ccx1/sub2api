@@ -14,18 +14,35 @@ const options = { global: { stubs: { AppLayout: { template: '<div><slot /></div>
 beforeEach(() => { vi.clearAllMocks(); mocks.listTasks.mockResolvedValue({ items: [task], stats: {}, has_more: false }); mocks.list.mockResolvedValue({ items: [{ id: 7, email: 'user@test' }], total: 1 }); mocks.createTask.mockResolvedValue(task); mocks.listRecords.mockResolvedValue({ items: [record], has_more: false }); mocks.getRecord.mockResolvedValue(record); mocks.getContent.mockResolvedValue({ text: '<img src=x onerror=alert(1)>', next_offset: 10, has_more: true }) })
 afterEach(() => vi.restoreAllMocks())
 describe('request capture page', () => {
-  it('validates duration and defaults media capture off', async () => {
+  it('validates duration and defaults media and raw capture off', async () => {
     const wrapper = mount(View, options); await flushPromises()
     await wrapper.findAll('select')[1]!.setValue('7')
     await wrapper.find('input[type=number]').setValue('0'); await wrapper.find('form').trigger('submit'); expect(mocks.createTask).not.toHaveBeenCalled()
     await wrapper.find('input[type=number]').setValue('1440'); await wrapper.find('form').trigger('submit'); await flushPromises()
-    expect(mocks.createTask).toHaveBeenCalledWith({ target_type: 'user', target_id: 7, duration_minutes: 1440, save_media: false }); wrapper.unmount()
+    expect(mocks.createTask).toHaveBeenCalledWith({ target_type: 'user', target_id: 7, duration_minutes: 1440, save_media: false, raw: false }); wrapper.unmount()
+  })
+  it('enables raw capture explicitly and clears it when switched off', async () => {
+    const wrapper = mount(View, options); await flushPromises()
+    await wrapper.findAll('select')[1]!.setValue('7')
+    const rawToggle = wrapper.findAll('label').find(label => label.text() === 'admin.requestCapture.raw')!.get('input[type=checkbox]')
+    expect((rawToggle.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.text()).not.toContain('admin.requestCapture.rawWarning')
+    await rawToggle.setValue(true)
+    expect(wrapper.text()).toContain('admin.requestCapture.rawWarning')
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocks.createTask).toHaveBeenLastCalledWith({ target_type: 'user', target_id: 7, duration_minutes: 10, save_media: false, raw: true })
+    await rawToggle.setValue(false)
+    expect(wrapper.text()).not.toContain('admin.requestCapture.rawWarning')
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocks.createTask).toHaveBeenLastCalledWith({ target_type: 'user', target_id: 7, duration_minutes: 10, save_media: false, raw: false })
+    wrapper.unmount()
   })
   it('renders capture content as text and replaces preview pages', async () => {
     const wrapper = mount(View, options); await flushPromises()
     await wrapper.findAll('button').find(b => b.text().includes('#7'))!.trigger('click'); await flushPromises()
     expect(mocks.listRecords).toHaveBeenLastCalledWith('task', 1, '', true)
-    expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(1) // Only media remains configurable.
+    expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(2)
+    expect(wrapper.findAll('form')[1]!.find('input[type=checkbox]').exists()).toBe(false)
     await wrapper.findAll('button').find(b => b.text() === 'request-id')!.trigger('click'); await flushPromises()
     expect(wrapper.find('img').exists()).toBe(false); expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>')
     mocks.getContent.mockResolvedValueOnce({ text: 'next page', next_offset: 19, has_more: false })

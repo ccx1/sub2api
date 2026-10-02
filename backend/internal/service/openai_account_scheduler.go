@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"hash/fnv"
 	"log/slog"
 	"math"
@@ -17,6 +16,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -1498,11 +1499,46 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 	}
 
+	var bpsAttempt *openAIAccountLoadSelectionAttempt
+	if req.Platform == PlatformOpenAI {
+		bpsAccounts := make([]*Account, 0, len(filtered))
+		nativeAccounts := make([]*Account, 0, len(filtered))
+		for _, account := range filtered {
+			if account.IsExcelBPSEnabledForModel(req.RequestedModel) &&
+				(ctx.Value(excelBPSRoutingContextKey{}) == nil || isOpenAIExcelBPSRouting(ctx, account)) {
+				bpsAccounts = append(bpsAccounts, account)
+			} else {
+				nativeAccounts = append(nativeAccounts, account)
+			}
+		}
+		if len(bpsAccounts) > 0 && len(nativeAccounts) > 0 {
+			attempt := s.trySelectByLoadBalancePool(ctx, req, bpsAccounts, loadMap, budget)
+			if attempt.err != nil && !attempt.noCompactCandidates {
+				return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, attempt.err
+			}
+			if attempt.result != nil {
+				return attempt.result, attempt.candidateCount, attempt.topK, attempt.loadSkew, nil
+			}
+			if !attempt.noCompactCandidates {
+				bpsAttempt = &attempt
+			}
+			filtered = nativeAccounts
+		}
+	}
+	finishBPSWait := func() (*AccountSelectionResult, int, int, float64, error) {
+		return s.finishLoadBalanceSelectionFallback(ctx, req, *bpsAttempt, budget, filterStats)
+	}
+
 	if req.SubscriptionPriority {
 		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionAccounts(filtered)
 		if len(subscriptionAccounts) > 0 {
 			attempt := s.trySelectByLoadBalancePool(ctx, req, subscriptionAccounts, loadMap, budget)
 			if attempt.err != nil && (!attempt.noCompactCandidates || len(regularAccounts) <= 0) {
+				if bpsAttempt != nil && attempt.noCompactCandidates {
+					if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+						return result, count, topK, skew, nil
+					}
+				}
 				return nil, attempt.candidateCount, attempt.topK, attempt.loadSkew, attempt.err
 			}
 			if attempt.result != nil {
@@ -1515,6 +1551,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				}
 				if regularAttempt.result != nil {
 					return regularAttempt.result, regularAttempt.candidateCount, regularAttempt.topK, regularAttempt.loadSkew, nil
+				}
+				if bpsAttempt != nil {
+					if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+						return result, count, topK, skew, nil
+					}
 				}
 				var result *AccountSelectionResult
 				candidateCount, topK, loadSkew := regularAttempt.candidateCount, regularAttempt.topK, regularAttempt.loadSkew
@@ -1534,6 +1575,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				}
 				return result, candidateCount, topK, loadSkew, fallbackErr
 			}
+			if bpsAttempt != nil {
+				if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+					return result, count, topK, skew, nil
+				}
+			}
 			return s.finishLoadBalanceSelectionFallback(ctx, req, attempt, budget, filterStats)
 		}
 	}
@@ -1544,6 +1590,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 	if attempt.result != nil {
 		return attempt.result, attempt.candidateCount, attempt.topK, attempt.loadSkew, nil
+	}
+	if bpsAttempt != nil {
+		if result, count, topK, skew, err := finishBPSWait(); err == nil && result != nil {
+			return result, count, topK, skew, nil
+		}
 	}
 	return s.finishLoadBalanceSelectionFallback(ctx, req, attempt, budget, filterStats)
 }
@@ -1781,6 +1832,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	ctx = withOpenAIProxyQuarantineTransport(ctx, req.RequiredTransport)
 	if account == nil {
 		return false, "account_nil"
+	}
+	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
+		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {
+			return false, "account_model_not_owned"
+		}
 	}
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"
@@ -2560,13 +2616,16 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	if account == nil {
 		return false
 	}
-	if !success && len(observedErr) > 0 && isExcelBPSRateLimitError(observedErr[0]) {
+	if len(observedErr) > 0 && ignoreOpenAIAccountHealthError(observedErr[0]) {
 		return false
 	}
 	accountID := account.ID
 	healthTripped := false
 	if s != nil && s.rateLimitService != nil {
 		if success {
+			// Reset at the synchronous result boundary, before asynchronous
+			// usage recording can reorder this success behind a later failure.
+			s.rateLimitService.resetOpenAIIPUnauthorizedStreak(account)
 			s.rateLimitService.ObserveOpenAIAPIKeyHealthSuccess(context.Background(), account)
 		} else if len(observedErr) > 0 && observedErr[0] != nil {
 			healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(context.Background(), account, observedErr[0])
@@ -2587,10 +2646,19 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 // ObserveOpenAIAccountHealthFailure records failures that cannot reach the
 // scheduler-result path, for example after semantic response bytes were sent.
 func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Context, account *Account, observedErr error) bool {
-	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || isExcelBPSRateLimitError(observedErr) {
+	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || ignoreOpenAIAccountHealthError(observedErr) {
 		return false
 	}
 	return s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr)
+}
+
+func ignoreOpenAIAccountHealthError(err error) bool {
+	if isExcelBPSRateLimitError(err) || IsOpenAITurnAdmissionError(err) ||
+		errors.Is(err, ErrRandomProxyUnavailable) || errors.Is(err, ErrRandomProxyChanged) {
+		return true
+	}
+	var failure *basispoints.UpstreamFailure
+	return errors.As(err, &failure) && (failure.Status == 401 || failure.Status == 403 || failure.Status == 429)
 }
 
 func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {

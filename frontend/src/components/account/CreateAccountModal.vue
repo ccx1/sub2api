@@ -1518,6 +1518,7 @@
             <div v-if="modelRestrictionMode === 'whitelist'">
               <ModelWhitelistSelector
                 v-model="allowedModels"
+                :model-mappings="modelMappings"
                 :platform="form.platform"
                 :sync-credentials="syncPreviewCredentials"
                 @upstream-synced="upstreamModelsPreviewed = true"
@@ -2005,6 +2006,7 @@
           <div v-if="modelRestrictionMode === 'whitelist'">
             <ModelWhitelistSelector
               v-model="allowedModels"
+              :model-mappings="modelMappings"
               platform="anthropic"
               :sync-credentials="syncPreviewCredentials"
               @upstream-synced="upstreamModelsPreviewed = true"
@@ -2346,6 +2348,7 @@
           <div v-if="modelRestrictionMode === 'whitelist'">
             <ModelWhitelistSelector
               v-model="allowedModels"
+              :model-mappings="modelMappings"
               :platform="form.platform"
               :sync-credentials="syncPreviewCredentials"
               @upstream-synced="upstreamModelsPreviewed = true"
@@ -3147,6 +3150,24 @@
       </div>
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
+      <div v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.excelBPS') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSDesc') }}</p>
+          </div>
+          <button type="button" role="switch" :aria-checked="excelBPSEnabled"
+            :aria-label="t('admin.accounts.openai.excelBPS')" data-testid="create-excel-bps-toggle"
+            @click="excelBPSEnabled = !excelBPSEnabled; excelBPSTouched = true"
+            :class="['relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2', excelBPSEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
+            <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', excelBPSEnabled ? 'translate-x-5' : 'translate-x-0']" />
+          </button>
+        </div>
+        <ExcelBPSOptionsFields v-if="excelBPSEnabled" v-model="excelBPSOptions" class="mt-3"
+          test-id-prefix="create-excel-bps" :allow-group-move="true" :groups="excelBPSGroups" />
+      </div>
+
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -4001,6 +4022,8 @@ import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyG
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import { defaultExcelBPSOptions, isKnownFreePlan, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
@@ -4499,6 +4522,12 @@ const openaiPassthroughEnabled = ref(false)
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
+const excelBPSEnabled = ref(false)
+const excelBPSTouched = ref(false)
+const excelBPSOptions = ref(defaultExcelBPSOptions())
+const excelBPSGroups = computed(() => props.groups
+  .filter(group => group.platform === 'openai' || (!authStore.isSimpleMode && group.platform === 'composite'))
+  .map(group => ({ id: group.id, name: group.name, platform: 'openai' })))
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 // Images 非流式响应缺 b64_json 时由网关下载 url 回填（仅 OpenAI API Key）。
@@ -5508,6 +5537,9 @@ const resetForm = () => {
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
+  excelBPSEnabled.value = false
+  excelBPSTouched.value = false
+  excelBPSOptions.value = defaultExcelBPSOptions()
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -5576,6 +5608,22 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (accountCategory.value === 'oauth-based') {
+    extra.openai_excel_bps = excelBPSEnabled.value
+    if (excelBPSEnabled.value) {
+      const options = normalizeExcelBPSOptions(excelBPSOptions.value)
+      if (options.models !== null) extra.openai_excel_bps_models = options.models
+      if (options.auto_disable_on_403) extra.openai_excel_bps_auto_disable_on_403 = true
+      if (options.cache_creation_as_input) extra.openai_excel_bps_cache_creation_as_input = true
+      if (options.ignore_images) extra.openai_excel_bps_ignore_images = true
+      if (options.ignore_encrypted_content) extra.openai_excel_bps_ignore_encrypted_content = true
+      if (options.omit_unsupported_tools) extra.openai_excel_bps_omit_unsupported_tools = true
+      if (options.auto_move_on_403) {
+        extra.openai_excel_bps_auto_move_on_403 = true
+        extra.openai_excel_bps_403_target_group_id = options.target_group_id
+      }
+    }
+  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5651,13 +5699,38 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
-const buildOpenAICodexImportExtra = (): Record<string, unknown> | undefined => {
+const excelBPSExtraKeys = [
+  'openai_excel_bps', 'openai_excel_bps_models', 'openai_excel_bps_auto_disable_on_403',
+  'openai_excel_bps_cache_creation_as_input', 'openai_excel_bps_ignore_images',
+  'openai_excel_bps_ignore_encrypted_content', 'openai_excel_bps_omit_unsupported_tools',
+  'openai_excel_bps_auto_move_on_403', 'openai_excel_bps_403_target_group_id'
+]
+
+const validateExcelBPSSelection = (credentials?: Record<string, unknown>): boolean => {
+  if (!excelBPSEnabled.value) return true
+  if (isKnownFreePlan(credentials)) {
+    appStore.showError(t('admin.accounts.openai.excelBPSFreeUnsupported'))
+    return false
+  }
+  const options = normalizeExcelBPSOptions(excelBPSOptions.value)
+  if (options.auto_move_on_403 && (options.target_group_id === null ||
+    (options.target_group_id !== 0 && !excelBPSGroups.value.some(group => group.id === options.target_group_id)))) {
+    appStore.showError(t('admin.accounts.openai.excelBPS403SelectTarget'))
+    return false
+  }
+  return true
+}
+
+const buildOpenAICodexImportExtra = (includeBPS = true): Record<string, unknown> | undefined => {
   const extra = buildOpenAIExtra()
   if (!extra) {
     return undefined
   }
   if (!openAILongContextBillingTouched.value) {
     delete extra.openai_long_context_billing_enabled
+  }
+  if (!includeBPS || !excelBPSTouched.value) {
+    for (const key of excelBPSExtraKeys) delete extra[key]
   }
   return Object.keys(extra).length > 0 ? extra : undefined
 }
@@ -5781,6 +5854,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 const handleSubmit = async () => {
   if (submitting.value || openaiOAuth.loading.value) return
   if (!validateCodexTicketProxy()) return
+  if (form.platform === 'openai' && accountCategory.value === 'oauth-based' && !validateExcelBPSSelection()) return
   const cooldownError = dailyCooldownValidationError(dailyCooldown.value)
   if (cooldownError || (randomProxyEnabled.value && !isValidRandomProxyReuseMinutes(randomProxyMaxReuseMinutes.value))) {
     appStore.showError(t(cooldownError || 'admin.accounts.randomProxyMaxReuseInvalid'))
@@ -6460,6 +6534,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
 // OpenAI OAuth 授权码兑换
 const handleOpenAIExchange = async (authCode: string) => {
   if (!validateCodexTicketProxy()) return
+  if (!validateExcelBPSSelection()) return
   const oauthClient = openaiOAuth
   if (!authCode.trim() || !oauthClient.sessionId.value) return
 
@@ -6483,6 +6558,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     if (!tokenInfo) return
 
     const credentials = oauthClient.buildCredentials(tokenInfo)
+    if (!validateExcelBPSSelection(credentials)) return
     form.credentials = credentials
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
     const extra = buildOpenAIExtra(oauthExtra)
@@ -6606,6 +6682,8 @@ const handleOpenAIImportCodexSession = async (content: string) => {
     oauthClient.error.value = t('admin.accounts.oauth.openai.agentIdentityInvalid')
     return
   }
+  const includeBPS = oauthFlowRef.value?.inputMethod !== 'agent_identity' && !isAgentIdentityImportContent(trimmed)
+  if (includeBPS && !validateExcelBPSSelection()) return
 
   const credentialExtras = buildOpenAICodexImportCredentialExtras()
   if (credentialExtras === null) {
@@ -6616,7 +6694,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
   oauthClient.error.value = ''
 
   try {
-    const extra = buildOpenAICodexImportExtra()
+    const extra = buildOpenAICodexImportExtra(includeBPS)
     const result = await adminAPI.accounts.importCodexSession(withProxySelection({
       content: trimmed,
       name: form.name,
@@ -6695,7 +6773,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
   oauthClient.error.value = ''
 
   try {
-    const extra = buildOpenAICodexImportExtra()
+    const extra = buildOpenAICodexImportExtra(false)
     await adminAPI.accounts.createOpenAICodexPAT(withProxySelection({
       access_token: trimmed,
       name: form.name,
@@ -6730,6 +6808,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 // OpenAI RT 批量验证和创建（共享逻辑）
 const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string) => {
   if (!validateCodexTicketProxy()) return
+  if (!validateExcelBPSSelection()) return
   const oauthClient = openaiOAuth
   if (!refreshTokenInput.trim()) return
 
@@ -6767,6 +6846,11 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         }
 
         const credentials = oauthClient.buildCredentials(tokenInfo)
+        if (!validateExcelBPSSelection(credentials)) {
+          failedCount++
+          errors.push(`#${i + 1}: ${t('admin.accounts.openai.excelBPSFreeUnsupported')}`)
+          continue
+        }
         form.credentials = credentials
         if (clientId) {
           credentials.client_id = clientId

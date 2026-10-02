@@ -90,6 +90,28 @@ func TestSharedImportDefaultsApplyOnlyRequestedFamilies(t *testing.T) {
 	}
 }
 
+func TestSharedImportDefaultsSkipFreeAndAdminGroupMove(t *testing.T) {
+	for _, mode := range []string{"create", "import"} {
+		for _, plan := range []string{"team", "free"} {
+			t.Run(mode+"/"+plan, func(t *testing.T) {
+				h, repo := newSharedDefaultsHandler(t, `{"enabled":true,"protection_enabled":false,"codex_ticket_enabled":false,"excel_bps_enabled":true,"excel_bps_options":{"ignore_images":true,"auto_move_on_403":true,"target_group_id":0},"proxy_mode":"direct","extra":{}}`)
+				input := sharedDefaultsInput()
+				input["credentials"].(map[string]any)["plan_type"] = plan
+				w := runSharedDefaultsCreate(t, h, mode, input)
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				account := repo.accounts[1]
+				require.NotNil(t, account)
+				require.Equal(t, plan != "free", account.IsExcelBPSEnabled())
+				require.NotContains(t, account.Extra, service.ExcelBPSAutoMoveOn403Key)
+				require.NotContains(t, account.Extra, service.ExcelBPS403TargetGroupIDKey)
+				if plan != "free" {
+					require.True(t, account.IsExcelBPSIgnoreImagesEnabled())
+				}
+			})
+		}
+	}
+}
+
 func TestSharedImportDefaultsPreserveExplicitProtectionAndBPSFamily(t *testing.T) {
 	for _, mode := range []string{"create", "import"} {
 		for _, bps := range []bool{false, true} {

@@ -362,7 +362,7 @@ func (s *OpenAIGatewayService) ProbeOpenAICodexTicketNodes(ctx context.Context, 
 			return result, &CodexTicketNodeProbeError{Reason: reason}
 		}
 		// 票据只能从采集它的出口重放，避免同一凭据从另一个 IP 出现。
-		if ticket.Egress != "" && ticket.Egress != openAICodexTicketEgress(egress.proxyURL) {
+		if ticket.Egress == "" || ticket.Egress != openAICodexTicketEgress(egress.proxyURL) {
 			return result, &CodexTicketNodeProbeError{Reason: "egress_changed"}
 		}
 		// 与业务发送一致按当前 cookie_mode 投影。
@@ -539,6 +539,9 @@ func codexTicketNodeModels(account *Account, cfg config.OpenAICodexTicketConfig)
 	}
 	for key := range account.Extra {
 		if !IsOpenAICodexTicketExtraKey(key) {
+			continue
+		}
+		if IsOpenAICodexTicketMetaExtraKey(key) {
 			continue
 		}
 		if model := normalizeOpenAICodexTicketModel(strings.TrimPrefix(key, openAICodexTicketExtraKeyPrefix)); model != "" && !seen[model] {

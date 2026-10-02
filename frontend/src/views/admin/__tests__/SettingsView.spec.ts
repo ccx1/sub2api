@@ -6,6 +6,7 @@ import enCommon from "@/i18n/locales/en/common";
 import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
+import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
 import SettingsView from "../SettingsView.vue";
 vi.mock('vue-router', () => ({
   useRoute: () => ({ hash: '' }),
@@ -875,7 +876,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     expect((wrapper.get('#excel-bps-image-max-images').element as HTMLInputElement).value).toBe('100');
     for (const [id, value, original] of [
-      ['max-images', '0', '100'], ['max-images', '4097', '100'], ['ttl-minutes', '1441', '60'],
+      ['max-images', '0', '100'], ['max-images', String(excelBPSImageLimits.images + 1), '100'], ['ttl-minutes', String(excelBPSImageLimits.ttlMinutes + 1), '60'],
       ['max-total-mib', '1', '32'], ['storage-entries', '99', '512'], ['storage-mib', '1', '1024'],
     ]) {
       await wrapper.get(`#excel-bps-image-${id}`).setValue(value);
@@ -912,10 +913,10 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper.get('#excel-bps-image-enabled').setValue(true);
     await wrapper.get('#excel-bps-image-base-url').setValue('https://images.example');
     for (const [selector, value] of [
-      ['#excel-bps-image-body-limit', '129'],
+      ['#excel-bps-image-body-limit', String(excelBPSImageLimits.bodyMiB + 1)],
       ['#excel-bps-image-budget', '511'],
       ['#excel-bps-image-max-requests', '0'],
-      ['#excel-bps-image-max-requests', '513'],
+      ['#excel-bps-image-max-requests', String(excelBPSImageLimits.requests + 1)],
       ['#excel-bps-image-max-requests', '1.5'],
     ]) {
       const input = wrapper.get(selector);

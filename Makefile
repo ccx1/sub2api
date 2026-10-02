@@ -5,6 +5,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/admin/__tests__/accountTokenGuard.spec.ts \
 	src/components/account/__tests__/AccountTodayStatsCell.spec.ts \
 	src/views/admin/__tests__/AccountQualityView.spec.ts \
+	src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts \
 	src/utils/__tests__/qualityRulePatch.spec.ts \
 	src/stores/__tests__/accountQuality.spec.ts \
 	src/api/__tests__/observerUsage.spec.ts \

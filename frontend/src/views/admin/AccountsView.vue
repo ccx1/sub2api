@@ -224,7 +224,7 @@
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSelection(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
@@ -523,9 +523,10 @@
     <CodexTicketHistoryModal :show="showCodexTicketHistory" :account="codexTicketHistoryAcc" @close="closeCodexTicketHistory" />
     <CodexModelQualityRecordModal :show="showCodexModelQuality" :account="codexModelQualityAcc" @close="closeCodexModelQuality" />
     <CodexTicketNodesModal :show="showCodexTicketNodes" :account="codexTicketNodesAcc" @close="closeCodexTicketNodes" />
+    <CodexTicketVaultModal :show="showCodexTicketVault" :account="codexTicketVaultAcc" @close="closeCodexTicketVault" />
     <IQTestModal :show="showIQTest" :account="iqTestingAcc" :accounts="accounts" @close="closeIQTestModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="!!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" :show-codex-model-quality="!!menu.acc && isCodexTicketAccount(menu.acc)" :show-codex-ticket-nodes="!!menu.acc && isCodexTicketAccount(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @codex-model-quality="handleViewCodexModelQuality" @codex-ticket-nodes="handleViewCodexTicketNodes" @schedule="handleSchedule" @iq-test="handleIQTest" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :show-codex-ticket-history="!!menu.acc && isCodexTicketAccount(menu.acc) && isCodexTicketEnabled(menu.acc)" :show-codex-model-quality="!!menu.acc && isCodexTicketAccount(menu.acc)" :show-codex-ticket-nodes="!!menu.acc && isCodexTicketAccount(menu.acc)" :show-codex-ticket-vault="!!menu.acc && isCodexTicketAccount(menu.acc)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @codex-ticket-history="handleViewCodexTicketHistory" @codex-model-quality="handleViewCodexModelQuality" @codex-ticket-nodes="handleViewCodexTicketNodes" @codex-ticket-vault="handleViewCodexTicketVault" @schedule="handleSchedule" @iq-test="handleIQTest" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal v-if="authStore.isAdmin" :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" :settings-open="showImportSettings" @close="showImportData = false" @settings="openImportSettings" @imported="handleDataImported" @imported-and-edit="handleDataImportedAndEdit" />
     <AccountImportSettingsModal v-if="authStore.isAdmin" :show="showImportSettings" @close="showImportSettings = false" />
@@ -534,6 +535,7 @@
       :account-ids="bulkEditTarget?.mode === 'selected' ? bulkEditTarget.accountIds : selIds"
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
+      :selected-plan-types="bulkEditTarget?.selectedPlanTypes ?? []"
       :target="bulkEditTarget ?? undefined"
       :proxies="proxies"
       :groups="groups"
@@ -586,6 +588,7 @@ import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import CodexTicketHistoryModal from '@/components/account/CodexTicketHistoryModal.vue'
 import CodexModelQualityRecordModal from '@/components/admin/account/CodexModelQualityRecordModal.vue'
 import CodexTicketNodesModal from '@/components/admin/account/CodexTicketNodesModal.vue'
+import CodexTicketVaultModal from '@/components/admin/account/CodexTicketVaultModal.vue'
 import CodexTicketAlerts from '@/components/account/CodexTicketAlerts.vue'
 import IQTestModal from '@/components/admin/account/IQTestModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
@@ -618,7 +621,6 @@ import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupSc
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
-
 const proxies = ref<AccountProxy[]>([])
 const proxyGroups = ref<ProxyGroup[]>([])
 const proxyGroupsState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
@@ -693,6 +695,8 @@ type AccountBulkEditTarget =
       accountIds: number[]
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
+      selectedPlanTypes: string[]
+      selectedExcelBPSEligible: boolean
     }
   | {
       mode: 'filtered'
@@ -709,6 +713,8 @@ type AccountBulkEditTarget =
       previewCount: number
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
+      selectedPlanTypes: string[]
+      selectedExcelBPSEligible: boolean
     }
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
@@ -739,8 +745,6 @@ watch([showCreate, showEdit, showBulkEdit], async (opened) => {
   await loadProxyDirectory(true)
 })
 const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
-let bulkEditRequestVersion = 0
-let bulkEditTargetLoading = false
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
 const showCreateShadowDialog = ref(false)
@@ -750,6 +754,7 @@ const showStats = ref(false)
 const showCodexTicketHistory = ref(false)
 const showCodexModelQuality = ref(false)
 const showCodexTicketNodes = ref(false)
+const showCodexTicketVault = ref(false)
 const showIQTest = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
@@ -763,6 +768,7 @@ const statsAcc = ref<Account | null>(null)
 const codexTicketHistoryAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const codexModelQualityAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const codexTicketNodesAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
+const codexTicketVaultAcc = ref<Pick<Account, 'id' | 'name'> | null>(null)
 const iqTestingAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
@@ -1319,7 +1325,12 @@ const clearSelection = () => {
 }
 
 const selectPage = () => {
+  selectionRequestVersion.value++
   selectCurrentPage()
+}
+const toggleSelection = (id: number) => {
+  selectionRequestVersion.value++
+  toggleSel(id)
 }
 
 const swipeVirtualContext: SwipeSelectVirtualContext = {
@@ -1338,6 +1349,7 @@ useSwipeSelect(accountTableRef, {
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
+  upstreamBillingRateAbortController?.abort()
 }
 
 type AccountLoadOptions = {
@@ -1389,25 +1401,35 @@ const upstreamBillingRateContextKey = () => JSON.stringify({
 })
 
 const applyUpstreamBillingRateSnapshots = async (
-  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>
+  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>,
+  requestContextKey: string,
+  signal: AbortSignal
 ) => {
   const nextIDs = result.items.map(item => item.account_id)
   const currentIDs = accounts.value.map(account => account.id)
+  const currentByID = new Map(accounts.value.map(account => [account.id, account]))
 
-  // The compact response cannot fill a row that crossed a page boundary.
-  // Only that case needs the expensive, full account-list request.
-  if (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs)) {
-    try {
-      await load({ refreshTodayStats: false })
-    } catch (error) {
-      console.error('Failed to reconcile upstream billing sort:', error)
-    }
+  // Fetch missing rows without replacing the table with its loading skeleton.
+  if (result.total !== pagination.total || nextIDs.length !== currentIDs.length || nextIDs.some(id => !currentByID.has(id))) {
+    const page = await adminAPI.accounts.list(
+      pagination.page,
+      pagination.page_size,
+      { ...toRaw(params), lite: '1' },
+      { signal }
+    )
+    if (signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    pagination.total = page.total
+    pagination.pages = page.pages
+    mergeAccountsIncrementally(page.items)
+    hasPendingListSync.value = false
+    upstreamBillingNow.value = Date.now()
     return
   }
 
   const itemsByID = new Map(result.items.map(item => [item.account_id, item]))
-  let changed = false
-  const nextAccounts = accounts.value.map(account => {
+  let changed = !sameAccountIDOrder(nextIDs, currentIDs)
+  const nextAccounts = nextIDs.map(id => {
+    const account = currentByID.get(id)!
     const item = itemsByID.get(account.id)
     if (!item) return account
     const nextSnapshot = item.snapshot ?? null
@@ -1458,10 +1480,13 @@ const refreshUpstreamBillingRates = async (force = false) => {
       buildUpstreamBillingRateFilters(),
       { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
     )
-    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    if (controller.signal.aborted || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
     if (result.etag) upstreamBillingRateETag.value = result.etag
-    if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
+    if (!result.notModified && result.data) {
+      await applyUpstreamBillingRateSnapshots(result.data, requestContextKey, controller.signal)
+    }
   } catch (error) {
+    upstreamBillingRateETag.value = null
     const refreshError = error as { name?: string; code?: string }
     if (refreshError.name !== 'AbortError' && refreshError.name !== 'CanceledError' && refreshError.code !== 'ERR_CANCELED') {
       console.error('Failed to refresh upstream billing rates:', error)
@@ -1470,11 +1495,6 @@ const refreshUpstreamBillingRates = async (force = false) => {
     if (upstreamBillingRateAbortController === controller) upstreamBillingRateAbortController = null
     upstreamBillingRateRefreshing.value = false
   }
-}
-
-const refreshUpstreamBillingSortedList = async (force = false) => {
-  if (!force && sortState.sort_by !== 'upstream_billing_rate') return
-  await refreshUpstreamBillingRates(force)
 }
 
 useIntervalFn(() => { void refreshUpstreamBillingRates() }, 5 * 60_000, { immediate: false })
@@ -1563,6 +1583,7 @@ const isAnyModalOpen = computed(() => {
     showCodexTicketHistory.value ||
     showCodexModelQuality.value ||
     showCodexTicketNodes.value ||
+    showCodexTicketVault.value ||
     showIQTest.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
@@ -2067,6 +2088,7 @@ const openMenu = (a: Account, e: MouseEvent) => {
 }
 const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
+  selectionRequestVersion.value++
   toggleVisible(target.checked)
 }
 const handleBulkDelete = async () => {
@@ -2277,11 +2299,6 @@ const buildBulkEditFilterSnapshot = () => {
   }
 }
 
-watch([selIds, params], () => {
-  bulkEditRequestVersion++
-  bulkEditTargetLoading = false
-}, { flush: 'sync' })
-
 const handleSelectAllResults = async () => {
   if (selectingAllResults.value || pagination.total === 0) return
 
@@ -2308,64 +2325,119 @@ const handleSelectAllResults = async () => {
   }
 }
 
-const collectSelectionMetadata = (rows: Pick<Account, 'platform' | 'type'>[]) => {
+const collectSelectionMetadata = (rows: Account[]) => {
   const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
   const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
-  return { selectedPlatforms, selectedTypes }
+  const selectedPlanTypes = Array.from(new Set(rows.map(account => {
+    const plan = (account.credentials as Record<string, unknown> | undefined)?.plan_type
+    return typeof plan === 'string' ? plan.trim() : ''
+  }).filter(Boolean)))
+  const selectedExcelBPSEligible = rows.length > 0 && rows.every(account => {
+    if (account.platform !== 'openai' || account.type !== 'oauth' || account.parent_account_id != null) return false
+    const credentials = account.credentials
+    if (!credentials) return false
+    const authMode = credentials.auth_mode
+    const legacyAuthMode = credentials.openai_auth_mode
+    if (typeof authMode === 'string' && authMode.trim().toLowerCase() === 'agentidentity') return false
+    return ![authMode, legacyAuthMode].some(mode =>
+      typeof mode === 'string' && ['personalaccesstoken', 'personal_access_token'].includes(mode.trim().toLowerCase())
+    )
+  })
+  return { selectedPlatforms, selectedTypes, selectedPlanTypes, selectedExcelBPSEligible }
 }
 
-const prepareBulkEditTarget = async (loadTarget: () => Promise<AccountBulkEditTarget>) => {
-  if (bulkEditTargetLoading) return
-  const requestVersion = ++bulkEditRequestVersion
-  bulkEditTargetLoading = true
+const selectionMetadataLoading = ref(false)
+let bulkMetadataRequest = 0
+const loadAccountsForMetadata = async (ids: number[], fallbackRows?: Map<number, Account>) => {
+  const rowsById = new Map<number, Account>()
+  const isComplete = (row: Account | undefined, id: number) =>
+    Boolean(row && row.id === id && row.platform && row.type)
+  const needsDetail = (row: Account | undefined, id: number) =>
+    !isComplete(row, id) || (row?.credentials === undefined && row?.extra !== undefined)
+  const idsToLoad = ids.filter(id => {
+    const row = fallbackRows?.get(id)
+    if (needsDetail(row, id)) return true
+    rowsById.set(id, row!)
+    return false
+  })
+  for (let offset = 0; offset < idsToLoad.length; offset += 8) {
+    const batchIds = idsToLoad.slice(offset, offset + 8)
+    const batch = await Promise.all(batchIds.map(id => adminAPI.accounts.getById(id)))
+    batch.forEach((row, index) => {
+      const id = batchIds[index]!
+      const resolved = row ?? fallbackRows?.get(id)
+      if (!isComplete(resolved, id)) throw new Error('Incomplete account metadata')
+      rowsById.set(id, resolved!)
+    })
+  }
+  const rows = ids.map(id => rowsById.get(id))
+  if (rows.some((row, index) => !isComplete(row, ids[index]!))) throw new Error('Incomplete account metadata')
+  return rows as Account[]
+}
+
+const openBulkEditSelected = async () => {
+  if (selectionMetadataLoading.value || selIds.value.length === 0) return
+  const requestVersion = ++bulkMetadataRequest
+  selectionMetadataLoading.value = true
   try {
-    const target = await loadTarget()
-    if (requestVersion !== bulkEditRequestVersion) return
-    bulkEditTarget.value = target
+    const ids = [...selIds.value]
+    const rowsById = new Map<number, Account>(accounts.value.map(account => [account.id, account]))
+    const detailIds = ids.filter(id => {
+      const account = rowsById.get(id)
+      return !account || (account.credentials === undefined && account.extra !== undefined)
+    })
+    const missingIds = ids.filter(id => !rowsById.has(id))
+    const idsToLoad = [...new Set([...missingIds, ...detailIds])]
+    for (let offset = 0; offset < idsToLoad.length; offset += 8) {
+      const batchIds = idsToLoad.slice(offset, offset + 8)
+      const batch = await Promise.all(batchIds.map(id => adminAPI.accounts.getById(id)))
+      if (batch.some((row, index) => !row || row.id !== batchIds[index] || !row.platform || !row.type)) {
+        throw new Error('Incomplete account metadata')
+      }
+      batch.forEach(account => rowsById.set(account.id, account))
+    }
+    if (requestVersion !== bulkMetadataRequest) return
+    bulkEditTarget.value = { mode: 'selected', accountIds: ids, ...collectSelectionMetadata(ids.map(id => rowsById.get(id)!)) }
     showBulkEdit.value = true
   } catch (error) {
-    if (requestVersion === bulkEditRequestVersion) {
-      appStore.showError(extractApiErrorMessage(error, t('common.error')))
-    }
+    if (requestVersion === bulkMetadataRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
   } finally {
-    if (requestVersion === bulkEditRequestVersion) bulkEditTargetLoading = false
+    if (requestVersion === bulkMetadataRequest) selectionMetadataLoading.value = false
   }
 }
 
-const openBulkEditSelected = () => {
-  const ids = [...selIds.value]
-  if (ids.length === 0) return
-  return prepareBulkEditTarget(async () => {
-    const rowsById = new Map<number, Pick<Account, 'platform' | 'type'>>(
-      accounts.value.map(account => [account.id, account])
-    )
-    const missingIds = ids.filter(id => !rowsById.has(id))
-    for (let offset = 0; offset < missingIds.length; offset += 8) {
-      const batchIds = missingIds.slice(offset, offset + 8)
-      const batch = await Promise.all(batchIds.map(id => adminAPI.accounts.getById(id)))
-      batch.forEach((account, index) => {
-        if (!account || account.id !== batchIds[index] || !account.platform || !account.type) {
-          throw new Error(t('common.error'))
-        }
-        rowsById.set(account.id, account)
-      })
-    }
-    return { mode: 'selected', accountIds: ids, ...collectSelectionMetadata(ids.map(id => rowsById.get(id)!)) }
-  })
-}
-
-const openBulkEditFiltered = () => {
+const openBulkEditFiltered = async () => {
+  if (selectionMetadataLoading.value) return
+  const requestVersion = ++bulkMetadataRequest
+  selectionMetadataLoading.value = true
   const filters = buildBulkEditFilterSnapshot()
-  return prepareBulkEditTarget(async () => {
-    const rows: Pick<Account, 'platform' | 'type'>[] = []
-    const ids = await fetchAllAccountIds(async (page, pageSize, requestFilters) => {
-      const result = await adminAPI.accounts.list(page, pageSize, requestFilters)
-      rows.push(...result.items.map(({ platform, type }) => ({ platform, type })))
-      return result
-    }, filters)
-    return { mode: 'filtered', filters, previewCount: ids.length, ...collectSelectionMetadata(rows) }
-  })
+  try {
+    const summaryRows = new Map<number, Account>()
+    const ids = await fetchAllAccountIds(
+      async (page, pageSize, requestFilters) => {
+        const result = await adminAPI.accounts.list(page, pageSize, requestFilters)
+        result.items.forEach(account => summaryRows.set(account.id, account as Account))
+        return result
+      }, filters)
+    if (requestVersion !== bulkMetadataRequest || ids.length === 0) return
+    const rows = await loadAccountsForMetadata(ids, summaryRows)
+    if (requestVersion !== bulkMetadataRequest) return
+    bulkEditTarget.value = { mode: 'filtered', filters, previewCount: ids.length, ...collectSelectionMetadata(rows) }
+    showBulkEdit.value = true
+  } catch (error) {
+    if (requestVersion === bulkMetadataRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  } finally {
+    if (requestVersion === bulkMetadataRequest) selectionMetadataLoading.value = false
+  }
 }
+watch([selIds, () => JSON.stringify(buildBulkEditFilterSnapshot())], () => {
+  bulkMetadataRequest++
+  selectionMetadataLoading.value = false
+}, { flush: 'sync' })
+watch([selIds, params], () => {
+  bulkMetadataRequest++
+  selectionMetadataLoading.value = false
+}, { flush: 'sync' })
 
 const handleBulkUpdated = () => {
   showBulkEdit.value = false
@@ -2378,12 +2450,11 @@ const handleDataImportedAndEdit = async (accountIds: number[]) => {
   handleDataImported()
   const ids = [...new Set(accountIds)].filter(id => Number.isSafeInteger(id) && id > 0)
   if (ids.length === 0) return
+  const requestVersion = ++bulkMetadataRequest
+  selectionMetadataLoading.value = true
   try {
-    const importedAccounts: Account[] = []
-    for (let offset = 0; offset < ids.length; offset += 8) {
-      const batch = await Promise.all(ids.slice(offset, offset + 8).map(id => adminAPI.accounts.getById(id)))
-      importedAccounts.push(...batch)
-    }
+    const importedAccounts = await loadAccountsForMetadata(ids)
+    if (requestVersion !== bulkMetadataRequest) return
     if (importedAccounts.length === 1) {
       edAcc.value = importedAccounts[0]!
       showEdit.value = true
@@ -2396,7 +2467,9 @@ const handleDataImportedAndEdit = async (accountIds: number[]) => {
     }
     showBulkEdit.value = true
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+    if (requestVersion === bulkMetadataRequest) appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  } finally {
+    if (requestVersion === bulkMetadataRequest) selectionMetadataLoading.value = false
   }
 }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
@@ -2518,7 +2591,9 @@ const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBilli
   })
 }
 const refreshAccountsAfterUpstreamBillingProbe = async () => {
-  await refreshUpstreamBillingSortedList(true)
+  enterAutoRefreshSilentWindow()
+  // Cost may change even when the active sort does not depend on upstream rates.
+  await refreshUpstreamBillingRates(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
   if (probingUpstreamBilling.has(account.id)) return
@@ -2643,6 +2718,15 @@ const handleViewCodexTicketNodes = (account: AccountListItem) => {
   if (!isCodexTicketAccount(account)) return
   codexTicketNodesAcc.value = { id: account.id, name: account.name }
   showCodexTicketNodes.value = true
+}
+const closeCodexTicketVault = () => {
+  showCodexTicketVault.value = false
+  codexTicketVaultAcc.value = null
+}
+const handleViewCodexTicketVault = (account: AccountListItem) => {
+  if (!isCodexTicketAccount(account)) return
+  codexTicketVaultAcc.value = { id: account.id, name: account.name }
+  showCodexTicketVault.value = true
 }
 const handleSchedule = async (a: Account) => {
   scheduleAcc.value = a
@@ -2898,7 +2982,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  bulkEditRequestVersion++
+  bulkMetadataRequest++
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

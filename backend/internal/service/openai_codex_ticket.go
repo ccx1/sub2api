@@ -74,6 +74,9 @@ type openAICodexTicket struct {
 	RevalidateAt   time.Time `json:"revalidate_at,omitempty"`
 	RevalidatedAt  time.Time `json:"revalidated_at,omitempty"`
 	Attempts       int       `json:"attempts"`
+	// consumed 仅是本机运行时标记：“用后即删”已领取该票谱系。它不序列化，
+	// 已领取的票在下一次发布时随其他不可用票一起从库存物理删除。
+	consumed bool
 }
 
 func openAICodexTicketKey(accountID int64, model string) string {
@@ -322,7 +325,19 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketSnapshot(ctx context.Contex
 	if cfg.FailClosed && s.codexModelQualityPaused(ctx, account, model) {
 		return nil, ErrOpenAICodexTicketUnavailable
 	}
-	ticket := s.lookupOpenAICodexTicketForConfig(account, model, cfg)
+	// A WS handshake may have selected a consume-after-use ticket before
+	// falling back to HTTP. Reuse that immutable selection for this turn so
+	// request construction and final header injection cannot consume another.
+	if receipt, ok := s.reuseClaimedOpenAICodexTicket(ctx, account, model, cfg, h); ok {
+		return receipt, nil
+	}
+	if cfg.ConsumeAfterUse {
+		receipt, err := s.applyConsumedOpenAICodexTicket(ctx, account, model, cfg, h)
+		if err != nil || receipt != nil {
+			return receipt, err
+		}
+	}
+	ticket := s.lookupOpenAICodexTicketForUse(account, model, cfg)
 	if ticket != nil && ticket.usable(time.Now(), account, cfg) {
 		projected, err := s.prepareCodexCookieTicket(ctx, account, ticket, cfg)
 		if err != nil {
@@ -414,8 +429,8 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccountContext(ctx context
 	if !OpenAICodexTicketAccountEnabled(account) || !isOpenAICodexTicketAccount(account, model) {
 		return false
 	}
-	ticket := s.lookupOpenAICodexTicketForConfig(account, model, cfg)
-	return !ticket.usable(time.Now(), account, cfg)
+	ticket := s.lookupOpenAICodexTicketForUse(account, model, cfg)
+	return ticket == nil
 }
 
 func jsonString(v string) string {

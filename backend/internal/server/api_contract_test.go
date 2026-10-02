@@ -896,7 +896,6 @@ func TestAPIContracts(t *testing.T) {
 					"excel_bps_image_body_limit_mib": 64,
 					"excel_bps_image_budget_mib": 1024,
 					"excel_bps_image_max_requests": 128,
-					"excel_bps_image_max_images": 20,
  "request_capture_enabled": false,
  "request_capture_quota_mib": 1024,
  "request_capture_retention_days": 7,
@@ -1036,6 +1035,7 @@ func TestAPIContracts(t *testing.T) {
 					"model_plaza_description": "",
 					"plugin_management_enabled": false,
 					"risk_control_enabled": false,
+					"cyber_policy_user_allowlist": "",
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
 					"cyber_session_identity_strict_enabled": false,
@@ -1251,7 +1251,6 @@ func TestAPIContracts(t *testing.T) {
 					"excel_bps_image_body_limit_mib": 64,
 					"excel_bps_image_budget_mib": 1024,
 					"excel_bps_image_max_requests": 128,
-					"excel_bps_image_max_images": 20,
  "request_capture_enabled": false,
  "request_capture_quota_mib": 1024,
  "request_capture_retention_days": 7,
@@ -1383,6 +1382,7 @@ func TestAPIContracts(t *testing.T) {
 					"model_plaza_description": "",
 					"plugin_management_enabled": false,
 					"risk_control_enabled": false,
+					"cyber_policy_user_allowlist": "",
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
 					"cyber_session_identity_strict_enabled": false,
@@ -1798,8 +1798,8 @@ func (stubApiKeyCache) IncrementCreateAttemptCount(ctx context.Context, userID i
 	return nil
 }
 
-func (stubApiKeyCache) DeleteCreateAttemptCount(ctx context.Context, userID int64) error {
-	return nil
+func (stubApiKeyCache) IncrementCreateCount(ctx context.Context, userID int64, window time.Duration) (int64, error) {
+	return 0, nil
 }
 
 func (stubApiKeyCache) IncrementDailyUsage(ctx context.Context, apiKey string) error {
@@ -2719,7 +2719,7 @@ func (r *stubUsageLogRepo) GetAPIKeyUsageTrend(ctx context.Context, startTime, e
 	return nil, errors.New("not implemented")
 }
 
-func (r *stubUsageLogRepo) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) ([]usagestats.UserUsageTrendPoint, error) {
+func (r *stubUsageLogRepo) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int, metric string) ([]usagestats.UserUsageTrendPoint, error) {
 	return nil, errors.New("not implemented")
 }
 

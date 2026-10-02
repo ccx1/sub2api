@@ -37,7 +37,7 @@ const mountView = () => shallowMount(ProxiesView, {
         props: ['modelValue', 'options', 'placeholder'],
         emits: ['update:modelValue', 'change'],
         template: `<select :data-filter="placeholder" :value="modelValue"
-          @change="$emit('update:modelValue', $event.target.value); $emit('change', $event.target.value)">
+          @change="$emit('update:modelValue', options.find(option => String(option.value) === $event.target.value)?.value); $emit('change', options.find(option => String(option.value) === $event.target.value)?.value)">
           <option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>`
       }
@@ -62,7 +62,7 @@ describe('proxy list filter pagination', () => {
     await flushPromises()
     await wrapper.get('[data-test="page"]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-testid="proxy-group-filter"]').setValue(group)
+    await wrapper.get('[data-testid="proxy-group-filter"] select').setValue(group)
     await flushPromises()
     expect(listProxies.mock.lastCall?.[0]).toBe(1)
     expect(listProxies.mock.lastCall?.[2].group_id).toBe(group === '' ? undefined : Number(group))

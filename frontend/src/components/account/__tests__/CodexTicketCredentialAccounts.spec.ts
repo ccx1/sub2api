@@ -7,7 +7,9 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showS
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isSimpleMode: true }) }))
 vi.mock('@/api/admin', () => ({ adminAPI: {
   proxies: { listGroups: vi.fn().mockResolvedValue([]) },
-  accounts: { update: mocks.update, create: mocks.create, importCodexSession: mocks.session, createOpenAICodexPAT: mocks.pat, checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }) },
+  accounts: { update: mocks.update, create: mocks.create, importCodexSession: mocks.session, createOpenAICodexPAT: mocks.pat,
+    getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
+    checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }) },
   settings: { getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }), getSettings: vi.fn().mockResolvedValue({}) },
   tlsFingerprintProfiles: { list: vi.fn().mockResolvedValue([]) }
 } }))
@@ -92,9 +94,11 @@ describe('ticket credential account integration', () => {
     await wrapper.get('#create-account-form').trigger('submit.prevent')
     await wrapper.get(`[data-testid="import-${method}"]`).trigger('click')
     await flushPromises()
-    expect((method === 'session' ? mocks.session : mocks.pat)).toHaveBeenCalledWith(expect.objectContaining({ extra: expect.objectContaining({
-      codex_ticket_proxy_mode: 'account', codex_ticket_credential_policy: { mode: 'cookie', ttl_seconds: 21, refresh_before_seconds: 0 }
-    }) }))
+    const payload = (method === 'session' ? mocks.session : mocks.pat).mock.calls.at(-1)?.[0]
+    expect(payload.extra).toMatchObject({
+      codex_ticket_credential_policy: { mode: 'cookie', ttl_seconds: 21, refresh_before_seconds: 0 }
+    })
+    expect(payload.extra).not.toHaveProperty('codex_ticket_proxy_mode')
     wrapper.unmount()
   })
 

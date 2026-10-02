@@ -32,7 +32,7 @@
       </div>
 
       <!-- Excel / BPS protocol (ChatGPT OAuth only) -->
-      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIExcelBPSEligible" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label id="bulk-edit-excel-bps-label" class="input-label mb-0" for="bulk-edit-excel-bps-enabled">
@@ -55,10 +55,12 @@
           aria-labelledby="bulk-edit-excel-bps-label">
           <button type="button" role="switch" :aria-checked="excelBPSEnabled"
             :aria-label="t('admin.accounts.openai.excelBPS')" data-testid="bulk-excel-bps-toggle"
+            :disabled="hasFreePlan && !excelBPSEnabled"
             @click="excelBPSEnabled = !excelBPSEnabled"
             :class="['relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2', excelBPSEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']">
             <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition', excelBPSEnabled ? 'translate-x-5' : 'translate-x-0']" />
           </button>
+          <p v-if="hasFreePlan" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSFreeUnsupported') }}</p>
           <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
             <label class="flex items-center gap-2 text-sm">
               <input v-model="excelBPSAllModels" type="checkbox" data-testid="bulk-excel-bps-all-models" />
@@ -448,6 +450,7 @@
 
               <ModelWhitelistSelector
                 v-model="allowedModels"
+                :model-mappings="modelMappings"
                 :platforms="targetSelectedPlatforms"
               />
 
@@ -1709,12 +1712,15 @@ interface Props {
   accountIds: number[]
   selectedPlatforms: AccountPlatform[]
   selectedTypes: AccountType[]
+  selectedPlanTypes?: string[]
   target?: {
     mode: 'selected' | 'filtered'
     filters?: Record<string, unknown>
     previewCount?: number
     selectedPlatforms?: AccountPlatform[]
     selectedTypes?: AccountType[]
+    selectedPlanTypes?: string[]
+    selectedExcelBPSEligible?: boolean
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
@@ -1735,6 +1741,8 @@ const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
+const targetSelectedPlanTypes = computed(() => props.target?.selectedPlanTypes ?? props.selectedPlanTypes ?? [])
+const hasFreePlan = computed(() => targetSelectedPlanTypes.value.some(plan => plan.trim().toLowerCase() === 'free'))
 // Grok 快捷端点仅在所选账号全部为 grok 平台时展示（其他平台不显示）
 const allTargetsGrok = computed(
   () =>
@@ -1770,6 +1778,9 @@ const allOpenAIOAuthOnly = computed(() => {
     targetSelectedTypes.value.every(t => t === 'oauth')
   )
 })
+const allOpenAIExcelBPSEligible = computed(() =>
+  allOpenAIOAuthOnly.value && props.target?.selectedExcelBPSEligible === true
+)
 
 const allOpenAIAPIKey = computed(() => {
   return (
@@ -2224,7 +2235,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
-  if (enableExcelBPS.value && allOpenAIOAuthOnly.value) {
+  if (enableExcelBPS.value && allOpenAIExcelBPSEligible.value) {
     const extra = ensureExtra()
     extra.openai_excel_bps = excelBPSEnabled.value
     // null explicitly removes an existing model scope; [] selects no BPS models.
@@ -2496,13 +2507,17 @@ const handleSubmit = async () => {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
   }
+  if (enableExcelBPS.value && hasFreePlan.value && excelBPSEnabled.value) {
+    appStore.showError(t('admin.accounts.openai.excelBPSFreeUnsupported'))
+    return
+  }
 
   const hasAnyFieldEnabled =
     enableProxyRegion.value ||
     enableCodexTicketProxy.value ||
     enableDailyCooldown.value ||
     enableBaseUrl.value ||
-    (enableExcelBPS.value && allOpenAIOAuthOnly.value) ||
+    (enableExcelBPS.value && allOpenAIExcelBPSEligible.value) ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
@@ -2536,7 +2551,7 @@ const handleSubmit = async () => {
     return
   }
 
-  if (enableExcelBPS.value && allOpenAIOAuthOnly.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
+  if (enableExcelBPS.value && allOpenAIExcelBPSEligible.value && excelBPSEnabled.value && excelBPSAutoMoveOn403.value) {
     const target = Number(excelBPS403TargetGroupID.value)
     if (excelBPS403TargetGroupID.value === '' || !Number.isSafeInteger(target) || target < 0 ||
       !excelBPS403GroupOptions.value.some(option => option.value === target)) {
