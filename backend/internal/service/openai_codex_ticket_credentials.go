@@ -51,9 +51,17 @@ func (t *openAICodexTicket) rawCookiesForURL(u *url.URL) []*http.Cookie {
 	}
 	var result []*http.Cookie
 	for _, cookie := range t.Cookies {
-		if cookie != nil && cookie.Valid() == nil && (cookie.Domain == "" || strings.TrimPrefix(cookie.Domain, ".") == "chatgpt.com") &&
-			cookie.MaxAge >= 0 && cookie.Expires.After(time.Now()) && codexTicketCookiePathMatches(cookie.Path, u.Path) {
+		if cookie == nil {
+			continue
+		}
+		deadline := cookie.Expires
+		if !t.historicalExpiresAt.IsZero() {
+			deadline = t.historicalExpiresAt
+		}
+		if cookie.Valid() == nil && (cookie.Domain == "" || strings.TrimPrefix(cookie.Domain, ".") == "chatgpt.com") &&
+			cookie.MaxAge >= 0 && deadline.After(time.Now()) && codexTicketCookiePathMatches(cookie.Path, u.Path) {
 			copy := *cookie
+			copy.Expires = deadline
 			result = append(result, &copy)
 		}
 	}

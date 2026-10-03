@@ -78,11 +78,26 @@ export function validateTicketSettings(settings: CodexTicketSettings): TicketVal
   if (sessionMode !== 'random' && sessionMode !== 'account' && sessionMode !== 'account_model') return { key: 'sessionMode' }
   const mode = settings.length_mode === undefined ? 'strict' : settings.length_mode
   if (mode !== 'auto' && mode !== 'strict') return { key: 'lengthMode' }
+  const usageMode = settings.usage_mode === undefined ? 'immediate' : settings.usage_mode
+  if (usageMode !== 'immediate' && usageMode !== 'aged') return { key: 'usageMode' }
+  const cookieRefreshMode = settings.cookie_refresh_mode ?? 'fresh_per_ticket'
+  if (cookieRefreshMode !== 'fresh_per_ticket' && cookieRefreshMode !== 'reuse_on_refresh') return { key: 'cookieRefreshMode' }
+  if (settings.consume_after_use !== undefined && typeof settings.consume_after_use !== 'boolean') return { key: 'consumeAfterUse' }
   const fields = [{ key: 'target_length' as NumericKey, min: 16, max: 8192 }, { key: 'business_verification_rounds' as NumericKey, min: 1, max: 10 }, ...ticketCookieFields, ...ticketNumericGroups.flatMap(group => group.fields)]
   const defaults: Partial<Record<NumericKey, number>> = { business_verification_rounds: 1, proxy_failure_threshold: 3, pool_capacity: 5, cookie_ttl_seconds: 20, cookie_refresh_before_seconds: 5 }
   for (const field of fields) {
     const value = settings[field.key] === undefined ? defaults[field.key] : settings[field.key]
     if (!inRange(value, field.min, field.max)) return { key: 'range', field: field.key, min: field.min, max: field.max }
+  }
+  const accountCapacity = settings.account_pool_capacity
+  if (accountCapacity !== undefined && !inRange(accountCapacity, settings.models.length, 1000)) {
+    return { key: 'range', field: 'account_pool_capacity', min: settings.models.length, max: 1000 }
+  }
+  if (usageMode === 'aged') {
+    const validity = settings.historical_ticket_validity_seconds ?? 691200
+    if (!inRange(validity, 1, 2592000)) return { key: 'range', field: 'historical_ticket_validity_seconds', min: 1, max: 2592000 }
+    const maxAge = validity - 1
+    if (!inRange(settings.min_ticket_age_seconds, 1, maxAge)) return { key: 'range', field: 'min_ticket_age_seconds', min: 1, max: maxAge }
   }
   if (settings.refresh_before_seconds >= settings.ttl_seconds) return { key: 'refresh' }
   if ((settings.cookie_refresh_before_seconds ?? 5) >= (settings.cookie_ttl_seconds ?? 20)) return { key: 'cookieRefresh' }

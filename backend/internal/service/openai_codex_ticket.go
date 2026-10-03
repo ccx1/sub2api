@@ -76,7 +76,8 @@ type openAICodexTicket struct {
 	Attempts       int       `json:"attempts"`
 	// consumed 仅是本机运行时标记：“用后即删”已领取该票谱系。它不序列化，
 	// 已领取的票在下一次发布时随其他不可用票一起从库存物理删除。
-	consumed bool
+	consumed            bool
+	historicalExpiresAt time.Time
 }
 
 func openAICodexTicketKey(accountID int64, model string) string {
@@ -160,6 +161,11 @@ type OpenAICodexTicketStatus struct {
 	ReserveCount            int        `json:"reserve_count"`
 	ExpiringCount           int        `json:"expiring_count"`
 	NextExpiresAt           *time.Time `json:"next_expires_at,omitempty"`
+	OriginCapturedAt        *time.Time `json:"origin_captured_at,omitempty"`
+	LastAttemptAt           *time.Time `json:"last_attempt_at,omitempty"`
+	LastAttemptSuccess      *bool      `json:"last_attempt_success,omitempty"`
+	LastAttemptReason       string     `json:"last_attempt_reason,omitempty"`
+	UsageMode               string     `json:"usage_mode"`
 	// Quality fields are the latest persisted model quality result. They are
 	// deliberately a compact summary so ticket/usage views never expose test
 	// prompts, tokens or transport details.
@@ -192,6 +198,10 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 		return nil
 	}
 	cfg = config.NormalizeOpenAICodexTicketConfig(cfg)
+	var history CodexTicketHistory
+	if account != nil && account.Extra != nil {
+		history, _ = DecodeCodexTicketHistory(account.Extra[OpenAICodexTicketHistoryKey])
+	}
 	models := cfg.Models
 	out := make([]OpenAICodexTicketStatus, 0, len(models))
 	for _, model := range models {
@@ -203,8 +213,20 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 		if account != nil && account.Extra != nil {
 			ticket = parseOpenAICodexTicketFromAny(account.ID, model, account.Extra[openAICodexTicketExtraKey(model)])
 		}
+		limitCodexTicketInventory(ticket, config.CodexTicketModelCapacity(cfg, model))
 		markCodexTicketSlotsConsumed(ticket, codexTicketConsumptionLedgerFromAccount(account, now))
-		out = append(out, codexTicketPoolStatus(model, ticket, account, cfg, now))
+		status := codexTicketPoolStatus(model, ticket, account, cfg, now)
+		status.UsageMode = cfg.UsageMode
+		for _, attempt := range history.Items {
+			if attempt.Model != model || attempt.StartedAt.IsZero() ||
+				status.LastAttemptAt != nil && !attempt.StartedAt.After(*status.LastAttemptAt) {
+				continue
+			}
+			started, success := attempt.StartedAt, attempt.Success
+			status.LastAttemptAt, status.LastAttemptSuccess = &started, &success
+			status.LastAttemptReason = attempt.Reason
+		}
+		out = append(out, status)
 	}
 	return out
 }

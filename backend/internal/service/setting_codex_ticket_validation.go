@@ -58,6 +58,8 @@ func validateCodexTicketPolicy(cfg *config.OpenAICodexTicketConfig) error {
 		{"target_length", cfg.TargetLength, 16, 8192},
 		{"ttl_seconds", cfg.TTLSeconds, 60, 86400},
 		{"pool_capacity", cfg.PoolCapacity, 1, config.MaxCodexTicketPoolCapacity},
+		{"account_pool_capacity", cfg.AccountPoolCapacity, 0, config.MaxCodexTicketAccountPoolCapacity},
+		{"historical_ticket_validity_seconds", cfg.HistoricalTicketValiditySeconds, 0, config.MaxCodexTicketHistoricalValiditySeconds},
 		{"refresh_before_seconds", cfg.RefreshBeforeSeconds, 0, cfg.TTLSeconds - 1},
 		{"harvest_probe_interval_seconds", cfg.HarvestProbeIntervalSeconds, 1, 3600},
 		{"harvest_attempt_timeout_seconds", cfg.HarvestAttemptTimeoutSeconds, 1, 300},
@@ -73,7 +75,7 @@ func validateCodexTicketPolicy(cfg *config.OpenAICodexTicketConfig) error {
 			return invalidCodexTicketPolicy(fmt.Sprintf("%s 必须在 %d 到 %d 之间", item.name, item.min, item.max))
 		}
 	}
-	// 取票机制依赖已校验的 ttl_seconds：沉淀时长必须小于票据有效期。
+	// 历史票独立于打票软复验 TTL。
 	if err := config.ValidateCodexTicketUsage(cfg); err != nil {
 		return invalidCodexTicketPolicy(err.Error())
 	}
@@ -89,6 +91,9 @@ func validateCodexTicketPolicy(cfg *config.OpenAICodexTicketConfig) error {
 	}
 	if err := validateCodexTicketModels(cfg); err != nil {
 		return err
+	}
+	if cfg.AccountPoolCapacity > 0 && cfg.AccountPoolCapacity < len(cfg.Models) {
+		return invalidCodexTicketPolicy("account_pool_capacity 不能小于模型数量")
 	}
 	return validateCodexTicketTiers(cfg)
 }

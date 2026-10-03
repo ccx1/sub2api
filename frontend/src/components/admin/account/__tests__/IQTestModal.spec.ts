@@ -34,7 +34,7 @@ function streamResponse(events: Array<Record<string, unknown>>) {
   } as Response
 }
 
-function mountModal(realDialog = false) {
+function mountModal(realDialog = false, account: Record<string, unknown> = {}) {
   return mount(IQTestModal, {
     ...(realDialog ? { attachTo: document.body } : {}),
     props: {
@@ -44,7 +44,8 @@ function mountModal(realDialog = false) {
         name: 'Astra account',
         platform: 'openai',
         type: 'oauth',
-        status: 'active'
+        status: 'active',
+        ...account
       } as any
     },
     global: {
@@ -102,6 +103,18 @@ describe('IQTestModal', () => {
     expect(frames[0].attributes('srcdoc')).toContain('<svg></svg>')
     expect(wrapper.text()).toContain('admin.accounts.pelicanTest.success')
     expect(localStorage.getItem('sub2api-pelican-test:42')).toContain('gpt-6-astra')
+  })
+
+  it('starts Claude accounts on a Claude model and other accounts on the OpenAI default', async () => {
+    const wrapper = mountModal(false, { platform: 'anthropic', name: 'Claude account' })
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body)
+    expect(body.model_id).toBe('claude-opus-5-5')
+
+    await wrapper.setProps({ account: { id: 43, name: 'Astra account', platform: 'openai', type: 'oauth', status: 'active' } as any })
+    expect((wrapper.vm as any).modelId).toBe('gpt-6-astra')
   })
 
   it('keeps non-HTML output visible but marks it as failed', async () => {

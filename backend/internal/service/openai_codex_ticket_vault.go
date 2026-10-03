@@ -40,10 +40,11 @@ var (
 )
 
 type CodexTicketVaultPolicy struct {
-	UsageMode           string `json:"usage_mode"`
-	MinTicketAgeSeconds int    `json:"min_ticket_age_seconds"`
-	ConsumeAfterUse     bool   `json:"consume_after_use"`
-	FailClosed          bool   `json:"fail_closed"`
+	UsageMode                       string `json:"usage_mode"`
+	MinTicketAgeSeconds             int    `json:"min_ticket_age_seconds"`
+	HistoricalTicketValiditySeconds int    `json:"historical_ticket_validity_seconds"`
+	ConsumeAfterUse                 bool   `json:"consume_after_use"`
+	FailClosed                      bool   `json:"fail_closed"`
 }
 
 // CodexTicketVaultInvalidation 只保留撤销原因与时间，不含上游信号或票据内容。
@@ -82,6 +83,7 @@ type CodexTicketVaultSlot struct {
 type CodexTicketVaultModel struct {
 	Model      string                 `json:"model"`
 	Configured bool                   `json:"configured"`
+	Capacity   int                    `json:"capacity"`
 	Total      int                    `json:"total"`
 	Available  int                    `json:"available"`
 	Maturing   int                    `json:"maturing"`
@@ -89,19 +91,20 @@ type CodexTicketVaultModel struct {
 }
 
 type CodexTicketVault struct {
-	AccountID        int64                   `json:"account_id"`
-	AccountName      string                  `json:"account_name"`
-	TicketEnabled    bool                    `json:"ticket_enabled"`
-	HarvestEnabled   bool                    `json:"harvest_enabled"`
-	ConfigEnabled    bool                    `json:"config_enabled"`
-	ProxyAvailable   bool                    `json:"proxy_available"`
-	CredentialMode   string                  `json:"credential_mode,omitempty"`
-	PoolCapacity     int                     `json:"pool_capacity"`
-	TTLSeconds       int                     `json:"ttl_seconds"`
-	CookieTTLSeconds int                     `json:"cookie_ttl_seconds"`
-	Policy           CodexTicketVaultPolicy  `json:"policy"`
-	Models           []CodexTicketVaultModel `json:"models"`
-	ServerTime       time.Time               `json:"server_time"`
+	AccountID           int64                   `json:"account_id"`
+	AccountName         string                  `json:"account_name"`
+	TicketEnabled       bool                    `json:"ticket_enabled"`
+	HarvestEnabled      bool                    `json:"harvest_enabled"`
+	ConfigEnabled       bool                    `json:"config_enabled"`
+	ProxyAvailable      bool                    `json:"proxy_available"`
+	CredentialMode      string                  `json:"credential_mode,omitempty"`
+	PoolCapacity        int                     `json:"pool_capacity"`
+	AccountPoolCapacity int                     `json:"account_pool_capacity,omitempty"`
+	TTLSeconds          int                     `json:"ttl_seconds"`
+	CookieTTLSeconds    int                     `json:"cookie_ttl_seconds"`
+	Policy              CodexTicketVaultPolicy  `json:"policy"`
+	Models              []CodexTicketVaultModel `json:"models"`
+	ServerTime          time.Time               `json:"server_time"`
 }
 
 // CodexTicketVaultRevokeInput 按指纹作废单张票，或 All=true 作废该模型全部未作废的票。
@@ -134,17 +137,23 @@ func (s *OpenAIGatewayService) GetOpenAICodexTicketVault(ctx context.Context, ac
 	resolved := resolveCodexTicketCredentialConfig(egress.account, cfg)
 	result.ConfigEnabled, result.ProxyAvailable = cfg.Enabled, egress.available
 	result.CredentialMode, result.PoolCapacity = resolved.CredentialMode, resolved.PoolCapacity
+	result.AccountPoolCapacity = resolved.AccountPoolCapacity
 	result.TTLSeconds, result.CookieTTLSeconds = resolved.TTLSeconds, resolved.CookieTTLSeconds
 	result.Policy = CodexTicketVaultPolicy{UsageMode: config.CodexTicketUsageImmediate, ConsumeAfterUse: resolved.ConsumeAfterUse, FailClosed: resolved.FailClosed}
 	if config.CodexTicketUsageAgedEnabled(resolved) {
 		result.Policy.UsageMode, result.Policy.MinTicketAgeSeconds = config.CodexTicketUsageAged, resolved.MinTicketAgeSeconds
+		result.Policy.HistoricalTicketValiditySeconds = resolved.HistoricalTicketValiditySeconds
 	}
 	for _, model := range codexTicketNodeModels(account, cfg) {
 		// 库存已是副本，补齐软复验时间不影响共享缓存。
 		inventory, selected := s.codexTicketNodeInventory(egress.account, model, cfg, now)
 		hydrateCodexTicketSoftRevalidate(inventory, resolved)
 		slots, labels := codexTicketNodeSlotLabels(inventory)
-		view := CodexTicketVaultModel{Model: model, Configured: codexTicketConfigGatesModel(cfg, model), Slots: make([]CodexTicketVaultSlot, 0, len(slots))}
+		view := CodexTicketVaultModel{Model: model, Configured: codexTicketConfigGatesModel(cfg, model),
+			Slots: make([]CodexTicketVaultSlot, 0, len(slots))}
+		if view.Configured {
+			view.Capacity = config.CodexTicketModelCapacity(cfg, model)
+		}
 		for i, slot := range slots {
 			item := codexTicketVaultSlotView(account.ID, model, labels[i], slot, selected, egress.account, resolved, now)
 			switch item.Status {
@@ -163,6 +172,9 @@ func (s *OpenAIGatewayService) GetOpenAICodexTicketVault(ctx context.Context, ac
 
 func codexTicketVaultSlotView(accountID int64, model, label string, slot, selected *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) CodexTicketVaultSlot {
 	lineage, expires := slot.lineageCapturedAt(), slot.hardExpiresAt()
+	if config.CodexTicketUsageAgedEnabled(cfg) {
+		expires = slot.historicalExpires(cfg)
+	}
 	view := CodexTicketVaultSlot{Label: label, Fingerprint: codexTicketVaultFingerprint(accountID, model, slot),
 		BusinessSelected: sameCodexTicket(slot, selected), CredentialMode: slot.CredentialMode, Length: slot.Length,
 		CookieNames: codexTicketVaultCookieNames(slot), Verified: slot.Verified, VerificationSkipped: slot.VerificationSkipped,

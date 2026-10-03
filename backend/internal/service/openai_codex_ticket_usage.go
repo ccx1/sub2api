@@ -26,13 +26,13 @@ const (
 	OpenAICodexTicketConsumedKey = openAICodexTicketExtraKeyPrefix + "consumed"
 	// OpenAICodexTicketConsumedLimit 是单账号账本最多保留的条目数。
 	// 已领取但尚未被下一次发布物理删除的票，每个模型最多只有库存容量（≤20）张。
-	OpenAICodexTicketConsumedLimit = 256
+	OpenAICodexTicketConsumedLimit = 2048
 
 	// 账本条目在票据最晚可能失效后再保留一段时间，覆盖在途复验发布的同谱系新版本。
 	codexTicketConsumptionGrace = 70 * time.Minute
 	// 票据有效期上限为 24 小时；账本条目绝不保留超过该硬上限。
-	codexTicketConsumptionMaxTTL    = 26 * time.Hour
-	codexTicketConsumptionLocalCap  = 512
+	codexTicketConsumptionMaxTTL    = 92 * 24 * time.Hour
+	codexTicketConsumptionLocalCap  = 4096
 	codexTicketConsumptionClaimWait = 2 * time.Second
 	codexTicketConsumptionIDLength  = 24
 )
@@ -84,6 +84,9 @@ func codexTicketConsumptionUntil(ticket *openAICodexTicket, cfg config.OpenAICod
 			if expires.After(until) {
 				until = expires
 			}
+		}
+		if config.CodexTicketUsageAgedEnabled(cfg) && ticket.historicalExpires(cfg).After(until) {
+			until = ticket.historicalExpires(cfg)
 		}
 	}
 	until = until.Add(codexTicketConsumptionGrace)
@@ -388,6 +391,7 @@ func (s *OpenAIGatewayService) lookupOpenAICodexTicketForUse(account *Account, m
 	lock.Lock()
 	defer lock.Unlock()
 	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
+	limitCodexTicketInventory(inventory, config.CodexTicketModelCapacity(cfg, model))
 	return selectOpenAICodexTicket(inventory, account, cfg, time.Now())
 }
 
@@ -454,24 +458,22 @@ func (s *OpenAIGatewayService) claimCodexTicketConsumption(ctx context.Context, 
 	return repo.ClaimCodexTicketConsumption(ctx, accountID, id, until, now, OpenAICodexTicketConsumedLimit)
 }
 
-func (s *OpenAIGatewayService) claimLocalOpenAICodexTicket(key string, account *Account, model string, cfg config.OpenAICodexTicketConfig, tried map[string]bool) (*openAICodexTicket, string, time.Time) {
+func (s *OpenAIGatewayService) codexTicketCandidatesForClaim(key string, account *Account, model string, cfg config.OpenAICodexTicketConfig) []*openAICodexTicket {
 	lock := s.codexTicketLock(key)
 	lock.Lock()
 	defer lock.Unlock()
-	now := time.Now()
 	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
-	index := s.codexTicketConsumptionIndex(account.ID, true)
-	for _, candidate := range codexTicketUsageCandidates(inventory, account, cfg, now) {
-		id := codexTicketConsumptionID(candidate)
-		if tried[id] {
-			continue
+	limitCodexTicketInventory(inventory, config.CodexTicketModelCapacity(cfg, model))
+	candidates := codexTicketUsageCandidates(inventory, account, cfg, time.Now())
+	result := make([]*openAICodexTicket, 0, len(candidates))
+	for _, candidate := range candidates {
+		selected := codexTicketLeaf(candidate)
+		if config.CodexTicketUsageAgedEnabled(cfg) {
+			selected.historicalExpiresAt = selected.historicalExpires(cfg)
 		}
-		until := codexTicketConsumptionUntil(candidate, cfg, now)
-		if index.mark(id, until, now) {
-			return codexTicketLeaf(candidate), id, until
-		}
+		result = append(result, selected)
 	}
-	return nil, "", time.Time{}
+	return result
 }
 
 // reuseClaimedOpenAICodexTicket 只接受同账号、同模型、仍可用且未撤销的已领取票；否则交给新领取。
@@ -511,14 +513,16 @@ func (s *OpenAIGatewayService) applyConsumedOpenAICodexTicket(ctx context.Contex
 	}
 	key := openAICodexTicketKey(account.ID, model)
 	target := codexTicketTargetURLFrom(ctx)
-	tried := make(map[string]bool)
-	for range config.MaxCodexTicketPoolCapacity {
-		leaf, id, until := s.claimLocalOpenAICodexTicket(key, account, model, cfg, tried)
-		if leaf == nil {
-			break
+	index := s.codexTicketConsumptionIndex(account.ID, true)
+	for _, leaf := range s.codexTicketCandidatesForClaim(key, account, model, cfg) {
+		if s.codexTicketRevoked(key, leaf) || !leaf.usable(time.Now(), account, cfg) {
+			continue
 		}
-		tried[id] = true
-		index := s.codexTicketConsumptionIndex(account.ID, true)
+		id, now := codexTicketConsumptionID(leaf), time.Now()
+		until := codexTicketConsumptionUntil(leaf, cfg, now)
+		if !index.mark(id, until, now) {
+			continue
+		}
 		projected, err := s.prepareCodexCookieTicket(ctx, account, leaf, cfg)
 		if err != nil {
 			index.release(id, until)

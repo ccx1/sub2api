@@ -9,6 +9,8 @@ const (
 	DefaultCodexTicketCookieTTLSeconds           = 20
 	DefaultCodexTicketCookieRefreshBeforeSeconds = 5
 	MaxCodexTicketCookieTTLSeconds               = 3600
+	CodexTicketCookieFreshPerTicket              = "fresh_per_ticket"
+	CodexTicketCookieReuseOnRefresh              = "reuse_on_refresh"
 )
 
 func CodexTicketUsesCookies(cfg OpenAICodexTicketConfig) bool {
@@ -16,6 +18,9 @@ func CodexTicketUsesCookies(cfg OpenAICodexTicketConfig) bool {
 }
 
 func NormalizeCodexTicketCredentialConfig(cfg OpenAICodexTicketConfig) OpenAICodexTicketConfig {
+	if cfg.CookieRefreshMode == "" {
+		cfg.CookieRefreshMode = CodexTicketCookieFreshPerTicket
+	}
 	if cfg.CredentialMode == "" {
 		cfg.CredentialMode = CodexTicketCredentialState
 	}
@@ -32,6 +37,9 @@ func NormalizeCodexTicketCredentialConfig(cfg OpenAICodexTicketConfig) OpenAICod
 
 func ValidateCodexTicketCredentialConfig(cfg *OpenAICodexTicketConfig) error {
 	*cfg = NormalizeCodexTicketCredentialConfig(*cfg)
+	if cfg.CookieRefreshMode != CodexTicketCookieFreshPerTicket && cfg.CookieRefreshMode != CodexTicketCookieReuseOnRefresh {
+		return fmt.Errorf("Cookie 刷新模式必须是 fresh_per_ticket 或 reuse_on_refresh")
+	}
 	switch cfg.CredentialMode {
 	case CodexTicketCredentialState, CodexTicketCredentialCookieState, CodexTicketCredentialCookie:
 	default:

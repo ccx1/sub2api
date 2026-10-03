@@ -1273,6 +1273,7 @@ type OpenAICodexTicketConfig struct {
 	TargetLength                  int                          `mapstructure:"target_length" json:"target_length"`
 	TTLSeconds                    int                          `mapstructure:"ttl_seconds" json:"ttl_seconds"`
 	PoolCapacity                  int                          `mapstructure:"pool_capacity" json:"pool_capacity,omitempty"`
+	AccountPoolCapacity           int                          `mapstructure:"account_pool_capacity" json:"account_pool_capacity,omitempty"`
 	RefreshBeforeSeconds          int                          `mapstructure:"refresh_before_seconds" json:"refresh_before_seconds"`
 	HarvestProxyURL               string                       `mapstructure:"harvest_proxy_url" json:"-"`
 	HarvestProbeIntervalSeconds   int                          `mapstructure:"harvest_probe_interval_seconds" json:"harvest_probe_interval_seconds"`
@@ -1304,6 +1305,10 @@ type OpenAICodexTicketConfig struct {
 	UsageMode string `mapstructure:"usage_mode" json:"usage_mode,omitempty"`
 	// MinTicketAgeSeconds 仅 aged 模式生效：票据自首次采集起至少经过该秒数才允许被业务请求使用。
 	MinTicketAgeSeconds int `mapstructure:"min_ticket_age_seconds" json:"min_ticket_age_seconds,omitempty"`
+	// HistoricalTicketValiditySeconds 从首次采集起计算历史票的使用窗口，独立于协议和软复验期限。
+	HistoricalTicketValiditySeconds int `mapstructure:"historical_ticket_validity_seconds" json:"historical_ticket_validity_seconds,omitempty"`
+	// CookieRefreshMode 控制历史模式是否沿用旧票 Cookie 做软复验。
+	CookieRefreshMode string `mapstructure:"cookie_refresh_mode" json:"cookie_refresh_mode,omitempty"`
 	// ConsumeAfterUse 为 true 时一票一用：业务请求取用后即标记消耗、不再发放，
 	// 并在下一次票池发布时从账号票库中删除。默认 false（票据可被重复使用直到过期）。
 	ConsumeAfterUse bool `mapstructure:"consume_after_use" json:"consume_after_use,omitempty"`

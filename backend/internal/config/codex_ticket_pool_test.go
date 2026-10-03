@@ -15,3 +15,19 @@ func TestCodexTicketPoolDefaultsAndEnvironment(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 8, cfg.Gateway.OpenAICodexTicket.PoolCapacity)
 }
+
+func TestCodexTicketAccountPoolCapacitySplitsAcrossModels(t *testing.T) {
+	cfg := NormalizeOpenAICodexTicketConfig(OpenAICodexTicketConfig{
+		Models: []string{"first", "second", "third"}, AccountPoolCapacity: 1000,
+	})
+	require.Equal(t, 334, CodexTicketModelCapacity(cfg, "first"))
+	require.Equal(t, 333, CodexTicketModelCapacity(cfg, "second"))
+	require.Equal(t, 333, CodexTicketModelCapacity(cfg, "third"))
+	require.Zero(t, CodexTicketModelCapacity(cfg, "removed"))
+	require.NoError(t, ValidateCodexTicketUsage(&cfg))
+	cfg.AccountPoolCapacity = 2
+	require.ErrorContains(t, ValidateCodexTicketUsage(&cfg), "account_pool_capacity")
+	cfg.AccountPoolCapacity = 0
+	require.NoError(t, ValidateCodexTicketUsage(&cfg))
+	require.Equal(t, DefaultCodexTicketPoolCapacity, CodexTicketModelCapacity(cfg, "third"))
+}

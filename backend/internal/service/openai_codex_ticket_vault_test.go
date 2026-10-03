@@ -154,6 +154,23 @@ func TestCodexTicketVaultListsMetadataWithoutSecrets(t *testing.T) {
 	require.Zero(t, repo.writes, "查看票库不写库")
 }
 
+func TestCodexTicketVaultShowsHistoricalDeadlineAfterStateExpiry(t *testing.T) {
+	now := time.Now()
+	ticket := usageTestTicket("H", 7*24*time.Hour+time.Hour, now)
+	ticket.State = codexTicketStateForExpiryTest(ticket.CapturedAt, 10)
+	ticket.Length = len(ticket.State)
+	ticket.StateExpiresAt = ticket.CapturedAt.Add(time.Hour - 30*time.Second)
+	ticket.ExpiresAt = ticket.StateExpiresAt
+	svc, _ := vaultTestService(t, historicalTestConfig(1), ticket)
+	vault, err := svc.GetOpenAICodexTicketVault(context.Background(), 41)
+	require.NoError(t, err)
+	slot := vaultTestSlot(t, vault, "primary")
+	require.Equal(t, CodexTicketVaultStatusAvailable, slot.Status)
+	require.WithinDuration(t, ticket.CapturedAt.Add(8*24*time.Hour), *slot.ExpiresAt, time.Second)
+	require.WithinDuration(t, ticket.StateExpiresAt, *slot.StateExpiresAt, time.Second)
+	require.InDelta(t, 23*3600, slot.RemainingSeconds, 2)
+}
+
 func TestCodexTicketVaultCookieSlotsExposeOnlyNamesAndNode(t *testing.T) {
 	now := time.Now()
 	oailb := codexTicketNodeTestOAILB(t, 88)

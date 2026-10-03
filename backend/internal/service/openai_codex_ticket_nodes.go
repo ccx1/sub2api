@@ -525,6 +525,9 @@ func (s *OpenAIGatewayService) codexTicketNodeInventory(account *Account, model 
 	lock.Lock()
 	defer lock.Unlock()
 	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
+	if config.CodexTicketModelCapacity(cfg, model) > 0 {
+		limitCodexTicketInventory(inventory, config.CodexTicketModelCapacity(cfg, model))
+	}
 	return inventory, selectOpenAICodexTicket(inventory, account, cfg, now)
 }
 

@@ -16,7 +16,7 @@ const ticket = (overrides: Partial<TicketStatus> = {}): TicketStatus => ({
 })
 const compileMessages = (messages: Record<string, unknown>) => ({
   admin: { accounts: { openai: Object.fromEntries(Object.entries(messages)
-    .filter(([key, value]) => /^(codexTicketPool|codexTicketPrimary|codexTicketUsing|codexTurnTicket|codexTicketQuality)/.test(key) && typeof value === 'string')
+    .filter(([key, value]) => /^(codexTicketPool|codexTicketPrimary|codexTicketUsing|codexTurnTicket|codexTicketQuality|codexTicketHistory|codexTicketHarvest)/.test(key) && typeof value === 'string')
     .map(([key, value]) => [key, new Function(`return ${baseCompile(value as string, { mode: 'arrow' }).code}`)()])) } }
 })
 const messages = { zh: compileMessages(zhAccounts.accounts.openai), en: compileMessages(enAccounts.accounts.openai) }
@@ -26,6 +26,52 @@ const render = (tickets?: TicketStatus[] | null, locale = 'zh') => mount(CodexTi
 })
 
 describe('CodexTicketPoolStatus', () => {
+  it.each([
+    ['zh', '历史票首次采集：2026-10-03 04:05:06', '历史票有效期剩余：7天 2小时', '最近打票：成功'],
+    ['en', 'History ticket first captured: 2026-10-03 04:05:06', 'History ticket validity left: 7d 2h', 'Last harvest: Succeeded']
+  ])('shows historical ticket time, long validity and actual harvest result (%s)', (locale, captureText, remainingText, harvestText) => {
+    const captured = new Date(2026, 9, 3, 4, 5, 6).toISOString()
+    const expires = new Date(Date.now() + (7 * 86400 + 2 * 3600) * 1000).toISOString()
+    const wrapper = render([ticket({
+      usage_mode: 'aged', origin_captured_at: captured, expires_at: expires,
+      remaining_seconds: 7 * 86400 + 2 * 3600, primary_remaining_seconds: 7 * 86400 + 2 * 3600,
+      last_attempt_at: captured, last_attempt_success: true
+    })], locale)
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain(captureText)
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain(remainingText)
+    expect(wrapper.get('[data-testid="primary-status"]').text()).toContain(locale === 'zh' ? '7天 2小时' : '7d 2h')
+    expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain(harvestText)
+    expect(wrapper.get('[data-testid="ticket-harvest-status"] time').attributes('datetime')).toBe(captured)
+    wrapper.unmount()
+  })
+
+  it('shows unknown historical details without a selected ticket and never infers harvest health from enablement', () => {
+    const wrapper = render([ticket({ usage_mode: 'aged', ready: false, remaining_seconds: 0,
+      origin_captured_at: undefined, expires_at: undefined, last_attempt_at: undefined, last_attempt_success: undefined })])
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('历史票首次采集：未知')
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('历史票有效期剩余：未知')
+    expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain('最近打票：暂无记录')
+    wrapper.unmount()
+  })
+
+  it('shows expired history and the last failed harvest independently', () => {
+    const wrapper = render([ticket({ usage_mode: 'aged', expires_at: new Date(Date.now() - 1000).toISOString(),
+      remaining_seconds: 0, last_attempt_at: new Date(2026, 9, 3, 4, 5, 6).toISOString(),
+      last_attempt_success: false, last_attempt_reason: 'upstream timeout' })])
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('已过期')
+    expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain('最近打票：失败')
+    expect(wrapper.get('[data-testid="ticket-harvest-status"] span').attributes('title')).toBe('upstream timeout')
+    wrapper.unmount()
+  })
+
+  it('hides history details in immediate mode while retaining the most recent harvest outcome', () => {
+    const wrapper = render([ticket({ usage_mode: 'immediate', last_attempt_at: 'bad date', last_attempt_success: true })])
+    expect(wrapper.find('[data-testid="history-ticket-status"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain('最近打票：暂无记录')
+    expect(wrapper.find('[data-testid="ticket-harvest-status"] time').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each([
     ['zh', '可用 5 张 · 目标容量 2 张', '备用 4 张'],
     ['en', '5 available · Target capacity 2', '4 in reserve']

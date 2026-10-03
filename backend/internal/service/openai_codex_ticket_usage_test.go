@@ -435,6 +435,8 @@ func TestCodexTicketConsumptionUntilCoversTicketLifetime(t *testing.T) {
 	require.Zero(t, until.Nanosecond())
 
 	ticket.ExpiresAt = now.Add(48 * time.Hour)
+	require.Equal(t, now.Add(48*time.Hour+codexTicketConsumptionGrace).Unix(), codexTicketConsumptionUntil(ticket, cfg, now).Unix())
+	ticket.ExpiresAt = now.Add(120 * 24 * time.Hour)
 	require.Equal(t, now.Add(codexTicketConsumptionMaxTTL).Unix(), codexTicketConsumptionUntil(ticket, cfg, now).Unix(), "不超过硬上限")
 
 	// 票据早于配置有效期失效时，仍至少覆盖配置有效期。

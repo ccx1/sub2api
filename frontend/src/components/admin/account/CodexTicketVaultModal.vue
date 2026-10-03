@@ -26,7 +26,7 @@
               <span v-if="!model.configured" class="ml-2 rounded bg-gray-100 px-1.5 py-0.5 font-sans text-xs font-normal text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ t(`${prefix}.notConfigured`) }}</span>
             </h3>
             <div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-              <span data-testid="vault-model-summary">{{ t(`${prefix}.summary.total`) }} {{ model.total }} / {{ vault.pool_capacity }} · {{ t(`${prefix}.summary.available`) }} {{ model.available }} · {{ t(`${prefix}.summary.maturing`) }} {{ model.maturing }}</span>
+              <span data-testid="vault-model-summary">{{ t(`${prefix}.summary.total`) }} {{ model.total }} / {{ model.capacity ?? vault.pool_capacity }} · {{ t(`${prefix}.summary.available`) }} {{ model.available }} · {{ t(`${prefix}.summary.maturing`) }} {{ model.maturing }}</span>
               <template v-if="confirmModel === model.model">
                 <button type="button" class="btn btn-danger" :disabled="!!busy" data-testid="vault-revoke-all-confirm" @click="revoke(model.model)">{{ t(`${prefix}.${busy ? 'revoking' : 'confirm'}`) }}</button>
                 <button type="button" class="btn btn-secondary" :disabled="!!busy" data-testid="vault-revoke-all-cancel" @click="confirmModel = ''">{{ t(`${prefix}.cancel`) }}</button>
@@ -144,7 +144,11 @@ const overviewRows = computed(() => {
     { key: 'cookieTtl', value: seconds(v.cookie_ttl_seconds) },
     { key: 'usageMode', value: v.policy.usage_mode === 'aged' ? t(`${prefix}.usageModes.aged`) : t(`${prefix}.usageModes.immediate`) }
   ]
+  if (v.account_pool_capacity) rows.push({ key: 'accountPoolCapacity', value: String(v.account_pool_capacity) })
   if (v.policy.usage_mode === 'aged') rows.push({ key: 'minAge', value: seconds(v.policy.min_ticket_age_seconds) })
+  if (v.policy.usage_mode === 'aged' && v.policy.historical_ticket_validity_seconds) {
+    rows.push({ key: 'historicalValidity', value: seconds(v.policy.historical_ticket_validity_seconds) })
+  }
   rows.push(
     { key: 'consumeAfterUse', value: onOff(v.policy.consume_after_use) },
     { key: 'failClosed', value: onOff(v.policy.fail_closed) },

@@ -86,8 +86,13 @@ func codexTicketConfigGatesModel(cfg config.OpenAICodexTicketConfig, model strin
 
 func (ticket *openAICodexTicket) usable(now time.Time, account *Account, cfg config.OpenAICodexTicketConfig) bool {
 	cfg = resolveCodexTicketCredentialConfig(account, cfg)
-	if ticket == nil || ticket.consumed || !ticket.accountCompatible(account) ||
-		(ticket.VerificationSkipped && config.CodexTicketBusinessVerificationEnabled(cfg)) {
+	if ticket == nil || ticket.consumed || !ticket.accountCompatible(account) {
+		return false
+	}
+	if config.CodexTicketUsageAgedEnabled(cfg) {
+		return ticket.historicalUsable(now, account, cfg)
+	}
+	if ticket.VerificationSkipped && config.CodexTicketBusinessVerificationEnabled(cfg) {
 		return false
 	}
 	if config.CodexTicketUsesCookies(cfg) {
@@ -100,6 +105,44 @@ func (ticket *openAICodexTicket) usable(now time.Time, account *Account, cfg con
 		return ticket.autoUsable(now, account)
 	}
 	return ticket.valid(now, openAICodexTicketTargetLength(account, cfg)) && !codexTicketStateRejected(ticket.State, cfg)
+}
+
+func (ticket *openAICodexTicket) historicalExpires(cfg config.OpenAICodexTicketConfig) time.Time {
+	first := ticket.lineageCapturedAt()
+	if first.IsZero() {
+		return time.Time{}
+	}
+	seconds := cfg.HistoricalTicketValiditySeconds
+	if seconds <= 0 {
+		seconds = config.DefaultCodexTicketHistoricalValiditySeconds
+	}
+	return first.Add(time.Duration(seconds) * time.Second)
+}
+
+func (ticket *openAICodexTicket) historicalUsable(now time.Time, account *Account, cfg config.OpenAICodexTicketConfig) bool {
+	if ticket.Revoked || !ticket.historicalExpires(cfg).After(now) {
+		return false
+	}
+	if config.CodexTicketUsesCookies(cfg) {
+		if !ticket.usesCookies() || ticket.CredentialMode != cfg.CredentialMode || len(ticket.Cookies) == 0 || len(ticket.Cookies) > 32 {
+			return false
+		}
+		for _, cookie := range ticket.Cookies {
+			if cookie == nil || cookie.Valid() != nil {
+				return false
+			}
+		}
+		if cfg.CredentialMode == config.CodexTicketCredentialCookie {
+			return true
+		}
+	} else if ticket.usesCookies() {
+		return false
+	}
+	state := strings.TrimSpace(ticket.State)
+	if !strings.HasPrefix(state, openAICodexTicketStatePrefix) || len(state) != ticket.Length {
+		return false
+	}
+	return cfg.LengthMode == config.CodexTicketLengthAuto || len(state) == openAICodexTicketTargetLength(account, cfg) && !codexTicketStateRejected(state, cfg)
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketProbeConfigCurrent(ctx context.Context, input openAICodexTicketProbeInput) bool {

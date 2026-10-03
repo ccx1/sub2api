@@ -66,7 +66,7 @@ func TestCodexTicketUsageSettingsValidation(t *testing.T) {
 		{mode: "oldest"},
 		{mode: config.CodexTicketUsageAged},
 		{mode: config.CodexTicketUsageAged, age: -1},
-		{mode: config.CodexTicketUsageAged, age: cfg.TTLSeconds},
+		{mode: config.CodexTicketUsageAged, age: cfg.HistoricalTicketValiditySeconds},
 		{mode: config.CodexTicketUsageAged, age: config.MaxCodexTicketMinAgeSeconds + 1},
 	}
 	for _, tc := range invalid {
@@ -89,8 +89,8 @@ func TestCodexTicketUsageSettingsValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, config.CodexTicketUsageImmediate, stored.UsageMode)
 
-	next.UsageMode, next.MinTicketAgeSeconds = config.CodexTicketUsageAged, cfg.TTLSeconds-1
+	next.UsageMode, next.MinTicketAgeSeconds = config.CodexTicketUsageAged, 7*86400
 	stored, err = svc.UpdateCodexTicketSettings(ctx, next)
 	require.NoError(t, err)
-	require.Equal(t, cfg.TTLSeconds-1, stored.MinTicketAgeSeconds)
+	require.Equal(t, 7*86400, stored.MinTicketAgeSeconds)
 }

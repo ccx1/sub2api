@@ -2941,13 +2941,25 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
 	usage := startPelicanTestStream(c, "anthropic")
+	// The connection probe only proves the account answers; a Pelican answer
+	// that stopped early is reported with the reason instead of as a success.
+	pelican := pelicanTestRequested(c)
+	stopReason, refusalCategory := "", ""
+	complete := func() error {
+		if pelican {
+			if failure := pelicanClaudeStopFailure(stopReason, refusalCategory); failure != "" {
+				return s.sendErrorAndEnd(c, failure)
+			}
+		}
+		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+		return nil
+	}
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-				return nil
+				return complete()
 			}
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
 		}
@@ -2960,8 +2972,7 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		usage.read(jsonStr)
 		if jsonStr == "[DONE]" {
-			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-			return nil
+			return complete()
 		}
 
 		var data map[string]any
@@ -2978,9 +2989,17 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 					s.sendEvent(c, TestEvent{Type: "content", Text: text})
 				}
 			}
+		case "message_delta":
+			if delta, ok := data["delta"].(map[string]any); ok {
+				if reason, ok := delta["stop_reason"].(string); ok {
+					stopReason = reason
+				}
+				if details, ok := delta["stop_details"].(map[string]any); ok {
+					refusalCategory, _ = details["category"].(string)
+				}
+			}
 		case "message_stop":
-			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-			return nil
+			return complete()
 		case "error":
 			errorMsg := "Unknown error"
 			if errData, ok := data["error"].(map[string]any); ok {

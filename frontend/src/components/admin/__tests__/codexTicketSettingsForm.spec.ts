@@ -12,6 +12,66 @@ const settings = (): CodexTicketSettings => ({
 })
 
 describe('ticket settings length mode validation', () => {
+  it.each([undefined, 'immediate', 'aged'] as const)('accepts supported request usage mode %s', usage_mode => {
+    expect(validateTicketSettings({ ...settings(), usage_mode, min_ticket_age_seconds: usage_mode === 'aged' ? 300 : 0 })).toBeNull()
+  })
+
+  it.each(['unknown', null, true, 0])('rejects unsupported request usage mode %s', usage_mode => {
+    expect(validateTicketSettings({ ...settings(), usage_mode } as unknown as CodexTicketSettings)).toEqual({ key: 'usageMode' })
+  })
+
+  it.each([undefined, 0, -1, 1.5, 691200, 2592001, NaN, Infinity, null, '300'])('rejects invalid historical age %s', min_ticket_age_seconds => {
+    const candidate = { ...settings(), usage_mode: 'aged', min_ticket_age_seconds } as unknown as CodexTicketSettings
+    expect(validateTicketSettings(candidate)).toEqual({ key: 'range', field: 'min_ticket_age_seconds', min: 1, max: 691199 })
+  })
+
+  it.each([1, 300, 86400, 604800])('accepts historical age %s below the configured lifetime', min_ticket_age_seconds => {
+    expect(validateTicketSettings({ ...settings(), usage_mode: 'aged', min_ticket_age_seconds })).toBeNull()
+  })
+
+  it('validates historical age against its own lifetime without using STATE or Cookie intervals', () => {
+    const candidate: CodexTicketSettings = {
+      ...settings(), credential_mode: 'cookie', usage_mode: 'aged', min_ticket_age_seconds: 86400,
+      cookie_ttl_seconds: 20, cookie_refresh_before_seconds: 5
+    }
+    expect(validateTicketSettings(candidate)).toBeNull()
+    expect(validateTicketSettings({ ...candidate, ttl_seconds: 300, refresh_before_seconds: 10 })).toBeNull()
+    expect(validateTicketSettings({ ...candidate, historical_ticket_validity_seconds: 86400 }))
+      .toEqual({ key: 'range', field: 'min_ticket_age_seconds', min: 1, max: 86399 })
+    expect(validateTicketSettings({ ...candidate, historical_ticket_validity_seconds: 2592001 }))
+      .toEqual({ key: 'range', field: 'historical_ticket_validity_seconds', min: 1, max: 2592000 })
+  })
+
+  it.each([undefined, 'fresh_per_ticket', 'reuse_on_refresh'] as const)('accepts Cookie refresh mode %s', cookie_refresh_mode => {
+    expect(validateTicketSettings({ ...settings(), cookie_refresh_mode })).toBeNull()
+  })
+
+  it('validates account-wide capacity independently of the legacy per-model capacity', () => {
+    const candidate = { ...settings(), models: ['gpt-6-astra', 'gpt-5.6-sol'] }
+    expect(validateTicketSettings({ ...candidate, account_pool_capacity: 1000 })).toBeNull()
+    expect(validateTicketSettings({ ...candidate, account_pool_capacity: 1 }))
+      .toEqual({ key: 'range', field: 'account_pool_capacity', min: 2, max: 1000 })
+    expect(validateTicketSettings({ ...candidate, account_pool_capacity: 1001 }))
+      .toEqual({ key: 'range', field: 'account_pool_capacity', min: 2, max: 1000 })
+  })
+
+  it('ignores the historical threshold in default mode without mutating the draft', () => {
+    const candidate: CodexTicketSettings = { ...settings(), usage_mode: 'immediate', min_ticket_age_seconds: 3600 }
+    const before = structuredClone(candidate)
+    expect(validateTicketSettings(candidate)).toBeNull()
+    expect(candidate).toEqual(before)
+  })
+
+  it.each([undefined, true, false])('supports consumption %s in both request usage modes', consume_after_use => {
+    for (const usage_mode of ['immediate', 'aged'] as const) {
+      expect(validateTicketSettings({ ...settings(), usage_mode, min_ticket_age_seconds: 300, consume_after_use })).toBeNull()
+    }
+  })
+
+  it.each(['false', 0, null, []])('rejects malformed ticket consumption switch %s', consume_after_use => {
+    expect(validateTicketSettings({ ...settings(), consume_after_use } as unknown as CodexTicketSettings)).toEqual({ key: 'consumeAfterUse' })
+  })
+
   it.each([undefined, 'revalidate', 'replace'] as const)('accepts supported refresh strategy %s', refresh_strategy => {
     expect(validateTicketSettings({ ...settings(), refresh_strategy })).toBeNull()
   })

@@ -28,16 +28,22 @@ export interface CodexTicketSettings {
   credential_mode?: 'state' | 'cookie_state' | 'cookie'
   cookie_ttl_seconds?: number
   cookie_refresh_before_seconds?: number
+  cookie_refresh_mode?: 'fresh_per_ticket' | 'reuse_on_refresh'
   verify_business?: boolean
   business_verification_rounds?: number
   length_mode?: 'auto' | 'strict'
   target_length: number
   ttl_seconds: number
   pool_capacity?: number
+  account_pool_capacity?: number
   refresh_before_seconds: number
   harvest_probe_interval_seconds: number
   harvest_attempt_timeout_seconds: number
   fail_closed: boolean
+  usage_mode?: 'immediate' | 'aged'
+  min_ticket_age_seconds?: number
+  historical_ticket_validity_seconds?: number
+  consume_after_use?: boolean
   session_mode?: 'random' | 'account' | 'account_model'
   refresh_strategy?: 'revalidate' | 'replace'
   proxy_failure_threshold?: number

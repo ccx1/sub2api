@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 const codexTicketPendingLimit = 1024
@@ -19,6 +21,10 @@ type codexTicketPendingCookies struct {
 }
 
 func (s *OpenAIGatewayService) captureCodexTicketCookieCandidate(receipt *openAICodexTicketReceipt, req *http.Request, resp *http.Response) {
+	if receipt != nil && config.CodexTicketUsageAgedEnabled(receipt.config) &&
+		receipt.config.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket {
+		return
+	}
 	if s == nil || receipt == nil || receipt.account == nil || req == nil || resp == nil ||
 		!receipt.ticket.usesCookies() || !receipt.ticket.matchesHeaders(req.Header) ||
 		receipt.account.ID <= 0 || receipt.account.ID != receipt.ticket.AccountID || len(resp.Cookies()) == 0 {

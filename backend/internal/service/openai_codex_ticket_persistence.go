@@ -21,6 +21,10 @@ type codexTicketCompareAndSwapper interface {
 	CompareAndSwapCodexTicket(context.Context, *Account, string, any) (bool, error)
 }
 
+type codexTicketPruningCompareAndSwapper interface {
+	CompareAndSwapCodexTicketPruning(context.Context, *Account, string, any, []string) (bool, error)
+}
+
 func openAICodexTicketEgress(proxyURL string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(proxyURL)))
 	return hex.EncodeToString(digest[:])
@@ -45,6 +49,7 @@ func (s *OpenAIGatewayService) codexTicketBindingForConfig(account *Account, cfg
 	cfg.RefreshStrategy = ""
 	// 库存容量只控制补票数量，不改变已发布票的身份绑定。
 	cfg.PoolCapacity = 0
+	cfg.AccountPoolCapacity = 0
 	// 换绑阈值只控制采集调度，保持升级前有效票据的绑定编码。
 	cfg.ProxyFailureThreshold = 0
 	// 默认随机模式保持升级前的绑定编码；固定模式参与在途发布校验。
@@ -159,12 +164,27 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		return false
 	}
 	available := s.availableCodexTicketInventory(key, inventory)
+	limitCodexTicketInventory(available, config.CodexTicketModelCapacity(cfg, copyTicket.Model))
 	replacement := mergeCodexTicketPublication(available, &copyTicket, account, cfg)
 	snapshot := cloneOpenAICodexTicketAccount(account)
 	if _, conditional := s.accountRepo.(codexTicketCompareAndSwapper); !conditional && inventory != nil {
 		snapshot.Extra[openAICodexTicketExtraKey(copyTicket.Model)] = inventory
 	}
-	if !s.persistOpenAICodexTicket(ctx, snapshot, copyTicket.Model, replacement) {
+	var persisted bool
+	if cfg.AccountPoolCapacity > 0 {
+		if repo, ok := s.accountRepo.(codexTicketPruningCompareAndSwapper); ok {
+			var err error
+			persisted, err = repo.CompareAndSwapCodexTicketPruning(ctx, snapshot, copyTicket.Model, replacement, cfg.Models)
+			if err != nil {
+				logger.L().Warn("openai_codex_ticket conditional persistence failed", zap.Int64("account_id", account.ID))
+			}
+		} else {
+			persisted = s.persistOpenAICodexTicket(ctx, snapshot, copyTicket.Model, replacement)
+		}
+	} else {
+		persisted = s.persistOpenAICodexTicket(ctx, snapshot, copyTicket.Model, replacement)
+	}
+	if !persisted {
 		return false
 	}
 	s.openaiCodexTickets.Store(key, replacement)

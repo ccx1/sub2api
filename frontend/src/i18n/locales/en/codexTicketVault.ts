@@ -1,7 +1,7 @@
 export default {
   codexTicketVault: {
     menu: 'Ticket vault', title: 'Account ticket vault', refresh: 'Refresh', loading: 'Loading ticket vault…', failed: 'Failed to load ticket vault',
-    safeHint: 'The vault shows ticket metadata only (status, timestamps, length, cookie names and a one-way fingerprint). Raw STATE, cookie values and tokens are never shown or returned. Tickets are stored in the per-model pool of the account, sized by the ticket pool capacity setting.',
+    safeHint: 'The vault shows ticket metadata only (status, timestamps, length, cookie names and a one-way fingerprint). Raw STATE, cookie values and tokens are never shown or returned. Account capacity is allocated across models.',
     overview: 'Vault overview', empty: 'No tickets stored for any model', noSlots: 'No tickets stored for this model', notConfigured: 'Not in the configured ticket models',
     businessSelected: 'Next for traffic', verified: 'Verified', verificationSkipped: 'Verification skipped', unverified: 'Unverified',
     revoke: 'Revoke', revokeAll: 'Revoke all', revoking: 'Revoking…', confirm: 'Confirm revoke', cancel: 'Cancel',
@@ -13,7 +13,7 @@ export default {
     usageModes: { immediate: 'Use immediately', aged: 'Use aged tickets' },
     fields: {
       ticketEnabled: 'Account tickets', harvestEnabled: 'Account harvest', configEnabled: 'Global tickets', proxy: 'Proxy', credentialMode: 'Credential mode',
-      poolCapacity: 'Pool capacity', ttl: 'Ticket TTL', cookieTtl: 'Cookie retention', usageMode: 'Usage mode', minAge: 'Minimum ticket age',
+      poolCapacity: 'Legacy per-model capacity', accountPoolCapacity: 'Account total capacity', ttl: 'Ticket TTL', cookieTtl: 'Cookie retention', usageMode: 'Usage mode', minAge: 'Minimum ticket age', historicalValidity: 'Historical ticket validity',
       consumeAfterUse: 'Delete after use', failClosed: 'Fail closed', serverTime: 'Server time'
     },
     values: { on: 'On', off: 'Off', available: 'Available', unavailable: 'Unavailable' },

@@ -74,9 +74,47 @@
             </label>
             <p data-testid="length-mode-hint" class="text-sm text-gray-500 dark:text-gray-400">{{ t(usesCookie ? 'codexTicketSettings.cookieLengthHint' : isAutoLength ? 'codexTicketSettings.lengthModeAutoHint' : 'codexTicketSettings.lengthModeStrictHint') }}</p>
           </section>
+          <section class="card space-y-4 p-5" aria-labelledby="ticket-usage-title">
+            <h2 id="ticket-usage-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.usageTitle') }}</h2>
+            <label class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.usageMode') }}</span>
+              <select v-model="form.usage_mode" data-testid="usage-mode" class="input w-full" @change="onUsageModeChange">
+                <option value="immediate">{{ t('codexTicketSettings.usageImmediate') }}</option>
+                <option value="aged">{{ t('codexTicketSettings.usageAged') }}</option>
+              </select>
+              <span class="block input-hint">{{ t('codexTicketSettings.usageModeHint') }}</span>
+            </label>
+            <label class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.minTicketAge') }}</span>
+              <input v-model.number="form.min_ticket_age_seconds" data-testid="min-ticket-age-seconds" type="number" min="1" :max="maxTicketAge" step="1" :disabled="form.usage_mode !== 'aged'" class="input w-full" />
+              <span class="block input-hint">{{ t('codexTicketSettings.minTicketAgeHint', { max: maxTicketAge }) }}</span>
+            </label>
+            <label v-if="form.usage_mode === 'aged'" class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.historicalTicketValidity') }}</span>
+              <input v-model.number="form.historical_ticket_validity_seconds" data-testid="historical-ticket-validity-seconds" type="number" min="2" max="2592000" step="1" class="input w-full" />
+              <span class="block input-hint">{{ t('codexTicketSettings.historicalTicketValidityHint') }}</span>
+            </label>
+            <label class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.accountPoolCapacity') }}</span>
+              <input v-model.number="form.account_pool_capacity" data-testid="account-pool-capacity" type="number" :min="form.models.length" max="1000" step="1" class="input w-full" />
+              <span class="block input-hint">{{ t('codexTicketSettings.accountPoolCapacityHint') }}</span>
+            </label>
+            <label class="flex items-start gap-3">
+              <input v-model="form.consume_after_use" type="checkbox" data-testid="consume-after-use" class="mt-1 h-4 w-4" />
+              <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.consumeAfterUse') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.consumeAfterUseHint') }}</span></span>
+            </label>
+          </section>
           <section class="card space-y-4 p-5" aria-labelledby="ticket-cookie-title">
             <h2 id="ticket-cookie-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.cookieTitle') }}</h2>
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.cookieTimingHint') }}</p>
+            <label class="block space-y-1">
+              <span class="input-label">{{ t('codexTicketSettings.cookieRefreshMode') }}</span>
+              <select v-model="form.cookie_refresh_mode" data-testid="cookie-refresh-mode" class="input w-full">
+                <option value="fresh_per_ticket">{{ t('codexTicketSettings.cookieRefreshFresh') }}</option>
+                <option value="reuse_on_refresh">{{ t('codexTicketSettings.cookieRefreshReuse') }}</option>
+              </select>
+              <span class="block input-hint">{{ t('codexTicketSettings.cookieRefreshModeHint') }}</span>
+            </label>
             <div class="grid gap-4 sm:grid-cols-2">
               <label v-for="field in ticketCookieFields" :key="field.key" class="min-w-0 space-y-1">
                 <span class="input-label">{{ numericFieldLabel(field.key) }}</span>
@@ -156,7 +194,7 @@
               <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.backoffHint') }}</span>
             </label>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <label v-for="field in group.fields" :key="field.key" class="min-w-0 space-y-1">
+              <label v-for="field in group.fields.filter(field => field.key !== 'pool_capacity' || !form?.account_pool_capacity)" :key="field.key" class="min-w-0 space-y-1">
                 <span class="input-label">{{ numericFieldLabel(field.key) }}</span>
                 <input v-model.number="form[field.key]" :data-testid="field.key" type="number" :min="field.min" :max="field.max" step="1" class="input w-full" :aria-describedby="field.key === 'pool_capacity' ? 'ticket-pool-capacity-hint' : undefined" />
                 <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.range', { min: field.min, max: field.max }) }}</span>
@@ -203,6 +241,7 @@ const saveError = ref('')
 const form = ref<CodexTicketSettings | null>(null)
 const isAutoLength = computed(() => form.value?.length_mode === 'auto')
 const usesCookie = computed(() => form.value?.credential_mode === 'cookie' || form.value?.credential_mode === 'cookie_state')
+const maxTicketAge = computed(() => Math.max(1, (form.value?.historical_ticket_validity_seconds ?? 691200) - 1))
 const backoffText = ref('')
 const rejectedText = ref('')
 const protection = ref(defaultTicketProtection())
@@ -220,6 +259,8 @@ const tierOptions = computed(() => tierSelections.value.options.map(option => ({
 let ruleSequence = 0
 const payload = computed<CodexTicketSettings | null>(() => form.value && ({
   ...form.value,
+  account_pool_capacity: (form.value.account_pool_capacity as number | '') === '' ? undefined : form.value.account_pool_capacity,
+  min_ticket_age_seconds: form.value.usage_mode === 'aged' ? form.value.min_ticket_age_seconds : 0,
   models: [...form.value.models],
   retry_backoff_seconds: splitTicketList(backoffText.value).map(Number),
   rejected_lengths: splitTicketList(rejectedText.value).map(Number),
@@ -234,6 +275,9 @@ const validationError = computed(() => {
 })
 
 function numericFieldLabel(key: string) {
+  if (key === 'min_ticket_age_seconds') return t('codexTicketSettings.minTicketAge')
+  if (key === 'historical_ticket_validity_seconds') return t('codexTicketSettings.historicalTicketValidity')
+  if (key === 'account_pool_capacity') return t('codexTicketSettings.accountPoolCapacity')
   const timingFields = ['ttl_seconds', 'refresh_before_seconds', 'cookie_ttl_seconds', 'cookie_refresh_before_seconds']
   const group = form.value?.refresh_strategy === 'replace' && timingFields.includes(key) ? 'updateFields' : 'fields'
   return t(`codexTicketSettings.${group}.${key}`)
@@ -242,6 +286,12 @@ function numericFieldLabel(key: string) {
 function setForm(settings: CodexTicketSettings) {
   form.value = {
     ...settings,
+    usage_mode: settings.usage_mode ?? 'immediate',
+    min_ticket_age_seconds: settings.min_ticket_age_seconds ?? 0,
+    historical_ticket_validity_seconds: settings.historical_ticket_validity_seconds ?? 691200,
+    account_pool_capacity: settings.account_pool_capacity || undefined,
+    cookie_refresh_mode: settings.cookie_refresh_mode ?? 'fresh_per_ticket',
+    consume_after_use: settings.consume_after_use ?? false,
     credential_mode: settings.credential_mode ?? 'state',
     cookie_ttl_seconds: settings.cookie_ttl_seconds ?? 20,
     cookie_refresh_before_seconds: settings.cookie_refresh_before_seconds ?? 5,
@@ -261,6 +311,11 @@ function setForm(settings: CodexTicketSettings) {
   protectionLengthsText.value = protection.value.reject_and_silence_lengths.join(', ')
   tierSelections.value = readTicketTierSelections(settings.tier_rules)
   rules.value = tierSelections.value.rows.map(rule => ({ ...rule, id: ++ruleSequence }))
+}
+function onUsageModeChange() {
+  if (form.value?.usage_mode === 'aged' && !form.value.min_ticket_age_seconds) {
+    form.value.min_ticket_age_seconds = Math.min(300, maxTicketAge.value)
+  }
 }
 function addRule() {
   if (!saving.value && !isAutoLength.value && !usesCookie.value && rules.value.length < 32) rules.value.push({ id: ++ruleSequence, tiers: [], target_length: form.value?.target_length ?? 292 })

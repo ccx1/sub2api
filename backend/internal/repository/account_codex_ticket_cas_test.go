@@ -92,6 +92,25 @@ func TestCompareAndSwapCodexTicketCreateReplaceDeleteAndConflict(t *testing.T) {
 	}
 }
 
+func TestCompareAndSwapCodexTicketPruningRemovesOnlyOldModelInventories(t *testing.T) {
+	repo, mock := newCodexTicketCASRepo(t)
+	account := codexTicketCASAccount()
+	account.Extra["codex_turn_ticket:old-model"] = map[string]any{"state": "old-ticket"}
+	account.Extra["codex_turn_ticket:custom"] = map[string]any{"note": "leave alone"}
+	account.Extra[service.OpenAICodexTicketHistoryKey] = map[string]any{"items": []any{}}
+	account.Extra["unrelated"] = "kept"
+	require.Equal(t, []string{"codex_turn_ticket:old-model"}, staleCodexTicketInventoryKeys(account.Extra, []string{"model"}))
+	mock.ExpectExec(regexp.QuoteMeta(codexTicketCASPruningSQL)).WithArgs("codex_turn_ticket:model", `{"state":"new"}`, int64(41),
+		service.PlatformOpenAI, service.AccountTypeOAuth, `{"access_token":"test"}`, nil, "null",
+		codexTicketCASDefaultConfig, `["codex_turn_ticket:old-model"]`,
+		codexTicketCASJSON(`{"codex_turn_ticket:old-model":{"state":"old-ticket"}}`)).WillReturnResult(sqlmock.NewResult(0, 1))
+	changed, err := repo.CompareAndSwapCodexTicketPruning(context.Background(), account, "model", map[string]any{"state": "new"}, []string{"model"})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Contains(t, account.Extra, "codex_turn_ticket:old-model", "调用方快照不得被仓库改写")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestCompareAndSwapCodexTicketPreservesRawConfigurationAndRandomProxyIdentity(t *testing.T) {
 	repo, mock := newCodexTicketCASRepo(t)
 	account := codexTicketCASAccount()

@@ -94,6 +94,20 @@ describe('CodexTicketVaultModal', () => {
     expect(wrapper.findAll('[data-testid="vault-revoke"]')).toHaveLength(2)
   })
 
+  it('shows the account-wide capacity and allocated model capacity', async () => {
+    const data = vault()
+    data.account_pool_capacity = 1000
+    data.policy.historical_ticket_validity_seconds = 691200
+    data.models![0]!.capacity = 500
+    mocks.load.mockResolvedValueOnce(data)
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="vault-model-summary"]').text()).toContain('3 / 500')
+    const overview = wrapper.get('[data-testid="vault-overview"]').text()
+    expect(overview).toContain(`${prefix}.fields.accountPoolCapacity`)
+    expect(overview).toContain(`${prefix}.fields.historicalValidity`)
+  })
+
   it('revokes one ticket by fingerprint and reloads', async () => {
     const wrapper = render()
     await flushPromises()

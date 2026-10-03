@@ -44,6 +44,10 @@ func (s *OpenAIGatewayService) applyCodexRequestStrategy(
 		return false, s.handleCodexRequestStrategyFailure(policy, errors.New("request strategy model is missing"))
 	}
 	cfg := config.NormalizeOpenAICodexTicketConfig(s.openAICodexTicketConfigForAccount(ctx, account))
+	if config.CodexTicketUsageAgedEnabled(cfg) {
+		// 历史票直接按库存窗口发送，不用额外的前置请求复核旧凭据。
+		return false, nil
+	}
 	ticket := s.lookupOpenAICodexTicketForConfig(account, model, cfg)
 	if ticket == nil || !ticket.usesCookies() || !ticket.cookieUsable(time.Now(), cfg) {
 		return false, s.handleCodexRequestStrategyFailure(policy, errors.New("no usable cookie ticket is available"))

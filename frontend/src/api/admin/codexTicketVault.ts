@@ -43,6 +43,7 @@ export interface CodexTicketVaultSlot {
 export interface CodexTicketVaultModel {
   model: string
   configured: boolean
+  capacity?: number
   total: number
   available: number
   maturing: number
@@ -58,11 +59,13 @@ export interface CodexTicketVault {
   proxy_available: boolean
   credential_mode?: string
   pool_capacity: number
+  account_pool_capacity?: number
   ttl_seconds: number
   cookie_ttl_seconds: number
   policy: {
     usage_mode: 'immediate' | 'aged' | string
     min_ticket_age_seconds: number
+    historical_ticket_validity_seconds?: number
     consume_after_use: boolean
     fail_closed: boolean
   }

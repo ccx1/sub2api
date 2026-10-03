@@ -1400,11 +1400,16 @@ export interface Account {
   ollama_cloud_usage?: OllamaCloudUsageState
   codex_turn_tickets?: Array<{
     model: string
+    usage_mode?: 'immediate' | 'aged'
     length?: number
     ready: boolean
     remaining_seconds: number
     blocked: boolean
     expires_at?: string
+    origin_captured_at?: string
+    last_attempt_at?: string
+    last_attempt_success?: boolean
+    last_attempt_reason?: string
     credential_state?: 'available' | 'revalidation_required' | 'expired' | 'revoked' | 'missing'
     revalidate_at?: string
     revalidation_required?: boolean

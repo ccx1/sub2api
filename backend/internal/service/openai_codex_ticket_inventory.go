@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"slices"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -107,7 +108,11 @@ func codexTicketInventoryTime(inventory *openAICodexTicket) time.Time {
 // 只返回实际发送的叶票，receipt 不能携带之后可能变化的库存关系。
 func selectOpenAICodexTicket(inventory *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) *openAICodexTicket {
 	for _, slot := range codexTicketUsageCandidates(inventory, account, cfg, now) {
-		return codexTicketLeaf(slot)
+		selected := codexTicketLeaf(slot)
+		if config.CodexTicketUsageAgedEnabled(cfg) {
+			selected.historicalExpiresAt = selected.historicalExpires(cfg)
+		}
+		return selected
 	}
 	return nil
 }
@@ -181,6 +186,26 @@ func (s *OpenAIGatewayService) codexTicketInventoryLocked(account *Account, mode
 	return current
 }
 
+func limitCodexTicketInventory(inventory *openAICodexTicket, capacity int) {
+	if inventory == nil || capacity < 1 {
+		return
+	}
+	slots := codexTicketSlots(inventory)
+	if len(slots) <= capacity {
+		return
+	}
+	inventory.Standby = nil
+	inventory.Reserve = nil
+	if capacity > 1 {
+		inventory.Standby = codexTicketLeaf(slots[1])
+	}
+	if capacity > 2 {
+		for _, slot := range slots[2:capacity] {
+			inventory.Reserve = append(inventory.Reserve, codexTicketLeaf(slot))
+		}
+	}
+}
+
 // 保护更新不改变采集时间；相同票的持久绑定可刷新旧缓存，撤销状态仍在下方合并。
 func refreshCodexTicketAccountBindings(inventory, persisted *openAICodexTicket, account *Account) {
 	for _, ticket := range codexTicketSlots(inventory) {
@@ -229,7 +254,9 @@ func (s *OpenAIGatewayService) codexTicketInventoryNeedsRefresh(account *Account
 	lock.Lock()
 	defer lock.Unlock()
 	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
-	if cfg.RefreshStrategy != config.CodexTicketRefreshReplace {
+	limitCodexTicketInventory(inventory, config.CodexTicketModelCapacity(cfg, model))
+	if cfg.RefreshStrategy != config.CodexTicketRefreshReplace &&
+		!(config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket) {
 		if pending := s.pendingCodexTicketCookies(account.ID, model); pending != nil && codexTicketInventoryContains(inventory, pending.Ticket) {
 			return true
 		}
@@ -261,7 +288,7 @@ func mergeCodexTicketPublication(inventory, incoming *openAICodexTicket, account
 		}
 		return composeCodexTicketPool(tickets, cfg)
 	}
-	if cfg.RefreshStrategy == config.CodexTicketRefreshReplace {
+	if cfg.RefreshStrategy == config.CodexTicketRefreshReplace && !(config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket) {
 		for index, ticket := range tickets {
 			hydrateCodexTicketSoftRevalidate(ticket, cfg)
 			if ticket.needsRefresh(now, time.Duration(cfg.RefreshBeforeSeconds)*time.Second) {
@@ -270,6 +297,22 @@ func mergeCodexTicketPublication(inventory, incoming *openAICodexTicket, account
 				return composeCodexTicketPool(tickets, cfg)
 			}
 		}
+	}
+	if config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket &&
+		len(tickets) >= config.CodexTicketModelCapacity(cfg, incoming.Model) {
+		oldest := -1
+		for index, ticket := range tickets {
+			if now.Sub(ticket.lineageCapturedAt()) < time.Duration(cfg.MinTicketAgeSeconds)*time.Second {
+				continue
+			}
+			if oldest < 0 || ticket.lineageCapturedAt().Before(tickets[oldest].lineageCapturedAt()) {
+				oldest = index
+			}
+		}
+		if oldest < 0 {
+			return composeCodexTicketPool(tickets, cfg)
+		}
+		tickets = slices.Delete(tickets, oldest, oldest+1)
 	}
 	return composeCodexTicketPool(append(tickets, incoming), cfg)
 }

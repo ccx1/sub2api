@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,12 +20,39 @@ func (r *accountRepository) GetCodexTicketAccountSnapshot(ctx context.Context, i
 
 // 发布核对采集身份、代理配置和旧票；撤销只核对实际发送的票据版本。
 func (r *accountRepository) CompareAndSwapCodexTicket(ctx context.Context, account *service.Account, model string, replacement any) (bool, error) {
+	return r.compareAndSwapCodexTicket(ctx, account, model, replacement, nil)
+}
+
+func (r *accountRepository) CompareAndSwapCodexTicketPruning(ctx context.Context, account *service.Account, model string, replacement any, allowedModels []string) (bool, error) {
+	return r.compareAndSwapCodexTicket(ctx, account, model, replacement, allowedModels)
+}
+
+func (r *accountRepository) compareAndSwapCodexTicket(ctx context.Context, account *service.Account, model string, replacement any, allowedModels []string) (bool, error) {
 	if r == nil {
 		return false, service.ErrAccountNilInput
 	}
 	request, err := prepareCodexTicketCAS(account, model, replacement)
 	if err != nil {
 		return false, err
+	}
+	if request.publish && allowedModels != nil {
+		stale := staleCodexTicketInventoryKeys(account.Extra, allowedModels)
+		if len(stale) > 0 {
+			encoded, err := json.Marshal(stale)
+			if err != nil {
+				return false, err
+			}
+			expected := make(map[string]any, len(stale))
+			for _, key := range stale {
+				expected[key] = account.Extra[key]
+			}
+			expectedJSON, err := json.Marshal(expected)
+			if err != nil {
+				return false, err
+			}
+			request.args = append(request.args, string(encoded), string(expectedJSON))
+			request.prune = true
+		}
 	}
 	client := clientFromContext(ctx, r.client)
 	if client == nil {
@@ -67,6 +95,7 @@ type codexTicketCASRequest struct {
 	account          *service.Account
 	args             []any
 	publish          bool
+	prune            bool
 	revoke           bool
 	withInvalidation bool
 }
@@ -149,12 +178,42 @@ func executeCodexTicketCAS(ctx context.Context, client *dbent.Client, request co
 	if codexTicketCASPublicationBlocked(request) {
 		return false, nil
 	}
-	result, err := client.ExecContext(ctx, codexTicketCASSQL, request.args...)
+	query := codexTicketCASSQL
+	if request.prune {
+		query = codexTicketCASPruningSQL
+	}
+	result, err := client.ExecContext(ctx, query, request.args...)
 	if err != nil {
 		return false, err
 	}
 	affected, err := result.RowsAffected()
 	return affected > 0 && err == nil, err
+}
+
+func staleCodexTicketInventoryKeys(extra map[string]any, allowedModels []string) []string {
+	allowed := make(map[string]bool, len(allowedModels))
+	for _, model := range allowedModels {
+		allowed[codexTicketCASKeyPrefix+strings.TrimSpace(model)] = true
+	}
+	var stale []string
+	for key, value := range extra {
+		if !strings.HasPrefix(key, codexTicketCASKeyPrefix) || allowed[key] || service.IsOpenAICodexTicketMetaExtraKey(key) {
+			continue
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			continue
+		}
+		var ticket struct {
+			State   string            `json:"state"`
+			Cookies []json.RawMessage `json:"cookies"`
+		}
+		if json.Unmarshal(encoded, &ticket) == nil && (ticket.State != "" || len(ticket.Cookies) > 0) {
+			stale = append(stale, key)
+		}
+	}
+	sort.Strings(stale)
+	return stale
 }
 
 func prepareCodexTicketRevocation(account *service.Account, key string, replacementJSON []byte) (codexTicketCASRequest, error) {
@@ -225,6 +284,26 @@ WHERE id = $3 AND platform = $4 AND type = $5
  )
  AND ($2::jsonb = 'null'::jsonb OR $2::jsonb @> '{"revoked":true}'::jsonb OR (status = 'active' AND schedulable = true
   AND (NOT auto_pause_on_expired OR expires_at IS NULL OR expires_at > NOW())))
+ AND deleted_at IS NULL`
+
+const codexTicketCASPruningSQL = `UPDATE accounts
+SET extra = (COALESCE(extra, '{}'::jsonb) - COALESCE(
+ (SELECT array_agg(item.key) FROM jsonb_array_elements_text($10::jsonb) AS item(key)), ARRAY[]::text[]))
+ || jsonb_build_object($1::text, $2::jsonb), updated_at = NOW()
+WHERE id = $3 AND platform = $4 AND type = $5
+ AND credentials = $6::jsonb
+ AND proxy_id IS NOT DISTINCT FROM $7
+ AND COALESCE(extra -> $1, 'null'::jsonb) = $8::jsonb
+ AND NOT EXISTS (
+  SELECT 1 FROM jsonb_each($9::jsonb) AS expected(key, value)
+  WHERE COALESCE(extra -> expected.key, 'null'::jsonb) <> expected.value
+ )
+ AND NOT EXISTS (
+  SELECT 1 FROM jsonb_each($11::jsonb) AS old_ticket(key, value)
+  WHERE COALESCE(extra -> old_ticket.key, 'null'::jsonb) <> old_ticket.value
+ )
+ AND (status = 'active' AND schedulable = true
+  AND (NOT auto_pause_on_expired OR expires_at IS NULL OR expires_at > NOW()))
  AND deleted_at IS NULL`
 
 // 撤票只归属实际发送的票据版本，不依赖可能已经刷新的 OAuth 凭据和出口配置。

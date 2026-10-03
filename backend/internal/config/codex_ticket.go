@@ -3,15 +3,16 @@ package config
 import "fmt"
 
 const (
-	CodexTicketLengthStrict        = "strict"
-	CodexTicketLengthAuto          = "auto"
-	CodexTicketSessionRandom       = "random"
-	CodexTicketSessionAccount      = "account"
-	CodexTicketSessionAccountModel = "account_model"
-	CodexTicketRefreshRevalidate   = "revalidate"
-	CodexTicketRefreshReplace      = "replace"
-	DefaultCodexTicketPoolCapacity = 5
-	MaxCodexTicketPoolCapacity     = 20
+	CodexTicketLengthStrict           = "strict"
+	CodexTicketLengthAuto             = "auto"
+	CodexTicketSessionRandom          = "random"
+	CodexTicketSessionAccount         = "account"
+	CodexTicketSessionAccountModel    = "account_model"
+	CodexTicketRefreshRevalidate      = "revalidate"
+	CodexTicketRefreshReplace         = "replace"
+	DefaultCodexTicketPoolCapacity    = 5
+	MaxCodexTicketPoolCapacity        = 20
+	MaxCodexTicketAccountPoolCapacity = 1000
 
 	// CodexTicketRejectSafetyBuffering* 控制 Safety Buffering 否决闸的严格度。
 	// off:               不因 Safety Buffering 信号否决（默认，保持既有行为）。
@@ -35,7 +36,9 @@ const (
 	CodexTicketUsageImmediate = "immediate"
 	CodexTicketUsageAged      = "aged"
 	// MaxCodexTicketMinAgeSeconds 是 aged 模式沉淀时长的硬上限。
-	MaxCodexTicketMinAgeSeconds = 86400
+	MaxCodexTicketMinAgeSeconds                 = 30 * 86400
+	DefaultCodexTicketHistoricalValiditySeconds = 8 * 86400
+	MaxCodexTicketHistoricalValiditySeconds     = 30 * 86400
 )
 
 // CodexTicketUsageAgedEnabled 报告是否启用了“只用沉淀满指定时长的票”。
@@ -47,11 +50,44 @@ func CodexTicketUsageAgedEnabled(cfg OpenAICodexTicketConfig) bool {
 // 取票机制不改变票据身份：票据绑定、采集配置快照和共享调度版本都不应因它变化而失效。
 func WithoutCodexTicketUsagePolicy(cfg OpenAICodexTicketConfig) OpenAICodexTicketConfig {
 	cfg.UsageMode, cfg.MinTicketAgeSeconds, cfg.ConsumeAfterUse = "", 0, false
+	cfg.HistoricalTicketValiditySeconds = 0
+	cfg.CookieRefreshMode = ""
 	return cfg
+}
+
+// CodexTicketModelCapacity assigns a stable share of the account-wide pool to each configured model.
+func CodexTicketModelCapacity(cfg OpenAICodexTicketConfig, model string) int {
+	if cfg.AccountPoolCapacity <= 0 {
+		return max(1, cfg.PoolCapacity)
+	}
+	count := len(cfg.Models)
+	if count == 0 {
+		return 0
+	}
+	for index, candidate := range cfg.Models {
+		if candidate == model {
+			capacity := cfg.AccountPoolCapacity / count
+			if index < cfg.AccountPoolCapacity%count {
+				capacity++
+			}
+			return capacity
+		}
+	}
+	return 0
 }
 
 // ValidateCodexTicketUsage 校验并规范化取票机制；空值按即取即用处理，旧配置保持原行为。
 func ValidateCodexTicketUsage(cfg *OpenAICodexTicketConfig) error {
+	if cfg.HistoricalTicketValiditySeconds == 0 {
+		cfg.HistoricalTicketValiditySeconds = DefaultCodexTicketHistoricalValiditySeconds
+	}
+	if cfg.HistoricalTicketValiditySeconds < 1 || cfg.HistoricalTicketValiditySeconds > MaxCodexTicketHistoricalValiditySeconds {
+		return fmt.Errorf("historical_ticket_validity_seconds 必须在 1 到 %d 之间", MaxCodexTicketHistoricalValiditySeconds)
+	}
+	if cfg.AccountPoolCapacity < 0 || cfg.AccountPoolCapacity > MaxCodexTicketAccountPoolCapacity ||
+		cfg.AccountPoolCapacity > 0 && cfg.AccountPoolCapacity < len(cfg.Models) {
+		return fmt.Errorf("account_pool_capacity 必须在模型数量到 %d 之间，0 表示沿用每模型容量", MaxCodexTicketAccountPoolCapacity)
+	}
 	switch cfg.UsageMode {
 	case "":
 		cfg.UsageMode = CodexTicketUsageImmediate
@@ -63,12 +99,9 @@ func ValidateCodexTicketUsage(cfg *OpenAICodexTicketConfig) error {
 		cfg.MinTicketAgeSeconds = 0
 		return nil
 	}
-	limit := MaxCodexTicketMinAgeSeconds
-	if cfg.TTLSeconds > 1 && cfg.TTLSeconds-1 < limit {
-		limit = cfg.TTLSeconds - 1
-	}
+	limit := min(MaxCodexTicketMinAgeSeconds, cfg.HistoricalTicketValiditySeconds-1)
 	if cfg.MinTicketAgeSeconds < 1 || cfg.MinTicketAgeSeconds > limit {
-		return fmt.Errorf("min_ticket_age_seconds 必须在 1 到 %d 之间，且小于票据有效期", limit)
+		return fmt.Errorf("min_ticket_age_seconds 必须在 1 到 %d 之间，且小于历史票有效期", limit)
 	}
 	return nil
 }
@@ -99,6 +132,13 @@ func NormalizeOpenAICodexTicketConfig(cfg OpenAICodexTicketConfig) OpenAICodexTi
 		cfg.PoolCapacity = DefaultCodexTicketPoolCapacity
 	}
 	cfg.PoolCapacity = min(cfg.PoolCapacity, MaxCodexTicketPoolCapacity)
+	if cfg.AccountPoolCapacity > MaxCodexTicketAccountPoolCapacity {
+		cfg.AccountPoolCapacity = MaxCodexTicketAccountPoolCapacity
+	}
+	if cfg.HistoricalTicketValiditySeconds <= 0 {
+		cfg.HistoricalTicketValiditySeconds = DefaultCodexTicketHistoricalValiditySeconds
+	}
+	cfg.HistoricalTicketValiditySeconds = min(cfg.HistoricalTicketValiditySeconds, MaxCodexTicketHistoricalValiditySeconds)
 	if cfg.VerifyBusiness == nil {
 		enabled := true
 		cfg.VerifyBusiness = &enabled
@@ -185,6 +225,6 @@ func NormalizeOpenAICodexTicketConfig(cfg OpenAICodexTicketConfig) OpenAICodexTi
 		cfg.UsageMode = CodexTicketUsageImmediate
 		cfg.MinTicketAgeSeconds = 0
 	}
-	cfg.MinTicketAgeSeconds = min(cfg.MinTicketAgeSeconds, MaxCodexTicketMinAgeSeconds)
+	cfg.MinTicketAgeSeconds = min(cfg.MinTicketAgeSeconds, MaxCodexTicketMinAgeSeconds, cfg.HistoricalTicketValiditySeconds-1)
 	return cfg
 }

@@ -13,6 +13,7 @@ func TestCodexTicketCredentialDefaults(t *testing.T) {
 	require.Equal(t, 5, *cfg.CookieRefreshBeforeSeconds)
 	require.False(t, CodexTicketUsesCookies(cfg))
 	require.Equal(t, 3600, cfg.TTLSeconds)
+	require.Equal(t, CodexTicketCookieFreshPerTicket, cfg.CookieRefreshMode)
 	cfg.CookieTTLSeconds, cfg.CookieRefreshBeforeSeconds = 1, nil
 	cfg = NormalizeCodexTicketCredentialConfig(cfg)
 	require.Zero(t, *cfg.CookieRefreshBeforeSeconds)
@@ -30,6 +31,7 @@ func TestCodexTicketCredentialValidation(t *testing.T) {
 	negative, equal := -1, 20
 	for _, cfg := range []OpenAICodexTicketConfig{
 		{CredentialMode: "other"}, {CookieTTLSeconds: -1}, {CookieTTLSeconds: 3601},
+		{CookieRefreshMode: "invalid"},
 		{CookieRefreshBeforeSeconds: &negative}, {CookieRefreshBeforeSeconds: &equal},
 	} {
 		require.Error(t, ValidateCodexTicketCredentialConfig(&cfg))

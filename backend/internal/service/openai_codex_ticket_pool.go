@@ -15,7 +15,11 @@ func usableCodexTicketPool(inventory *openAICodexTicket, account *Account, cfg c
 		if ticket.usable(now, account, cfg) && !seen[ticket.credentialIdentity()] {
 			seen[ticket.credentialIdentity()] = true
 			copy := codexTicketLeaf(ticket)
-			copy.ExpiresAt = ticket.effectiveExpiresAt(resolveCodexTicketCredentialConfig(account, cfg))
+			if config.CodexTicketUsageAgedEnabled(cfg) {
+				copy.ExpiresAt = ticket.historicalExpires(cfg)
+			} else {
+				copy.ExpiresAt = ticket.effectiveExpiresAt(resolveCodexTicketCredentialConfig(account, cfg))
+			}
 			tickets = append(tickets, copy)
 		}
 	}
@@ -26,7 +30,11 @@ func composeCodexTicketPool(tickets []*openAICodexTicket, cfg config.OpenAICodex
 	if len(tickets) == 0 {
 		return nil
 	}
-	capacity := config.NormalizeOpenAICodexTicketConfig(cfg).PoolCapacity
+	cfg = config.NormalizeOpenAICodexTicketConfig(cfg)
+	capacity := config.CodexTicketModelCapacity(cfg, tickets[0].Model)
+	if capacity < 1 {
+		return nil
+	}
 	for len(tickets) > capacity {
 		// 保留当前票；空间不足时淘汰最早到期的备用，容量为一时直接续票。
 		remove := 0
@@ -34,7 +42,11 @@ func composeCodexTicketPool(tickets []*openAICodexTicket, cfg config.OpenAICodex
 			remove = 1
 		}
 		for index := remove + 1; index < len(tickets); index++ {
-			if tickets[index].ExpiresAt.Before(tickets[remove].ExpiresAt) {
+			left, right := tickets[index].ExpiresAt, tickets[remove].ExpiresAt
+			if config.CodexTicketUsageAgedEnabled(cfg) {
+				left, right = tickets[index].historicalExpires(cfg), tickets[remove].historicalExpires(cfg)
+			}
+			if left.Before(right) {
 				remove = index
 			}
 		}
@@ -52,11 +64,29 @@ func composeCodexTicketPool(tickets []*openAICodexTicket, cfg config.OpenAICodex
 
 func codexTicketPoolNeedsRefresh(inventory *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) bool {
 	cfg = resolveCodexTicketCredentialConfig(account, config.NormalizeOpenAICodexTicketConfig(cfg))
+	if inventory == nil {
+		return true
+	}
 	inventory = cloneCodexTicketInventory(inventory)
 	hydrateCodexTicketSoftRevalidate(inventory, cfg)
 	tickets := usableCodexTicketPool(inventory, account, cfg, now)
-	if len(tickets) < cfg.PoolCapacity {
+	capacity := config.CodexTicketModelCapacity(cfg, inventory.Model)
+	if len(tickets) < capacity {
 		return true
+	}
+	if config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket {
+		latest := codexTicketInventoryTime(inventory)
+		if account != nil && account.Extra != nil {
+			history, err := DecodeCodexTicketHistory(account.Extra[OpenAICodexTicketHistoryKey])
+			if err == nil {
+				for _, attempt := range history.Items {
+					if attempt.Model == inventory.Model && attempt.StartedAt.After(latest) {
+						latest = attempt.StartedAt
+					}
+				}
+			}
+		}
+		return !latest.After(now.Add(-time.Hour))
 	}
 	refreshBefore := time.Duration(cfg.RefreshBeforeSeconds) * time.Second
 	if cfg.RefreshStrategy == config.CodexTicketRefreshReplace {
@@ -72,7 +102,7 @@ func codexTicketPoolNeedsRefresh(inventory *openAICodexTicket, account *Account,
 			return true
 		}
 	}
-	if cfg.PoolCapacity == 1 {
+	if capacity == 1 {
 		return tickets[0].needsRefresh(now, refreshBefore)
 	}
 	freshBackups := 0
@@ -81,7 +111,7 @@ func codexTicketPoolNeedsRefresh(inventory *openAICodexTicket, account *Account,
 			freshBackups++
 		}
 	}
-	return freshBackups < cfg.PoolCapacity-1
+	return freshBackups < capacity-1
 }
 
 func normalizeCodexTicketPool(inventory *openAICodexTicket) {
@@ -103,7 +133,7 @@ func normalizeCodexTicketPool(inventory *openAICodexTicket) {
 	inventory.Standby = normalize(inventory.Standby)
 	var reserve []*openAICodexTicket
 	for _, ticket := range inventory.Reserve {
-		if len(reserve) >= config.MaxCodexTicketPoolCapacity-2 {
+		if len(reserve) >= config.MaxCodexTicketAccountPoolCapacity-2 {
 			break
 		}
 		if leaf := normalize(ticket); leaf != nil {
@@ -153,6 +183,18 @@ func codexTicketPrimaryReason(ticket *openAICodexTicket, account *Account, cfg c
 		return "binding"
 	}
 	resolved := resolveCodexTicketCredentialConfig(account, cfg)
+	if config.CodexTicketUsageAgedEnabled(resolved) {
+		if ticket.usable(now, account, resolved) {
+			if first := ticket.lineageCapturedAt(); first.IsZero() || now.Sub(first) < time.Duration(resolved.MinTicketAgeSeconds)*time.Second {
+				return "maturing"
+			}
+			return ""
+		}
+		if !ticket.historicalExpires(resolved).After(now) {
+			return "expired"
+		}
+		return "unavailable"
+	}
 	if config.CodexTicketUsesCookies(resolved) {
 		if !ticket.usesCookies() || ticket.CredentialMode != resolved.CredentialMode {
 			return "credential"
@@ -182,24 +224,42 @@ func codexTicketPoolStatus(model string, inventory *openAICodexTicket, account *
 	inventory = cloneCodexTicketInventory(inventory)
 	hydrateCodexTicketSoftRevalidate(inventory, cfg)
 	tickets := usableCodexTicketPool(inventory, account, cfg, now)
-	status := OpenAICodexTicketStatus{Model: model, Capacity: cfg.PoolCapacity, CredentialState: "missing",
-		AvailableCount: len(tickets), ReserveCount: max(0, len(tickets)-1), Blocked: cfg.FailClosed && len(tickets) == 0}
+	selected := selectOpenAICodexTicket(inventory, account, cfg, now)
+	if config.CodexTicketUsageAgedEnabled(cfg) {
+		matured := tickets[:0]
+		for _, ticket := range tickets {
+			if first := ticket.lineageCapturedAt(); !first.IsZero() && now.Sub(first) >= time.Duration(cfg.MinTicketAgeSeconds)*time.Second {
+				matured = append(matured, ticket)
+			}
+		}
+		tickets = matured
+	}
+	status := OpenAICodexTicketStatus{Model: model, Capacity: config.CodexTicketModelCapacity(cfg, model), CredentialState: "missing",
+		AvailableCount: len(tickets), ReserveCount: max(0, len(tickets)-1), Blocked: cfg.FailClosed && selected == nil}
 	setCodexTicketPrimaryStatus(&status, inventory, account, cfg, now)
-	if len(tickets) == 0 {
+	if selected == nil {
 		if status.PrimaryReason == "expired" || status.PrimaryReason == "revoked" {
 			status.CredentialState = status.PrimaryReason
 		}
 		return status
 	}
-	current := tickets[0]
-	status.Ready, status.Length, status.ExpiresAt = true, current.Length, &current.ExpiresAt
-	status.RemainingSeconds = int64(current.ExpiresAt.Sub(now) / time.Second)
+	current := selected
+	expires := current.effectiveExpiresAt(cfg)
+	if config.CodexTicketUsageAgedEnabled(cfg) {
+		expires = current.historicalExpires(cfg)
+	}
+	status.Ready, status.Length, status.ExpiresAt = true, current.Length, &expires
+	status.RemainingSeconds = int64(expires.Sub(now) / time.Second)
+	origin := current.lineageCapturedAt()
+	if !origin.IsZero() {
+		status.OriginCapturedAt = &origin
+	}
 	status.UsingStandby = !sameCodexTicket(current, inventory)
 	status.CredentialState = "available"
 	if !current.RevalidateAt.IsZero() {
 		status.RevalidateAt = &current.RevalidateAt
 	}
-	status.RevalidationRequired = current.needsRefresh(now, 0)
+	status.RevalidationRequired = !config.CodexTicketUsageAgedEnabled(cfg) && current.needsRefresh(now, 0)
 	if status.RevalidationRequired {
 		status.CredentialState = "revalidation_required"
 	}
@@ -223,6 +283,9 @@ func setCodexTicketPrimaryStatus(status *OpenAICodexTicketStatus, inventory *ope
 		status.PrimaryReason = codexTicketPrimaryReason(inventory, account, cfg, now)
 		status.PrimaryReady = status.PrimaryReason == ""
 		primaryExpiry := inventory.effectiveExpiresAt(cfg)
+		if config.CodexTicketUsageAgedEnabled(cfg) {
+			primaryExpiry = inventory.historicalExpires(cfg)
+		}
 		if !primaryExpiry.IsZero() {
 			status.PrimaryExpiresAt = &primaryExpiry
 			status.PrimaryRemainingSeconds = int64(primaryExpiry.Sub(now) / time.Second)

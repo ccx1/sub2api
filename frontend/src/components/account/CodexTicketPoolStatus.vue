@@ -48,6 +48,14 @@
         <span v-if="validCount(ticket.expiring_count) && ticket.expiring_count! > 0" class="text-amber-600 dark:text-amber-400" data-testid="pool-expiring">{{ t('admin.accounts.openai.codexTicketPoolExpiring', { count: ticket.expiring_count }) }}</span>
         <span v-if="validExpiry(ticket.next_expires_at)" class="break-words" :title="formatDateTime(ticket.next_expires_at)" data-testid="pool-expiry">{{ t('admin.accounts.openai.codexTicketPoolNextExpiry', { time: shortExpiry(ticket.next_expires_at!) }) }}</span>
       </div>
+      <div v-if="ticket.usage_mode === 'aged'" class="flex flex-col text-gray-500 dark:text-gray-400" data-testid="history-ticket-status">
+        <span>{{ t('admin.accounts.openai.codexTicketHistoryCapturedAt', { time: strictDateTime(ticket.origin_captured_at) ?? t('admin.accounts.openai.codexTicketHistoryUnknown') }) }}</span>
+        <span>{{ t('admin.accounts.openai.codexTicketHistoryRemaining', { time: historyRemaining(ticket) }) }}</span>
+      </div>
+      <div class="flex flex-wrap gap-x-1.5 text-gray-500 dark:text-gray-400" data-testid="ticket-harvest-status">
+        <span :class="harvestStatusClass(ticket)" :title="ticket.last_attempt_success === false ? ticket.last_attempt_reason : undefined">{{ t('admin.accounts.openai.codexTicketHarvestLast', { status: harvestStatusLabel(ticket) }) }}</span>
+        <time v-if="strictDateTime(ticket.last_attempt_at)" :datetime="ticket.last_attempt_at">{{ strictDateTime(ticket.last_attempt_at) }}</time>
+      </div>
       <div
         v-if="routeAffinityLabel(ticket)"
         class="flex flex-wrap items-center gap-x-1.5 text-[10px]"
@@ -109,6 +117,41 @@ function availabilityKey(ticket: TicketStatus) {
 const validExpiry = (value?: string) => !!value && Number.isFinite(Date.parse(value))
 const shortExpiry = (value: string) => formatDateTime(value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 const shortModel = (model: string) => ({ 'gpt-6-astra': 'astra', 'gpt-5.6-sol': 'sol' })[model] ?? model
+const padTimePart = (value: number) => String(value).padStart(2, '0')
+function strictDateTime(value?: string) {
+  if (!validExpiry(value)) return undefined
+  const date = new Date(value!)
+  return `${date.getFullYear()}-${padTimePart(date.getMonth() + 1)}-${padTimePart(date.getDate())} ${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}:${padTimePart(date.getSeconds())}`
+}
+
+function historyRemaining(ticket: TicketStatus) {
+  if (!validExpiry(ticket.expires_at) || !Number.isFinite(ticket.remaining_seconds) || ticket.remaining_seconds < 0) {
+    return t('admin.accounts.openai.codexTicketHistoryUnknown')
+  }
+  if (Date.parse(ticket.expires_at!) <= Date.now() || ticket.remaining_seconds === 0) return t('admin.accounts.openai.codexTicketHistoryExpired')
+  const total = Math.floor(ticket.remaining_seconds)
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor(total % 86400 / 3600)
+  const minutes = Math.floor(total % 3600 / 60)
+  if (days) return t('admin.accounts.openai.codexTicketHistoryDaysHours', { days, hours })
+  if (hours) return t('admin.accounts.openai.codexTicketHistoryHoursMinutes', { hours, minutes })
+  if (minutes) return t('admin.accounts.openai.codexTicketHistoryMinutesSeconds', { minutes, seconds: total % 60 })
+  return t('admin.accounts.openai.codexTicketHistorySeconds', { seconds: total })
+}
+
+function harvestStatusLabel(ticket: TicketStatus) {
+  if (!strictDateTime(ticket.last_attempt_at)) return t('admin.accounts.openai.codexTicketHarvestUnknown')
+  if (ticket.last_attempt_success === true) return t('admin.accounts.openai.codexTicketHarvestSucceeded')
+  if (ticket.last_attempt_success === false) return t('admin.accounts.openai.codexTicketHarvestFailed')
+  return t('admin.accounts.openai.codexTicketHarvestUnknown')
+}
+
+function harvestStatusClass(ticket: TicketStatus) {
+  if (!strictDateTime(ticket.last_attempt_at)) return ''
+  if (ticket.last_attempt_success === true) return 'text-emerald-600 dark:text-emerald-400'
+  if (ticket.last_attempt_success === false) return 'text-amber-600 dark:text-amber-400'
+  return ''
+}
 const standbyExpiry = (ticket: TicketStatus) => validExpiry(ticket.standby_expires_at)
   ? t('admin.accounts.openai.codexTurnTicketStandbyExpires', { time: formatDateTime(ticket.standby_expires_at) }) : undefined
 
@@ -239,6 +282,10 @@ function qualityReasonText(reason?: string) {
 
 function formatRemaining(seconds: number) {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor(total % 86400 / 3600)
+  if (days) return t('admin.accounts.openai.codexTicketHistoryDaysHours', { days, hours })
+  if (hours) return t('admin.accounts.openai.codexTicketHistoryHoursMinutes', { hours, minutes: Math.floor(total % 3600 / 60) })
   return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`
 }
 </script>

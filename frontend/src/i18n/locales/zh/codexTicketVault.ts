@@ -1,7 +1,7 @@
 export default {
   codexTicketVault: {
     menu: '票库', title: '账号票库', refresh: '刷新', loading: '正在读取票库…', failed: '读取票库失败',
-    safeHint: '票库只展示票据元数据（状态、时间、长度、Cookie 名称与单向指纹），不展示也不返回原始 STATE、Cookie 值或 token。票据保存在账号的按模型票池中，容量即打票配置的库存容量。',
+    safeHint: '票库只展示票据元数据（状态、时间、长度、Cookie 名称与单向指纹），不展示也不返回原始 STATE、Cookie 值或 token。账号总容量按模型分配。',
     overview: '票库概览', empty: '当前没有任何模型的票据', noSlots: '该模型当前没有存票', notConfigured: '未在打票模型中配置',
     businessSelected: '业务下一张', verified: '已验证', verificationSkipped: '跳过验证', unverified: '未验证',
     revoke: '作废', revokeAll: '全部作废', revoking: '作废中…', confirm: '确认作废', cancel: '取消',
@@ -13,7 +13,7 @@ export default {
     usageModes: { immediate: '即取即用', aged: '使用沉淀后的票' },
     fields: {
       ticketEnabled: '账号打票', harvestEnabled: '账号采集', configEnabled: '全局打票', proxy: '代理', credentialMode: '凭据模式',
-      poolCapacity: '库存容量', ttl: '票据 TTL', cookieTtl: 'Cookie 保留时间', usageMode: '取票机制', minAge: '最小票龄',
+      poolCapacity: '旧版每模型容量', accountPoolCapacity: '账号总容量', ttl: '票据 TTL', cookieTtl: 'Cookie 保留时间', usageMode: '取票机制', minAge: '最小票龄', historicalValidity: '历史票有效期',
       consumeAfterUse: '用后即删', failClosed: '无票拒绝', serverTime: '服务器时间'
     },
     values: { on: '开启', off: '关闭', available: '可用', unavailable: '不可用' },

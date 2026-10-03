@@ -83,7 +83,9 @@ func (s *OpenAIGatewayService) harvestVerifiedOpenAICodexTicket(ctx context.Cont
 		input.SessionEpoch = &schedule.reservation.SessionEpoch
 	}
 	defer s.finishOpenAICodexTicketHarvest(ctx, &input)
-	if !isCodexTicketManualRetry(ctx) && cfg.RefreshStrategy != config.CodexTicketRefreshReplace && s.revalidateExistingCodexTicket(ctx, &input) {
+	if !isCodexTicketManualRetry(ctx) && cfg.RefreshStrategy != config.CodexTicketRefreshReplace &&
+		!(config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket) &&
+		s.revalidateExistingCodexTicket(ctx, &input) {
 		return
 	}
 	state, status, err := s.probeOpenAICodexTicket(ctx, input)
