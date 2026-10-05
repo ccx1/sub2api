@@ -1223,6 +1223,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
+					if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
+						if retryErr != nil {
+							return
+						}
+						continue
+					}
 					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -1804,6 +1810,12 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					if !forbiddenBudget.canRetry(failoverErr, switchCount) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
+					}
+					if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
+						if retryErr != nil {
+							return
+						}
+						continue
 					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
@@ -2982,6 +2994,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	waitForWSSameAccountRetry := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
 		if !service.OpenAIWSIngressCanFailover(ctx, c) {
 			return false
+		}
+		if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(ctx, failoverErr); claimed {
+			return retryErr == nil && ctx.Err() == nil
 		}
 		if account == nil || failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests || failoverErr.SameAccountRetryDeadline.IsZero() {
 			return false

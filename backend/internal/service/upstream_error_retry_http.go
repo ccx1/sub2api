@@ -2,7 +2,7 @@ package service
 
 import (
 	"bytes"
-	"context"
+	"errors"
 	"io"
 	"net/http"
 )
@@ -13,7 +13,10 @@ const upstreamErrorRetryBodyLimit = 64 << 10
 // deliberately leaves transport errors and 429 to the existing failover and
 // rate-limit policies.
 func DoWithConfiguredUpstreamRetry(req *http.Request, send func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-	if req == nil || send == nil {
+	if send == nil {
+		return nil, errors.New("upstream retry sender is nil")
+	}
+	if req == nil {
 		return send(req)
 	}
 	state := upstreamErrorRetryFromContext(req.Context())
@@ -27,19 +30,23 @@ func DoWithConfiguredUpstreamRetry(req *http.Request, send func(*http.Request) (
 			return resp, err
 		}
 		body := []byte(nil)
+		var readErr error
 		if resp.Body != nil {
-			body, err = io.ReadAll(io.LimitReader(resp.Body, upstreamErrorRetryBodyLimit+1))
-			resp.Body = &upstreamRetryPrefixBody{ReadCloser: resp.Body, reader: io.MultiReader(bytes.NewReader(body), resp.Body)}
+			originalBody := resp.Body
+			body, readErr = io.ReadAll(io.LimitReader(originalBody, upstreamErrorRetryBodyLimit+1))
+			resp.Body = &upstreamRetryPrefixBody{ReadCloser: originalBody, reader: io.MultiReader(bytes.NewReader(body), &upstreamRetryReadError{err: readErr}, originalBody)}
 		}
-		if err != nil || len(body) > upstreamErrorRetryBodyLimit {
+		if readErr != nil || len(body) > upstreamErrorRetryBodyLimit {
 			return resp, nil
 		}
 		delay, claimed := state.claim(resp.StatusCode, body)
 		if !claimed {
 			return resp, nil
 		}
-		if err := resp.Body.Close(); err != nil {
-			return resp, nil
+		if resp.Body != nil {
+			if err := resp.Body.Close(); err != nil {
+				return resp, nil
+			}
 		}
 		next := original.Clone(original.Context())
 		if original.GetBody != nil {
@@ -64,3 +71,14 @@ type upstreamRetryPrefixBody struct {
 }
 
 func (b *upstreamRetryPrefixBody) Read(p []byte) (int, error) { return b.reader.Read(p) }
+
+type upstreamRetryReadError struct{ err error }
+
+func (r *upstreamRetryReadError) Read([]byte) (int, error) {
+	if r.err != nil {
+		err := r.err
+		r.err = nil
+		return 0, err
+	}
+	return 0, io.EOF
+}

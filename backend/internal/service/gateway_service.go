@@ -698,7 +698,13 @@ type UpstreamFailoverError struct {
 	SameAccountRetryDeadline time.Time     // 同账号重试截止时间；零值表示仅受 retryLimit 限制
 	SameAccountRetryMax      int           // 可选的错误级同账号重试上限，低于 handler 默认预算时优先采用
 	RequestScopedTransient   bool          // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
-	SafeToFailoverAfterWrite bool          // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
+	// ConfiguredRetryUnsafe prevents the administrator-configured replay policy
+	// from retrying a response that already carried billable usage/output.
+	ConfiguredRetryUnsafe bool
+	// ConfiguredRetry marks a stream failure that may carry a current WS turn
+	// payload for a safe replacement-account replay.
+	ConfiguredRetry          bool
+	SafeToFailoverAfterWrite bool // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
 	Stage                    GatewayFailureStage
 	Scope                    GatewayFailureScope
 	Reason                   GatewayFailureReason

@@ -34,6 +34,8 @@ func BuiltinProfile(name string) *Profile {
 			SignatureAlgorithms: []uint16{1025, 513, 1281, 1537, 1027, 515, 1283, 1539},
 			Extensions:          []uint16{0, 10, 11, 13, 5, 18, 23},
 		}
+	case "mac_codex":
+		return NewMacCodexProfile()
 	default:
 		return nil
 	}

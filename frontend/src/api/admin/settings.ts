@@ -12,6 +12,13 @@ import type {
 } from "@/types";
 import type { RechargeBonusTier } from "@/utils/rechargeBonus";
 
+export interface UpstreamErrorRetrySettings {
+  enabled: boolean;
+  max_retries: number;
+  delay_ms: number;
+  errors: string;
+}
+
 export interface DefaultSubscriptionSetting {
   group_id: number;
   validity_days: number;
@@ -638,6 +645,7 @@ export interface SystemSettings {
   allow_ungrouped_key_scheduling: boolean;
 
   // Gateway forwarding behavior
+  upstream_error_retry: UpstreamErrorRetrySettings;
   openai_ttft_mode: string;
   enable_fingerprint_unification: boolean;
   enable_metadata_passthrough: boolean;
@@ -1000,6 +1008,7 @@ export interface UpdateSettingsRequest {
   min_claude_code_version?: string;
   max_claude_code_version?: string;
   allow_ungrouped_key_scheduling?: boolean;
+  upstream_error_retry?: UpstreamErrorRetrySettings;
   openai_ttft_mode?: string;
   enable_fingerprint_unification?: boolean;
   enable_metadata_passthrough?: boolean;

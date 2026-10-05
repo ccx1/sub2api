@@ -1954,6 +1954,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					lease.MarkBroken()
 					return nil, s.newOpenAIWSRateLimitFailoverError(account, lease.HandshakeHeaders(), upstreamMessage, errMsgRaw)
 				}
+				if !wroteDownstream && !openAIUsageHasTokens(&usage) {
+					if retryFailure := configuredOpenAIStreamRetryFailure(ctx, upstreamMessage, errMsgRaw, &usage); retryFailure != nil {
+						lease.MarkBroken()
+						return nil, retryFailure
+					}
+				}
+			}
+			if eventType == "response.failed" && !wroteDownstream && !openAIUsageHasTokens(&usage) {
+				if retryFailure := configuredOpenAIStreamRetryFailure(ctx, upstreamMessage, extractOpenAISSEErrorMessage(upstreamMessage), &usage); retryFailure != nil {
+					lease.MarkBroken()
+					return nil, retryFailure
+				}
 			}
 			isTokenEvent := isOpenAIWSTokenEvent(eventType)
 			if isTokenEvent {

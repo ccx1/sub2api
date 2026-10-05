@@ -172,6 +172,9 @@ func (s *upstreamErrorRetryState) getPolicy() *upstreamErrorRetryPolicy {
 	if s == nil {
 		return nil
 	}
+	if s.policy != nil {
+		return s.policy
+	}
 	s.once.Do(func() { s.policy = s.settings.upstreamErrorRetryPolicy(s.clientCtx) })
 	return s.policy
 }
@@ -214,10 +217,13 @@ func (s *upstreamErrorRetryState) wait(ctx context.Context, delay time.Duration)
 // failover error. Existing credential, 429 and output/usage guards remain in
 // control; callers should continue their existing failover loop on success.
 func TryConfiguredUpstreamErrorRetry(ctx context.Context, failure *UpstreamFailoverError) (bool, error) {
-	if ctx == nil || failure == nil || !failure.ShouldRetryNextAccount() || failure.IsCredentialFailure() || failure.StatusCode == http.StatusTooManyRequests || ctx.Err() != nil {
+	if ctx == nil || failure == nil || !failure.ShouldRetryNextAccount() || failure.IsCredentialFailure() || failure.ConfiguredRetryUnsafe || failure.StatusCode == http.StatusTooManyRequests || ctx.Err() != nil {
 		return false, nil
 	}
 	state := upstreamErrorRetryFromContext(ctx)
+	if state == nil {
+		return false, nil
+	}
 	if delay, ok := state.claim(failure.StatusCode, failure.ResponseBody); ok {
 		return true, state.wait(ctx, delay)
 	}
@@ -247,6 +253,45 @@ func upstreamErrorRetryHasUsage(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// configuredOpenAIStreamRetryFailure translates an HTTP-200 SSE/WS terminal
+// error into a failover error only while the request is still replay-safe.
+// The caller must invoke this before writing the failed event downstream.
+func configuredOpenAIStreamRetryFailure(ctx context.Context, payload []byte, message string, usage *OpenAIUsage) *UpstreamFailoverError {
+	state := upstreamErrorRetryFromContext(ctx)
+	if state == nil || ctx == nil || ctx.Err() != nil || state.clientCtx.Err() != nil || openAIUsageHasTokens(usage) {
+		return nil
+	}
+	code := openAIStreamFailedEventErrorCode(payload)
+	errType := firstNonEmpty(
+		gjson.GetBytes(payload, "response.error.type").String(),
+		gjson.GetBytes(payload, "error.type").String(),
+	)
+	if isOpenAIWSRateLimitError(code, errType, message) {
+		return nil
+	}
+	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	if status != http.StatusTooManyRequests {
+		for _, path := range []string{"response.error.status_code", "error.status_code", "status_code"} {
+			if candidate := int(gjson.GetBytes(payload, path).Int()); candidate >= 400 && candidate <= 599 {
+				status = candidate
+				break
+			}
+		}
+	}
+	if status == http.StatusTooManyRequests {
+		return nil
+	}
+	if !state.getPolicy().matches(status, payload) {
+		return nil
+	}
+	return &UpstreamFailoverError{
+		StatusCode:             status,
+		ResponseBody:           append([]byte(nil), payload...),
+		RequestScopedTransient: true,
+		ConfiguredRetry:        true,
+	}
 }
 
 func (s *SettingService) upstreamErrorRetryPolicy(ctx context.Context) *upstreamErrorRetryPolicy {

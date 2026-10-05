@@ -207,6 +207,12 @@ func (s *FailoverState) HandleFailoverError(
 	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
 		return FailoverExhausted
 	}
+	if claimed, err := service.TryConfiguredUpstreamErrorRetry(ctx, failoverErr); claimed {
+		if err != nil {
+			return FailoverCanceled
+		}
+		return FailoverContinue
+	}
 
 	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
 	retryCount := s.SameAccountRetryCount[accountID]

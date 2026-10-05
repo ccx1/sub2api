@@ -28,8 +28,11 @@ func (s *httpUpstreamService) doRegionalEgress(req *http.Request, accountID int6
 	client := &http.Client{Transport: &regionalUpstreamTransport{s, accountID, concurrency, profile, fingerprint}, CheckRedirect: s.redirectChecker}
 	client = s.httpClientForUpstreamRequest(client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	// Regional routing adds no replay/failover or transparent direct fallback.
-	return doUpstreamRequest(client, req)
+	// Keep regional routing's per-attempt proxy/TLS selection while sharing the
+	// same configured retry budget as the pooled transport path.
+	return service.DoWithConfiguredUpstreamRetry(req, func(attempt *http.Request) (*http.Response, error) {
+		return doUpstreamRequest(client, attempt)
+	})
 }
 
 type regionalUpstreamTransport struct {

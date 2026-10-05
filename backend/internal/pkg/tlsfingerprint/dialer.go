@@ -326,7 +326,15 @@ func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, a
 	}
 
 	spec := buildClientHelloSpecFromProfile(profile)
-	tlsConn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloCustom)
+	tlsConfig := &utls.Config{ServerName: host}
+	// A profile that explicitly advertises pre_shared_key may have no cached
+	// ticket on the first connection. Hide the empty extension in that case;
+	// other profiles retain the historical uTLS configuration.
+	if profile != nil && slices.Contains(profile.Extensions, 41) {
+		tlsConfig.OmitEmptyPsk = true
+		tlsConfig.PreferSkipResumptionOnNilExtension = true
+	}
+	tlsConn := utls.UClient(conn, tlsConfig, utls.HelloCustom)
 
 	if err := tlsConn.ApplyPreset(spec); err != nil {
 		_ = conn.Close()
@@ -478,6 +486,8 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 			extensions = append(extensions, &utls.SignatureAlgorithmsCertExtension{SupportedSignatureAlgorithms: signatureAlgorithms})
 		case 51: // key_share
 			extensions = append(extensions, &utls.KeyShareExtension{KeyShares: keyShares})
+		case 41: // pre_shared_key (must be the final extension)
+			extensions = append(extensions, &utls.UtlsPreSharedKeyExtension{})
 		case 0xfe0d: // encrypted_client_hello (ECH, 65037)
 			// Send GREASE ECH with random payload — mimics Node.js behavior when no real ECHConfig is available.
 			// An empty GenericExtension causes "error decoding message" from servers that validate ECH format.

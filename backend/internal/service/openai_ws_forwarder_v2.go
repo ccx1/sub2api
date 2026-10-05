@@ -845,6 +845,12 @@ readLoop:
 		if eventType == "error" || eventType == "response.failed" {
 			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
 		}
+		if !wroteDownstream && !openAIUsageHasTokens(usage) && (eventType == "error" || eventType == "response.failed") {
+			if retryFailure := configuredOpenAIStreamRetryFailure(ctx, message, extractOpenAISSEErrorMessage(message), usage); retryFailure != nil {
+				lease.MarkBroken()
+				return nil, retryFailure
+			}
+		}
 
 		if eventType == "error" {
 			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
