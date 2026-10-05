@@ -2740,6 +2740,21 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, nil, finalErr)
 			}
+			if turn > 1 {
+				var configuredFailure *UpstreamFailoverError
+				if errors.As(finalErr, &configuredFailure) && configuredFailure.ConfiguredRetry {
+					retryPayload, retrySafe, retryErr := buildOpenAIWSCurrentTurnRetryPayload(
+						currentPayload, currentTurnReplayInput, currentTurnReplayInputExists, currentOriginalModel,
+					)
+					if retryErr != nil {
+						return fmt.Errorf("build websocket current-turn retry payload: %w", retryErr)
+					}
+					if !retrySafe {
+						retryPayload = nil
+					}
+					return newOpenAIWSCurrentTurnFailoverError(finalErr, retryPayload)
+				}
+			}
 			return finalErr
 		}
 		turnRetry = 0
