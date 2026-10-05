@@ -836,6 +836,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 	refreshWindow time.Duration,
 	gate refreshAttemptGate,
 ) error {
+	ctx = s.withGrokRefreshRuntimeSnapshot(ctx, account)
 	var lastErr error
 	maxRetries := s.maxRetries()
 
@@ -1174,8 +1175,13 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 			s.notifyAccountSchedulingBlockCleared(account.ID)
 		}
 	}
-	// 刷新成功后清除临时不可调度状态（处理 OAuth 401 恢复场景）
-	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
+	if account.IsGrok() {
+		if cleared, clearErr := s.recoverGrokRefreshCooldown(ctx, account); clearErr != nil {
+			slog.Warn("token_refresh.grok_recovery_failed", "account_id", account.ID, "error", clearErr)
+		} else if cleared {
+			slog.Info("token_refresh.grok_credential_cooldown_cleared", "account_id", account.ID)
+		}
+	} else if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
 		if clearErr := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); clearErr != nil {
 			slog.Warn("token_refresh.clear_temp_unschedulable_failed",
 				"account_id", account.ID,
@@ -1195,7 +1201,24 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 			}
 		}
 	}
-	s.postRefreshStateSync(ctx, account)
+	// Grok 的持久刷新已发出 outbox；不再写请求快照，避免覆盖并发新保护。
+	if account.IsGrok() {
+		if s.cacheInvalidator != nil {
+			_ = s.cacheInvalidator.InvalidateToken(ctx, account)
+		}
+		// Publish the durable post-CAS row to the scheduler. Reading it after
+		// persistence keeps a concurrent 403 exclusion instead of reusing the
+		// pre-refresh request snapshot.
+		if s.schedulerCache != nil {
+			if latest, readErr := s.accountRepo.GetByID(ctx, account.ID); readErr == nil && latest != nil {
+				if setErr := s.schedulerCache.SetAccount(ctx, latest); setErr != nil {
+					slog.Warn("token_refresh.sync_grok_scheduler_cache_failed", "account_id", account.ID, "error", setErr)
+				}
+			}
+		}
+	} else {
+		s.postRefreshStateSync(ctx, account)
+	}
 	// OpenAI OAuth: 刷新成功后，检查是否已设置 privacy_mode，未设置则尝试关闭训练数据共享
 	s.ensureOpenAIPrivacy(ctx, account)
 	// Antigravity OAuth: 刷新成功后，检查是否已设置 privacy_mode，未设置则调用 setUserSettings

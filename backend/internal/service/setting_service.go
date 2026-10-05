@@ -8,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -118,6 +119,10 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
+	astraRoutingMu                     sync.Mutex
+	astraRoutingOnSaved                func(config.AstraRoutingSettings)
+	astraRoutingCache                  *config.AstraRoutingSettings
+	astraRoutingExpires                time.Time
 	requestCapture                     *requestcapture.Manager
 	settingRepo                        SettingRepository
 	defaultSubGroupReader              DefaultSubscriptionGroupReader
@@ -165,6 +170,8 @@ type SettingService struct {
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
 	openAIAPIKeyHealthBreakerCache    atomic.Value // *cachedOpenAIAPIKeyHealthBreakerSettings
+	upstreamErrorRetryCache           atomic.Pointer[cachedUpstreamErrorRetry]
+	upstreamErrorRetryMu              sync.Mutex
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()
@@ -303,10 +310,14 @@ const (
 
 // NewSettingService 创建系统设置服务实例
 func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *SettingService {
-	return &SettingService{
+	s := &SettingService{
 		settingRepo: settingRepo,
 		cfg:         cfg,
 	}
+	if cfg != nil {
+		cfg.SetAstraRoutingLoader(s.astraRoutingRuntime)
+	}
+	return s
 }
 
 // SetDefaultSubscriptionGroupReader injects an optional group reader for default subscription validation.

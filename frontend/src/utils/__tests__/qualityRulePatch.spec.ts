@@ -17,6 +17,18 @@ const plan = (): ScheduledTestPlan => ({
 })
 
 describe('quality rule partial updates', () => {
+  it('keeps multi-model selection and cooldown controls together without changing other rules', () => {
+    const input = draft(), rule = plan()
+    input.pelican_config.model_ids = ['new-model', 'another-model']
+    input.pelican_config.quality.action = 'remove_models'
+    input.pelican_config.quality.remove_models = ['another-model']
+    input.pelican_config.quality.trigger_on_upstream_5xx = true
+    input.pelican_config.quality.recovery_concurrency = 4
+    const patch = buildQualityRulePatch(rule, input, ['model', 'action'])
+    expect(patch.pelican_config?.model_ids).toEqual(['new-model', 'another-model'])
+    expect(patch.pelican_config?.quality).toMatchObject({ action: 'remove_models', remove_models: ['another-model'], trigger_on_upstream_5xx: true, recovery_concurrency: 4, remove_group_ids: [] })
+    expect(rule.pelican_config?.quality?.action).toBe('remove_groups')
+  })
   it('sends only selected top-level fields, including an explicit false value', () => {
     expect(buildQualityRulePatch(plan(), draft(), ['model', 'schedule', 'enabled'])).toEqual({
       model_id: 'new-model', cron_expression: '0 * * * *', enabled: false,

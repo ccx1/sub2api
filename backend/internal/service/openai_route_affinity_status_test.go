@@ -72,6 +72,40 @@ func TestEnrichCodexRouteAffinityStatusPreservesTicketReadiness(t *testing.T) {
 	}
 }
 
+func TestEnrichCodexRouteAffinityStatusClearsDisabledRouteDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode string
+		enabled    bool
+	}{
+		{name: "strategy disabled", mode: CodexRouteAffinityStrict},
+		{name: "affinity off", mode: CodexRouteAffinityOff, enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, req, _ := routeAffinityStatusFixture(t)
+			policy := DefaultCodexRequestStrategyPolicy()
+			policy.Enabled, policy.RouteAffinityMode = tc.enabled, tc.mode
+			_, err := s.settingService.UpdateCodexRequestStrategyPolicy(context.Background(), policy)
+			require.NoError(t, err)
+			expires := time.Now().Add(time.Hour)
+			statuses := []OpenAICodexTicketStatus{{Model: req.CodexTicketReceipt.ticket.Model,
+				RouteNode: "old-node", RouteNodeCountry: "US", RouteNodeRegion: "old-region",
+				RouteMacroRegion: "NA", RouteEgressCountry: "DE", RouteCrossRegion: true,
+				RouteExpiresAt: &expires, RouteAffinityStatus: "available", RouteAffinityConnections: 3}}
+			s.EnrichCodexRouteAffinityStatus(context.Background(), req.Account, statuses)
+			status := statuses[0]
+			require.Equal(t, CodexRouteAffinityOff, status.RouteAffinityStatus)
+			require.Zero(t, status.RouteAffinityConnections)
+			require.Nil(t, status.RouteExpiresAt)
+			require.Empty(t, status.RouteNode)
+			require.Empty(t, status.RouteNodeCountry)
+			require.Empty(t, status.RouteNodeRegion)
+			require.Empty(t, status.RouteMacroRegion)
+			require.Empty(t, status.RouteEgressCountry)
+			require.False(t, status.RouteCrossRegion)
+		})
+	}
+}
+
 func assertRouteAffinityEnrichment(t *testing.T, s *OpenAIGatewayService, req openAIWSAcquireRequest, ready bool, wantStatus string, wantCount int) {
 	t.Helper()
 	want := OpenAICodexTicketStatus{Model: req.CodexTicketReceipt.ticket.Model, Ready: ready,

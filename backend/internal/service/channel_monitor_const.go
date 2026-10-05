@@ -205,6 +205,7 @@ var (
 )
 
 var (
+	ErrChannelMonitorInvalidMode = infraerrors.BadRequest("CHANNEL_MONITOR_INVALID_MODE", "invalid channel monitor mode")
 	ErrChannelMonitorDisabled = infraerrors.Forbidden(
 		"CHANNEL_MONITOR_DISABLED",
 		"channel monitor feature is disabled",

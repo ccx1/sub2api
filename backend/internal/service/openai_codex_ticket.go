@@ -34,25 +34,26 @@ const (
 var ErrOpenAICodexTicketUnavailable = errors.New("codex turn-state ticket unavailable")
 
 type openAICodexTicket struct {
-	AttemptID           string                   `json:"attempt_id,omitempty"`
-	Invalidation        *CodexTicketInvalidation `json:"invalidation,omitempty"`
-	Revoked             bool                     `json:"revoked,omitempty"`
-	Verified            bool                     `json:"verified,omitempty"`
-	VerificationSkipped bool                     `json:"verification_skipped,omitempty"`
-	Standby             *openAICodexTicket       `json:"standby,omitempty"`
-	Reserve             []*openAICodexTicket     `json:"reserve,omitempty"`
-	Binding             string                   `json:"binding,omitempty"`
-	AccountBinding      string                   `json:"account_binding,omitempty"`
-	Egress              string                   `json:"egress,omitempty"`
-	HarvestProxyID      int64                    `json:"harvest_proxy_id,omitempty"`
-	HarvestProxyName    string                   `json:"harvest_proxy_name,omitempty"`
-	HarvestEgress       string                   `json:"harvest_egress,omitempty"`
-	HarvestCountry      string                   `json:"harvest_country,omitempty"` // 采集出口国家，判断 __oailb 节点是否跨大区
-	SessionID           string                   `json:"session_id,omitempty"`
-	AccountID           int64                    `json:"account_id"`
-	Model               string                   `json:"model"`
-	State               string                   `json:"state"`
-	CredentialMode      string                   `json:"credential_mode,omitempty"`
+	AttemptID           string                    `json:"attempt_id,omitempty"`
+	Invalidation        *CodexTicketInvalidation  `json:"invalidation,omitempty"`
+	Revoked             bool                      `json:"revoked,omitempty"`
+	Verified            bool                      `json:"verified,omitempty"`
+	VerificationSkipped bool                      `json:"verification_skipped,omitempty"`
+	Standby             *openAICodexTicket        `json:"standby,omitempty"`
+	Reserve             []*openAICodexTicket      `json:"reserve,omitempty"`
+	RouteRotation       *codexTicketRouteRotation `json:"route_rotation,omitempty"`
+	Binding             string                    `json:"binding,omitempty"`
+	AccountBinding      string                    `json:"account_binding,omitempty"`
+	Egress              string                    `json:"egress,omitempty"`
+	HarvestProxyID      int64                     `json:"harvest_proxy_id,omitempty"`
+	HarvestProxyName    string                    `json:"harvest_proxy_name,omitempty"`
+	HarvestEgress       string                    `json:"harvest_egress,omitempty"`
+	HarvestCountry      string                    `json:"harvest_country,omitempty"` // 采集出口国家，判断 __oailb 节点是否跨大区
+	SessionID           string                    `json:"session_id,omitempty"`
+	AccountID           int64                     `json:"account_id"`
+	Model               string                    `json:"model"`
+	State               string                    `json:"state"`
+	CredentialMode      string                    `json:"credential_mode,omitempty"`
 	// 发送投影仅属于已验证的运行时 receipt，不改变库存原票和撤销身份。
 	CookieMode           string         `json:"-"`
 	CookiePolicyVerified bool           `json:"-"`
@@ -64,8 +65,11 @@ type openAICodexTicket struct {
 	// OriginCapturedAt 记录同一条凭据谱系首次采集的时间。软复验会刷新 CapturedAt
 	// （Cookie 票每约 20s 一次），但谱系保持不变；质量检测与路由状态据此判定，
 	// 避免每轮复验都把已完成的检测重置为“未检测”。
-	OriginCapturedAt time.Time `json:"origin_captured_at,omitempty"`
-	ExpiresAt        time.Time `json:"expires_at"`
+	OriginCapturedAt            time.Time `json:"origin_captured_at,omitempty"`
+	HistoricalUsedAt            time.Time `json:"historical_used_at,omitempty"`
+	ExpiresAt                   time.Time `json:"expires_at"`
+	HistoricalExtendedExpiresAt time.Time `json:"historical_extended_expires_at,omitempty"`
+	HistoricalQualityCheckedAt  time.Time `json:"historical_quality_checked_at,omitempty"`
 	// IssuedAt and StateExpiresAt are derived from the STATE protocol metadata.
 	// RevalidateAt is the configured soft refresh deadline; it must not make a
 	// still-live STATE unusable.
@@ -78,6 +82,13 @@ type openAICodexTicket struct {
 	// 已领取的票在下一次发布时随其他不可用票一起从库存物理删除。
 	consumed            bool
 	historicalExpiresAt time.Time
+}
+
+type codexTicketRouteRotation struct {
+	ActiveLineageID string               `json:"active_lineage_id,omitempty"`
+	ActiveHost      string               `json:"active_host,omitempty"`
+	Cooldowns       map[string]time.Time `json:"cooldowns,omitempty"`
+	UpdatedAt       time.Time            `json:"updated_at,omitempty"`
 }
 
 func openAICodexTicketKey(accountID int64, model string) string {
@@ -162,6 +173,7 @@ type OpenAICodexTicketStatus struct {
 	ExpiringCount           int        `json:"expiring_count"`
 	NextExpiresAt           *time.Time `json:"next_expires_at,omitempty"`
 	OriginCapturedAt        *time.Time `json:"origin_captured_at,omitempty"`
+	HistoricalUsedAt        *time.Time `json:"historical_used_at,omitempty"`
 	LastAttemptAt           *time.Time `json:"last_attempt_at,omitempty"`
 	LastAttemptSuccess      *bool      `json:"last_attempt_success,omitempty"`
 	LastAttemptReason       string     `json:"last_attempt_reason,omitempty"`
@@ -183,6 +195,9 @@ type OpenAICodexTicketStatus struct {
 	RouteAffinityConnections int    `json:"route_affinity_connections,omitempty"`
 	// RouteExpiresAt 来自 __oailb 解码后的 exp，仅在能解析时返回。
 	RouteExpiresAt *time.Time `json:"route_expires_at,omitempty"`
+	// RouteHost 来自历史票当前发送 Cookie 中的 __oailb.host。
+	// 只返回规范化后的 host，不返回 Cookie 原文。
+	RouteHost string `json:"route_host,omitempty"`
 	// Route node 字段来自 __oailb 的 host 声明与节点枚举表；地名是 Azure IP 归属地。
 	RouteNode          string `json:"route_node,omitempty"`
 	RouteNodeCountry   string `json:"route_node_country,omitempty"`
@@ -354,13 +369,26 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketSnapshot(ctx context.Contex
 	if receipt, ok := s.reuseClaimedOpenAICodexTicket(ctx, account, model, cfg, h); ok {
 		return receipt, nil
 	}
+	var ticket *openAICodexTicket
+	if !cfg.ConsumeAfterUse && config.CodexTicketUsageAgedEnabled(cfg) && cfg.SkipSameRouteHost && config.CodexTicketUsesCookies(cfg) {
+		var err error
+		ticket, err = s.selectHistoricalRouteTicket(ctx, account, model, cfg)
+		if err != nil {
+			if cfg.FailClosed {
+				return nil, err
+			}
+			return nil, nil
+		}
+	}
 	if cfg.ConsumeAfterUse {
 		receipt, err := s.applyConsumedOpenAICodexTicket(ctx, account, model, cfg, h)
 		if err != nil || receipt != nil {
 			return receipt, err
 		}
 	}
-	ticket := s.lookupOpenAICodexTicketForUse(account, model, cfg)
+	if ticket == nil {
+		ticket = s.lookupOpenAICodexTicketForUse(account, model, cfg)
+	}
 	if ticket != nil && ticket.usable(time.Now(), account, cfg) {
 		projected, err := s.prepareCodexCookieTicket(ctx, account, ticket, cfg)
 		if err != nil {
@@ -371,6 +399,22 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketSnapshot(ctx context.Contex
 				return nil, ErrOpenAICodexTicketUnavailable
 			}
 			return nil, nil
+		}
+		if config.CodexTicketUsageAgedEnabled(cfg) {
+			if !s.markHistoricalCodexTicketUsed(ctx, account, ticket, cfg) {
+				if cfg.FailClosed {
+					return nil, ErrOpenAICodexTicketUnavailable
+				}
+				return nil, nil
+			}
+			projected.HistoricalUsedAt = ticket.HistoricalUsedAt
+			projected.historicalExpiresAt = projected.historicalExpires(cfg)
+		}
+		// 历史模式切换到下一张票时，旧 Cookie 不能沿用到 STATE 票；
+		// fresh_per_ticket 是默认且可配置的清理策略，reuse_on_refresh
+		// 则保留原有复验兼容语义。
+		if config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket {
+			h.Del("Cookie")
 		}
 		projected.applyHeaders(h)
 		return &openAICodexTicketReceipt{account: cloneOpenAICodexTicketAccount(account), ticket: *projected, config: cfg, service: s}, nil
@@ -417,10 +461,16 @@ func (s *OpenAIGatewayService) openAICodexTicketOutboundModel(account *Account, 
 // outboundModel 必须是真正会发给上游的模型名（openAICodexTicketOutboundModel），
 // 不是客户端原始模型：注入侧读的是出站 body.model，两侧口径必须一致。
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, outboundModel string) bool {
+	if account.IsPrismBrowserEnabledForModel(outboundModel) {
+		return false
+	}
 	return s.openAICodexTicketBlocksAccountContext(withCodexTicketTurnAdmission(context.Background()), account, outboundModel)
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketBlocksAccountContext(ctx context.Context, account *Account, outboundModel string) bool {
+	if account.IsPrismBrowserEnabledForModel(outboundModel) {
+		return false
+	}
 	if ctx.Err() != nil {
 		return true
 	}

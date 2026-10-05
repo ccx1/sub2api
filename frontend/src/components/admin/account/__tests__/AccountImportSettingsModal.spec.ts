@@ -30,6 +30,27 @@ const enable = (wrapper: ReturnType<typeof mountModal>) => wrapper.get('[data-te
 const submit = (wrapper: ReturnType<typeof mountModal>) => wrapper.get('form').trigger('submit')
 
 describe('AccountImportSettingsModal', () => {
+  it('saves, restores and clears Prism defaults as one configuration family', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await enable(wrapper)
+    await wrapper.get('[data-testid="import-settings-prism-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="import-settings-prism-model-gpt-6-luna"]').setValue(false)
+    await submit(wrapper)
+    await flushPromises()
+    expect(saveSettings.mock.lastCall?.[0].extra.openai_prism_browser).toBe(true)
+    expect(saveSettings.mock.lastCall?.[0].extra.openai_prism_browser_models).not.toContain('gpt-6-luna')
+    getSettings.mockResolvedValue(saveSettings.mock.lastCall?.[0])
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="import-settings-prism-model-gpt-6-luna"]').element.checked).toBe(false)
+    await wrapper.get('[data-testid="import-settings-prism-toggle"]').setValue(false)
+    await submit(wrapper)
+    await flushPromises()
+    expect(saveSettings.mock.lastCall?.[0].extra).toMatchObject({ openai_prism_browser: false, openai_prism_browser_models: [] })
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     getSettings.mockReset().mockResolvedValue(defaultAccountImportSettings())

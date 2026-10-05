@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -36,20 +37,28 @@ func (s *UpdateService) checkLocalSource(ctx context.Context, force bool, cached
 	return &UpdateInfo{CurrentVersion: s.currentVersion, BuildType: s.buildType, Warning: err.Error()}
 }
 
-func (s *UpdateService) checkRanxiSource(ctx context.Context, force bool, cached *VersionSourceInfo) *VersionSourceInfo {
+func officialVersion(version string) string {
+	parts := strings.Split(strings.TrimPrefix(version, "v"), ".")
+	if len(parts) > 3 {
+		return strings.Join(parts[:3], ".")
+	}
+	return strings.TrimPrefix(version, "v")
+}
+
+func (s *UpdateService) checkRemoteSource(ctx context.Context, force bool, repo, current string, cached *VersionSourceInfo) *VersionSourceInfo {
 	if !force && cached != nil {
 		return cached
 	}
-	info, err := s.fetchSourceRelease(ctx, ranxiRepo, s.ranxiVersion)
+	info, err := s.fetchSourceRelease(ctx, repo, current)
 	if err == nil {
-		return &VersionSourceInfo{Repository: ranxiRepo, CurrentVersion: s.ranxiVersion,
+		return &VersionSourceInfo{Repository: repo, CurrentVersion: current,
 			LatestVersion: info.LatestVersion, HasUpdate: info.HasUpdate, ReleaseInfo: info.ReleaseInfo}
 	}
 	if cached != nil {
 		cached.Warning = "Using cached data: " + err.Error()
 		return cached
 	}
-	return &VersionSourceInfo{Repository: ranxiRepo, CurrentVersion: s.ranxiVersion,
+	return &VersionSourceInfo{Repository: repo, CurrentVersion: current,
 		Warning: err.Error()}
 }
 
@@ -61,8 +70,9 @@ type cachedSourceRelease struct {
 }
 
 type sourceUpdateCache struct {
-	Local *cachedSourceRelease `json:"local,omitempty"`
-	Ranxi *cachedSourceRelease `json:"ranxi,omitempty"`
+	Local    *cachedSourceRelease `json:"local,omitempty"`
+	Official *cachedSourceRelease `json:"official,omitempty"`
+	Ranxi    *cachedSourceRelease `json:"ranxi,omitempty"`
 }
 
 func (c *cachedSourceRelease) valid(repo string) bool {
@@ -91,13 +101,19 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 		info.HasUpdate = compareVersions(s.currentVersion, cached.Local.Latest) < 0
 		info.Cached = true
 	}
+	if cached.Official.valid(officialRepo) {
+		current := officialVersion(s.currentVersion)
+		info.Official = &VersionSourceInfo{Repository: officialRepo, CurrentVersion: current,
+			LatestVersion: cached.Official.Latest, ReleaseInfo: cached.Official.ReleaseInfo,
+			HasUpdate: compareVersions(current, cached.Official.Latest) < 0, Cached: true}
+	}
 	if s.ranxiVersion != "" && cached.Ranxi.valid(ranxiRepo) {
 		info.Ranxi = &VersionSourceInfo{Repository: ranxiRepo, CurrentVersion: s.ranxiVersion,
 			LatestVersion: cached.Ranxi.Latest, ReleaseInfo: cached.Ranxi.ReleaseInfo,
 			HasUpdate: compareVersions(s.ranxiVersion, cached.Ranxi.Latest) < 0, Cached: true}
 	}
 	// 旧缓存没有来源标记，可能来自合并前的 Ranxi updater，必须重新获取。
-	if !info.Cached && info.Ranxi == nil {
+	if !info.Cached && info.Official == nil && info.Ranxi == nil {
 		return nil, fmt.Errorf("no valid source cache")
 	}
 	return info, nil
@@ -112,6 +128,11 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	if !info.Cached && info.Warning == "" && info.ReleaseInfo != nil {
 		cached.Local = &cachedSourceRelease{Repository: githubRepo, Latest: info.LatestVersion,
 			ReleaseInfo: info.ReleaseInfo, Timestamp: time.Now().Unix()}
+		changed = true
+	}
+	if r := info.Official; r != nil && !r.Cached && r.Warning == "" && r.ReleaseInfo != nil {
+		cached.Official = &cachedSourceRelease{Repository: officialRepo, Latest: r.LatestVersion,
+			ReleaseInfo: r.ReleaseInfo, Timestamp: time.Now().Unix()}
 		changed = true
 	}
 	if r := info.Ranxi; r != nil && !r.Cached && r.Warning == "" && r.ReleaseInfo != nil {

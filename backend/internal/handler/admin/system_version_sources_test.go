@@ -16,6 +16,8 @@ import (
 func TestSystemHandlerDualVersionResponse(t *testing.T) {
 	svc := &systemHandlerUpdateServiceStub{updateInfo: &service.UpdateInfo{
 		CurrentVersion: "0.2.8.17", LatestVersion: "0.2.8", BuildType: "release",
+		Official: &service.VersionSourceInfo{Repository: "Wei-Shaw/sub2api",
+			CurrentVersion: "0.2.8", LatestVersion: "0.2.9", HasUpdate: true},
 		Ranxi: &service.VersionSourceInfo{Repository: "ranxi2001/sub2api",
 			CurrentVersion: "2.8.14", LatestVersion: "2.8.15", HasUpdate: true},
 	}}
@@ -31,6 +33,8 @@ func TestSystemHandlerDualVersionResponse(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &data))
 	require.Equal(t, "0.2.8.17", data.Data.CurrentVersion)
 	require.False(t, data.Data.HasUpdate)
+	require.Equal(t, "Wei-Shaw/sub2api", data.Data.Official.Repository)
+	require.True(t, data.Data.Official.HasUpdate)
 	require.True(t, data.Data.Ranxi.HasUpdate)
 	require.Equal(t, "2.8.14", data.Data.Ranxi.CurrentVersion)
 	require.Equal(t, []bool{true}, svc.checkForces)

@@ -79,7 +79,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 发送请求
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.httpUpstream.Do(withAccountRegionalEgress(req, account), proxyURL, account.ID, account.Concurrency)
 	if resp != nil {
 		RecordRandomProxyUsage(ctx, account, s.accountRepo)
 	} else if proxyURL != "" {

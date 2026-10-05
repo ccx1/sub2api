@@ -1002,13 +1002,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if err := ticketReceipt.validate(time.Now()); err != nil {
 			return err
 		}
+		if ticketReceipt != nil && proxyURL == "" {
+			ctx = WithRegionalEgressBypass(ctx)
+		}
 		if ticketReceipt != nil && ticketReceipt.service != nil && ticketReceipt.ticket.usesCookies() {
 			cfg := ticketReceipt.service.openAICodexTicketConfigForAccount(ctx, account)
 			if err := ticketReceipt.service.validateCodexCookieProjectionProof(ctx, account, &ticketReceipt.ticket, cfg); err != nil {
 				return err
 			}
 		}
-		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
+		dialCtx, cancelDial := context.WithTimeout(WithRegionalEgressBypassForAccount(ctx, account), s.openAIWSDialTimeout())
 		if tlsProfile != nil {
 			tlsDialer, ok := dialer.(openAIWSClientTLSDialer)
 			if !ok {

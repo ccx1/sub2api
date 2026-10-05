@@ -222,6 +222,58 @@ func (s *OpenAIGatewayService) persistOpenAICodexTicketResult(ctx context.Contex
 	return err == nil, err
 }
 
+// markHistoricalCodexTicketUsed starts the configured historical validity window
+// at the first business request that actually selects the ticket. The timestamp
+// is persisted with the inventory so restarts and other instances keep the same
+// expiry deadline.
+func (s *OpenAIGatewayService) markHistoricalCodexTicketUsed(ctx context.Context, account *Account, ticket *openAICodexTicket, cfg config.OpenAICodexTicketConfig) bool {
+	if ticket == nil || !config.CodexTicketUsageAgedEnabled(cfg) || !ticket.HistoricalUsedAt.IsZero() {
+		return true
+	}
+	if s == nil || account == nil || account.ID <= 0 {
+		return false
+	}
+	model := normalizeOpenAICodexTicketModel(ticket.Model)
+	key := openAICodexTicketKey(account.ID, model)
+	lock := s.codexTicketLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	inventory := s.availableCodexTicketInventory(key, s.codexTicketInventoryLocked(account, model))
+	if inventory == nil {
+		return false
+	}
+	id := codexTicketConsumptionID(ticket)
+	var target *openAICodexTicket
+	for _, slot := range codexTicketSlots(inventory) {
+		if slot == nil || slot.Revoked {
+			continue
+		}
+		if (id != "" && codexTicketConsumptionID(slot) == id) || (id == "" && sameCodexTicket(slot, ticket)) {
+			target = slot
+			break
+		}
+	}
+	if target == nil {
+		return false
+	}
+	if target.HistoricalUsedAt.IsZero() {
+		target.HistoricalUsedAt = time.Now().UTC()
+		snapshot := cloneOpenAICodexTicketAccount(account)
+		snapshot.Extra[openAICodexTicketExtraKey(model)] = inventory
+		updated, err := s.persistOpenAICodexTicketResult(ctx, snapshot, model, inventory)
+		if !updated || err != nil {
+			return false
+		}
+		s.openaiCodexTickets.Store(key, inventory)
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		account.Extra[openAICodexTicketExtraKey(model)] = inventory
+	}
+	ticket.HistoricalUsedAt = target.HistoricalUsedAt
+	return true
+}
+
 func (s *OpenAIGatewayService) invalidateOpenAICodexTicket(ctx context.Context, account *Account, used *openAICodexTicket, details ...*CodexTicketInvalidation) {
 	var detail *CodexTicketInvalidation
 	if len(details) > 0 {

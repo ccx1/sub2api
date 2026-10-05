@@ -88,6 +88,20 @@ function getLocaleMessage(locale: 'en' | 'zh', key: string): string {
 }
 
 describe('admin account ImportDataModal', () => {
+  it.each([false, true])('preserves explicit Prism fields over enabled import defaults: %s', async enabled => {
+    batchCreate.mockResolvedValue({ success: 1, failed: 0, results: [{ success: true, id: 71 }] })
+    const account = { ...accountPayload, extra: { openai_prism_browser: enabled, openai_prism_browser_models: enabled ? ['gpt-6-luna'] : [] } }
+    const wrapper = mountModal()
+    await wrapper.get('textarea').setValue(JSON.stringify([account]))
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(batchCreate).toHaveBeenCalledWith([account], { use_import_defaults: true })
+    await wrapper.get('textarea').setValue(JSON.stringify({ ...dataPayload, accounts: [account] }))
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(importData).toHaveBeenCalledWith(expect.objectContaining({ data: { ...dataPayload, accounts: [account] }, use_import_defaults: true }))
+    wrapper.unmount()
+  })
   beforeEach(() => {
     tMock.mockReset().mockImplementation((key: string) => key)
     batchCreate.mockReset()

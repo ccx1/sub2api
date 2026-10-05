@@ -79,12 +79,22 @@ export function validateTicketSettings(settings: CodexTicketSettings): TicketVal
   const mode = settings.length_mode === undefined ? 'strict' : settings.length_mode
   if (mode !== 'auto' && mode !== 'strict') return { key: 'lengthMode' }
   const usageMode = settings.usage_mode === undefined ? 'immediate' : settings.usage_mode
-  if (usageMode !== 'immediate' && usageMode !== 'aged') return { key: 'usageMode' }
+  if (usageMode !== 'latest_only' && usageMode !== 'immediate' && usageMode !== 'aged') return { key: 'usageMode' }
   const cookieRefreshMode = settings.cookie_refresh_mode ?? 'fresh_per_ticket'
   if (cookieRefreshMode !== 'fresh_per_ticket' && cookieRefreshMode !== 'reuse_on_refresh') return { key: 'cookieRefreshMode' }
+  if (settings.skip_same_route_host !== undefined && typeof settings.skip_same_route_host !== 'boolean') return { key: 'skipSameRouteHost' }
+  if (settings.historical_quality_enabled !== undefined && typeof settings.historical_quality_enabled !== 'boolean') return { key: 'historicalQualityEnabled' }
   if (settings.consume_after_use !== undefined && typeof settings.consume_after_use !== 'boolean') return { key: 'consumeAfterUse' }
-  const fields = [{ key: 'target_length' as NumericKey, min: 16, max: 8192 }, { key: 'business_verification_rounds' as NumericKey, min: 1, max: 10 }, ...ticketCookieFields, ...ticketNumericGroups.flatMap(group => group.fields)]
-  const defaults: Partial<Record<NumericKey, number>> = { business_verification_rounds: 1, proxy_failure_threshold: 3, pool_capacity: 5, cookie_ttl_seconds: 20, cookie_refresh_before_seconds: 5 }
+  const fields = [{ key: 'target_length' as NumericKey, min: 16, max: 8192 }, { key: 'business_verification_rounds' as NumericKey, min: 1, max: 10 }, { key: 'same_route_cooldown_hours' as NumericKey, min: 1, max: 168 },
+    { key: 'historical_quality_check_before_seconds' as NumericKey, min: 5, max: 86400 },
+    { key: 'historical_quality_check_interval_seconds' as NumericKey, min: 5, max: 86400 },
+    { key: 'historical_quality_extend_seconds' as NumericKey, min: 1, max: 86400 },
+    ...ticketCookieFields, ...ticketNumericGroups.flatMap(group => group.fields)]
+  const defaults: Partial<Record<NumericKey, number>> = {
+    business_verification_rounds: 1, same_route_cooldown_hours: 1,
+    historical_quality_check_before_seconds: 120, historical_quality_check_interval_seconds: 30, historical_quality_extend_seconds: 30,
+    proxy_failure_threshold: 3, pool_capacity: 5, cookie_ttl_seconds: 20, cookie_refresh_before_seconds: 5
+  }
   for (const field of fields) {
     const value = settings[field.key] === undefined ? defaults[field.key] : settings[field.key]
     if (!inRange(value, field.min, field.max)) return { key: 'range', field: field.key, min: field.min, max: field.max }
@@ -96,8 +106,7 @@ export function validateTicketSettings(settings: CodexTicketSettings): TicketVal
   if (usageMode === 'aged') {
     const validity = settings.historical_ticket_validity_seconds ?? 691200
     if (!inRange(validity, 1, 2592000)) return { key: 'range', field: 'historical_ticket_validity_seconds', min: 1, max: 2592000 }
-    const maxAge = validity - 1
-    if (!inRange(settings.min_ticket_age_seconds, 1, maxAge)) return { key: 'range', field: 'min_ticket_age_seconds', min: 1, max: maxAge }
+    if (!inRange(settings.min_ticket_age_seconds, 1, 2592000)) return { key: 'range', field: 'min_ticket_age_seconds', min: 1, max: 2592000 }
   }
   if (settings.refresh_before_seconds >= settings.ttl_seconds) return { key: 'refresh' }
   if ((settings.cookie_refresh_before_seconds ?? 5) >= (settings.cookie_ttl_seconds ?? 20)) return { key: 'cookieRefresh' }

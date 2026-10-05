@@ -11,7 +11,7 @@
             v-if="ticket.using_standby && ticket.ready"
             data-testid="current-status"
             class="font-medium text-amber-600 dark:text-amber-400"
-          >{{ t('admin.accounts.openai.codexTicketUsingStandbyCompact', { time: formatRemaining(ticket.remaining_seconds) }) }}</span>
+          >{{ t('admin.accounts.openai.codexTicketUsingStandbyCompact', { time: formatRemaining(remainingSeconds(ticket) ?? ticket.remaining_seconds) }) }}</span>
           <span
             v-if="hasPrimarySummary(ticket)"
             data-testid="primary-status"
@@ -29,7 +29,7 @@
         <template v-else>
           <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400" :title="ticket.using_standby ? standbyExpiry(ticket) : undefined">
             <span v-if="ticket.using_standby !== undefined">{{ t(ticket.using_standby ? 'admin.accounts.openai.codexTurnTicketUsingStandby' : 'admin.accounts.openai.codexTurnTicketPrimary') }} </span>
-            {{ formatRemaining(ticket.remaining_seconds) }}
+            {{ formatRemaining(remainingSeconds(ticket) ?? ticket.remaining_seconds) }}
           </span>
           <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.codexTurnTicketPaused') }}</span>
           <span v-else class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
@@ -51,6 +51,7 @@
       <div v-if="ticket.usage_mode === 'aged'" class="flex flex-col text-gray-500 dark:text-gray-400" data-testid="history-ticket-status">
         <span>{{ t('admin.accounts.openai.codexTicketHistoryCapturedAt', { time: strictDateTime(ticket.origin_captured_at) ?? t('admin.accounts.openai.codexTicketHistoryUnknown') }) }}</span>
         <span>{{ t('admin.accounts.openai.codexTicketHistoryRemaining', { time: historyRemaining(ticket) }) }}</span>
+        <span v-if="ticket.route_host" data-testid="history-ticket-host">{{ t('admin.accounts.openai.codexTicketHistoryHost', { host: ticket.route_host }) }}</span>
       </div>
       <div class="flex flex-wrap gap-x-1.5 text-gray-500 dark:text-gray-400" data-testid="ticket-harvest-status">
         <span :class="harvestStatusClass(ticket)" :title="ticket.last_attempt_success === false ? ticket.last_attempt_reason : undefined">{{ t('admin.accounts.openai.codexTicketHarvestLast', { status: harvestStatusLabel(ticket) }) }}</span>
@@ -68,7 +69,7 @@
         <span v-if="validExpiry(ticket.route_expires_at)" class="tabular-nums" :title="formatDateTime(ticket.route_expires_at)" data-testid="route-expires">{{ t('admin.accounts.openai.codexTicketPoolRouteExpires', { time: shortExpiry(ticket.route_expires_at!) }) }}</span>
       </div>
       <div
-        v-if="ticket.route_node"
+        v-if="routeAffinityLabel(ticket) && ticket.route_node"
         class="flex flex-wrap items-center gap-x-1.5 text-[10px] text-gray-500 dark:text-gray-400"
         data-testid="ticket-route-node"
         :title="t('admin.accounts.openai.codexTicketPoolRouteNodeHint')"
@@ -95,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { formatDateTime } from '@/utils/format'
@@ -104,6 +105,16 @@ type TicketStatus = NonNullable<Account['codex_turn_tickets']>[number]
 const props = defineProps<{ tickets?: TicketStatus[] | null }>()
 const tickets = computed(() => props.tickets ?? [])
 const { t } = useI18n()
+const now = ref(Date.now())
+let countdownTimer: ReturnType<typeof setInterval> | undefined
+
+onMounted(() => {
+  countdownTimer = setInterval(() => { now.value = Date.now() }, 1000)
+})
+onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer)
+})
+
 const validCount = (count: unknown): count is number => typeof count === 'number' && Number.isInteger(count) && count >= 0
 const hasCount = (ticket: TicketStatus) => validCount(ticket.available_count)
 const hasPrimarySummary = (ticket: TicketStatus) => ticket.primary_present !== undefined || ticket.primary_ready !== undefined || ticket.primary_reason !== undefined
@@ -125,18 +136,21 @@ function strictDateTime(value?: string) {
 }
 
 function historyRemaining(ticket: TicketStatus) {
-  if (!validExpiry(ticket.expires_at) || !Number.isFinite(ticket.remaining_seconds) || ticket.remaining_seconds < 0) {
+  if (!validExpiry(ticket.historical_used_at)) {
+    return t('admin.accounts.openai.codexTicketHistoryNotUsed')
+  }
+	const total = remainingSeconds(ticket, ticket.expires_at ?? ticket.primary_expires_at)
+  if (total === undefined) {
     return t('admin.accounts.openai.codexTicketHistoryUnknown')
   }
-  if (Date.parse(ticket.expires_at!) <= Date.now() || ticket.remaining_seconds === 0) return t('admin.accounts.openai.codexTicketHistoryExpired')
-  const total = Math.floor(ticket.remaining_seconds)
-  const days = Math.floor(total / 86400)
-  const hours = Math.floor(total % 86400 / 3600)
-  const minutes = Math.floor(total % 3600 / 60)
-  if (days) return t('admin.accounts.openai.codexTicketHistoryDaysHours', { days, hours })
-  if (hours) return t('admin.accounts.openai.codexTicketHistoryHoursMinutes', { hours, minutes })
-  if (minutes) return t('admin.accounts.openai.codexTicketHistoryMinutesSeconds', { minutes, seconds: total % 60 })
-  return t('admin.accounts.openai.codexTicketHistorySeconds', { seconds: total })
+  if (total === 0) return t('admin.accounts.openai.codexTicketHistoryExpired')
+  return t('admin.accounts.openai.codexTicketHistoryCountdown', { time: formatCountdown(total) })
+}
+
+function remainingSeconds(ticket: TicketStatus, expiresAt = ticket.expires_at): number | undefined {
+  if (validExpiry(expiresAt)) return Math.max(0, Math.ceil((Date.parse(expiresAt!) - now.value) / 1000))
+  if (!Number.isFinite(ticket.remaining_seconds) || ticket.remaining_seconds <= 0) return undefined
+  return Math.floor(ticket.remaining_seconds)
 }
 
 function harvestStatusLabel(ticket: TicketStatus) {
@@ -186,8 +200,12 @@ function credentialStatusTitle(ticket: TicketStatus) {
 }
 
 function primaryStatusLabel(ticket: TicketStatus) {
+  if (ticket.usage_mode === 'aged' && !validExpiry(ticket.historical_used_at) &&
+    (!ticket.primary_reason || ticket.primary_reason === 'maturing')) {
+    return t('admin.accounts.openai.codexTicketHistoryNotUsed')
+  }
   if (ticket.primary_ready) {
-    const seconds = ticket.primary_remaining_seconds ?? ticket.remaining_seconds
+    const seconds = remainingSeconds(ticket, ticket.primary_expires_at) ?? ticket.primary_remaining_seconds ?? ticket.remaining_seconds
     return ticket.using_standby
       ? t('admin.accounts.openai.codexTicketUsingStandbyCompact', { time: formatRemaining(seconds) })
       : t('admin.accounts.openai.codexTicketPrimaryReady', { time: formatRemaining(seconds) })
@@ -201,6 +219,7 @@ function primaryUnavailableLabel(ticket: TicketStatus) {
     case 'expired': return t('admin.accounts.openai.codexTicketPrimaryExpired')
     case 'credential': return t('admin.accounts.openai.codexTicketPrimaryCredential')
     case 'cookie_missing': return t('admin.accounts.openai.codexTicketPrimaryCookieMissing')
+    case 'route_cooldown': return t('admin.accounts.openai.codexTicketPrimaryRouteCooldown')
     case 'missing': return t('admin.accounts.openai.codexTicketPrimaryMissing')
     default: return t('admin.accounts.openai.codexTicketPrimaryUnavailable')
   }
@@ -282,10 +301,16 @@ function qualityReasonText(reason?: string) {
 
 function formatRemaining(seconds: number) {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
-  const days = Math.floor(total / 86400)
-  const hours = Math.floor(total % 86400 / 3600)
-  if (days) return t('admin.accounts.openai.codexTicketHistoryDaysHours', { days, hours })
-  if (hours) return t('admin.accounts.openai.codexTicketHistoryHoursMinutes', { hours, minutes: Math.floor(total % 3600 / 60) })
+  if (total >= 86400) return formatCountdown(total)
+  const hours = Math.floor(total / 3600)
+  if (hours) return `${hours}h${String(Math.floor(total % 3600 / 60)).padStart(2, '0')}m${String(total % 60).padStart(2, '0')}s`
   return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`
+}
+
+function formatCountdown(seconds: number) {
+  const total = Math.max(0, Math.floor(seconds))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor(total % 3600 / 60)
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 </script>

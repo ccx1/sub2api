@@ -284,7 +284,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(getById).toHaveBeenCalledWith(1)
     expect(wrapper.getComponent(BulkEditAccountModalStub).props()).toMatchObject({
       show: true, accountIds: [1],
-      target: { mode: 'selected', accountIds: [1], selectedPlatforms: ['openai'], selectedTypes: ['oauth'], selectedPlanTypes: [], selectedExcelBPSEligible: false }
+      target: { mode: 'selected', accountIds: [1], selectedPlatforms: ['openai'], selectedTypes: ['oauth'], selectedPlanTypes: [], selectedExcelBPSEligible: false, selectedPrismEligible: true }
     })
     expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual([1])
     wrapper.unmount()
@@ -301,7 +301,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(getById).toHaveBeenCalledWith(1)
     expect(wrapper.getComponent(BulkEditAccountModalStub).props('target')).toEqual({
       mode: 'selected', accountIds: [1, 2], selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'],
-      selectedPlanTypes: [], selectedExcelBPSEligible: false
+      selectedPlanTypes: [], selectedExcelBPSEligible: false, selectedPrismEligible: false
     })
     wrapper.unmount()
   })

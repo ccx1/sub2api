@@ -69,6 +69,13 @@
           <ExcelBPSOptionsFields v-if="excelBPSEnabled" v-model="excelBPSOptions" :disabled="saving" test-id-prefix="shared-excel-bps"
             class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" />
         </div>
+        <div v-if="supportsPrism" class="space-y-3">
+          <div class="flex items-start justify-between gap-4">
+            <label for="shared-prism" class="input-label">{{ t('admin.accounts.openai.prismBrowser') }}</label>
+            <Toggle id="shared-prism" v-model="prismEnabled" :aria-label="t('admin.accounts.openai.prismBrowser')" :disabled="saving" />
+          </div>
+          <PrismBrowserOptionsFields v-if="prismEnabled" v-model="prismOptions" :disabled="saving" test-id-prefix="shared-prism" />
+        </div>
         <SharedCredentialsForm v-if="!account" :platform="form.platform" :type="form.type" :proxy-url="form.proxy_url" :editing="false" :disabled="saving" @change="credentials = $event" @valid="credentialsValid = $event" @busy="authorizing = $event" />
         <p v-if="error" role="alert" class="break-words text-sm text-red-600 dark:text-red-400">{{ error }}</p>
       </fieldset>
@@ -97,6 +104,8 @@ import { hasSettlementPolicy } from './settlementPolicy'
 import { resolveSharedAccountImportDefaults } from './sharedAccountImportDefaults'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import PrismBrowserOptionsFields from '@/components/account/PrismBrowserOptionsFields.vue'
+import { normalizePrismBrowserOptions } from '@/utils/prismBrowserOptions'
 import { defaultExcelBPSOptions, isKnownFreePlan, sharedExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { sharedPoolAPI, type SharedAccount, type SharedAccountInput, type SharedAccountUpdateInput, type SharedConfig, type SharedImportDefaults, type SharedPlatform } from '@/api/sharedPool'
@@ -126,6 +135,16 @@ const initialExcelBPSOptions = sharedExcelBPSOptions(props.account
   ? props.account.excel_bps_options ?? defaultExcelBPSOptions() : importDefaults.excel_bps_options)
 const excelBPSEnabled = ref(initialExcelBPSEnabled)
 const excelBPSOptions = ref(sharedExcelBPSOptions(initialExcelBPSOptions))
+const supportsPrism = computed(() => props.account ? props.account.prism_browser_enabled !== undefined : isOpenAIOAuth.value)
+const initialPrismEnabled = props.account ? props.account.prism_browser_enabled === true : importDefaults.prism_browser_enabled === true
+const initialPrismOptions = normalizePrismBrowserOptions({ models: props.account ? props.account.prism_browser_models : importDefaults.prism_browser_models })
+const prismEnabled = ref(initialPrismEnabled)
+const prismOptions = ref(normalizePrismBrowserOptions(initialPrismOptions))
+const prismChanged = computed(() => prismEnabled.value !== initialPrismEnabled
+  || (prismEnabled.value && JSON.stringify(prismOptions.value.models) !== JSON.stringify(initialPrismOptions.models)))
+function prismInput() {
+  return { prism_browser_enabled: prismEnabled.value, prism_browser_models: prismEnabled.value ? [...prismOptions.value.models] : [] }
+}
 function excelBPSInput() {
   return excelBPSEnabled.value
     ? { excel_bps_enabled: true, excel_bps_options: sharedExcelBPSOptions(excelBPSOptions.value) }
@@ -157,7 +176,7 @@ function validateCooldown() {
 function openImport() {
   if (saving.value || authorizing.value) return
   error.value = ''
-  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, ...excelBPSInput(), ...cooldownInput() })
+  if (validateCooldown()) emit('import', { ...form, enabled: true, dispatch_consent: true, ...excelBPSInput(), ...prismInput(), ...cooldownInput() })
 }
 function submit() {
   if (saving.value || authorizing.value) return
@@ -178,12 +197,13 @@ async function save() {
         name: form.name.trim(), platform: props.account.platform, type: props.account.type,
         enabled: props.account.enabled, protection_enabled: props.account.protection_enabled,
         concurrency: form.concurrency, ...(changeProxy.value ? { proxy_url: form.proxy_url } : {}), ...cooldownInput(),
-        ...(supportsExcelBPS.value && excelBPSChanged.value ? excelBPSInput() : {})
+        ...(supportsExcelBPS.value && excelBPSChanged.value ? excelBPSInput() : {}),
+        ...(supportsPrism.value && prismChanged.value ? prismInput() : {})
       }
       await sharedPoolAPI.update(props.account.id, input)
     } else {
       await sharedPoolAPI.create({ ...form, enabled: true, dispatch_consent: true, ...cooldownInput(), name: form.name.trim(), credentials: credentials.value, confirm_disable: false,
-        ...(isOpenAIOAuth.value ? excelBPSInput() : {}) })
+        ...(isOpenAIOAuth.value ? { ...excelBPSInput(), ...prismInput() } : {}) })
     }
     emit('saved')
   } catch (e: unknown) { error.value = (e as Error).message || t('sharedPool.actionFailed') }

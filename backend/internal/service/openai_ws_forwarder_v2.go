@@ -35,6 +35,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	lastFailureReason string,
 	agentTaskRecoveryTried *bool,
 ) (returnResult *OpenAIForwardResult, returnErr error) {
+	ctx = WithRegionalEgressBypassForAccount(ctx, account)
+	if anchor := codexWSAnchorFromContext(ctx); anchor != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, anchor.expires)
+		defer cancel()
+	}
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -163,9 +169,16 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			preferredConnID = connID
 		}
 	}
+	anchor := codexWSAnchorFromContext(ctx)
+	if anchor != nil && anchor.previousID != "" {
+		preferredConnID = anchor.connID
+	}
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := strategyApplied || (forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == "")
+	if anchor != nil && anchor.connID != "" {
+		forceNewConn = false
+	}
 	var ticketReceipt *openAICodexTicketWSReceipt
 	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
@@ -183,6 +196,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
+	}
+	if anchor != nil && anchor.cookie != "" {
+		replaceCodexWSAnchorCookie(wsHeaders, anchor.cookie)
 	}
 	logOpenAIWSModeDebug(
 		"acquire_start account_id=%d account_type=%s transport=%s preferred_conn_id=%s has_previous_response_id=%v session_hash=%s has_turn_state=%v turn_state_len=%d has_turn_metadata=%v turn_metadata_len=%d store_disabled=%v store_disabled_conn_mode=%s retry_last_reason=%s force_new_conn=%v header_user_agent=%s header_openai_beta=%s header_originator=%s header_accept_language=%s header_session_id=%s header_conversation_id=%s session_id_source=%s conversation_id_source=%s has_prompt_cache_key=%v has_chatgpt_account_id=%v has_authorization=%v has_session_id=%v has_conversation_id=%v proxy_enabled=%v",
@@ -237,6 +253,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				return nil, err
 			}
 			// 票据已在构建握手头时按快照注入（CodexTicketReceipt），这里只做发送前准入复核。
+			if anchor != nil && anchor.cookie != "" {
+				replaceCodexWSAnchorCookie(headers, anchor.cookie)
+			}
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
 		BindHandshake: func(headers http.Header) *openAIWSTurnBinding {
@@ -268,20 +287,44 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			}
 			return nil
 		},
-		PreferredConnID: preferredConnID,
-		ForceNewConn:    forceNewConn,
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		PreferredConnID:    preferredConnID,
+		ForceNewConn:       forceNewConn || (anchor != nil && anchor.connID == ""),
+		ForcePreferredConn: anchor != nil && anchor.connID != "",
+		ProxyURL:           resolveAccountProxyURL(account),
+	}
+	if anchor != nil {
+		acquireReq.AnchorScope = anchor.scope
+		if anchor.connID != "" {
+			acquireReq.ProxyURL = anchor.proxyURL
+		}
 	}
 	strategyScope := codexRequestStrategyConnectionScope(ctx)
 	if strategyScope == "" {
 		strategyScope = CodexRequestStrategyScopeDedicated
 	}
 	s.applyCodexRouteManagementPolicy(ctx, strategyScope, &acquireReq)
+	if anchor != nil && anchor.connID == "" {
+		if ticketReceipt != nil && ticketReceipt.ticket.usesCookies() {
+			return nil, errors.New("astra_ticket_route_incompatible")
+		}
+		if pool, ok := s.httpUpstream.(interface {
+			CodexGatewayPinWSRequest(context.Context, http.Header, string, int64, int) (string, string, func(), error)
+		}); ok {
+			route, proxyURL, release, routeErr := pool.CodexGatewayPinWSRequest(ctx, wsHeaders, acquireReq.ProxyURL, account.ID, account.Concurrency)
+			if release != nil {
+				defer release()
+			}
+			if routeErr != nil {
+				return nil, s.astraRouteFailover(ctx, account, routeErr)
+			}
+			acquireReq.ProxyURL = proxyURL
+			anchor.cookie = route
+			if route != "" {
+				replaceCodexWSAnchorCookie(wsHeaders, route)
+			}
+		}
+		anchor.proxyURL = acquireReq.ProxyURL
+	}
 	defer func() {
 		if errors.Is(returnErr, errOpenAIWSRouteAffinityUnavailable) {
 			model := canonicalOpenAIAccountSchedulingModel(account, originalModel)
@@ -353,6 +396,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		lease.Release()
 	}()
 	connID := strings.TrimSpace(lease.ConnID())
+	if anchor != nil {
+		anchor.connID = connID
+		lease.conn.anchorUntilNano.Store(anchor.expires.UnixNano())
+	}
 	logOpenAIWSModeDebug(
 		"connected account_id=%d account_type=%s transport=%s conn_id=%s conn_reused=%v conn_idle_ms=%d conn_age_ms=%d upstream_pings=%d conn_pick_ms=%d queue_wait_ms=%d has_previous_response_id=%v",
 		account.ID,
@@ -848,6 +895,11 @@ readLoop:
 			}
 			// error 事件后连接不再可复用，避免回池后污染下一请求。
 			lease.MarkBroken()
+			if !wroteDownstream && (errCodeRaw == "server_is_overloaded" || errCodeRaw == "slow_down") {
+				failover := newOpenAIUpstreamFailoverError(http.StatusServiceUnavailable, lease.HandshakeHeaders(), message, errMsg, false)
+				failover.RetryableOnSameAccount = false
+				return nil, failover
+			}
 			if !wroteDownstream && canFallback {
 				return nil, wrapOpenAIWSFallback(fallbackReason, errors.New(errMsg))
 			}
@@ -979,6 +1031,9 @@ readLoop:
 		clientDisconnected,
 	)
 
+	if anchor != nil {
+		anchor.qualified = responseModelObserver.astraCompleted && !responseModelObserver.Conflict()
+	}
 	result := resultWithUsage()
 	result.ImageCount = imageCounter.Count()
 	result.ImageOutputSizes = imageCounter.Sizes()

@@ -12,12 +12,14 @@ import (
 // same account stay schedulable. Multi-instance: each process learns from its
 // own upstream errors.
 type grokModelQuotaBlock struct {
-	Until time.Time
+	Until    time.Time
+	Sequence uint64
 }
 
 type grokModelQuotaBlockStore struct {
-	mu    sync.Mutex
-	items map[string]grokModelQuotaBlock // key: accountID|model
+	mu       sync.Mutex
+	items    map[string]grokModelQuotaBlock // key: accountID|model
+	sequence uint64
 }
 
 var globalGrokModelQuotaBlocks = &grokModelQuotaBlockStore{
@@ -41,7 +43,7 @@ func markGrokModelQuotaBlock(accountID int64, model string, until time.Time) {
 		return
 	}
 	now := time.Now()
-	if !until.After(now.Add(grokModelQuotaBlockMinTTL)) {
+	if !until.After(now) {
 		until = now.Add(grokModelQuotaBlockDefaultTTL)
 	}
 	if max := now.Add(grokModelQuotaBlockMaxTTL); until.After(max) {
@@ -76,10 +78,13 @@ func storeGrokModelQuotaBlock(accountID int64, model string, until, now time.Tim
 	key := grokModelQuotaBlockKey(accountID, model)
 	globalGrokModelQuotaBlocks.mu.Lock()
 	defer globalGrokModelQuotaBlocks.mu.Unlock()
+	globalGrokModelQuotaBlocks.sequence++
 	if cur, ok := globalGrokModelQuotaBlocks.items[key]; ok && cur.Until.After(until) {
+		cur.Sequence = globalGrokModelQuotaBlocks.sequence
+		globalGrokModelQuotaBlocks.items[key] = cur
 		return
 	}
-	globalGrokModelQuotaBlocks.items[key] = grokModelQuotaBlock{Until: until}
+	globalGrokModelQuotaBlocks.items[key] = grokModelQuotaBlock{Until: until, Sequence: globalGrokModelQuotaBlocks.sequence}
 	for k, v := range globalGrokModelQuotaBlocks.items {
 		if !v.Until.After(now) {
 			delete(globalGrokModelQuotaBlocks.items, k)

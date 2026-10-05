@@ -2600,6 +2600,11 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	if len(requestedModels) > 0 && account.IsExcelBPSEnabledForModel(requestedModels[0]) {
 		return false
 	}
+	// Prism browser turns are HTTP/SSE only; keep them out of the native WS pool
+	// while allowing the same OAuth account to serve non-Prism models normally.
+	if len(requestedModels) > 0 && account.IsPrismBrowserEnabledForModel(requestedModels[0]) {
+		return false
+	}
 	if requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress {
 		if s.cfg == nil || !s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 			return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == OpenAIUpstreamTransportResponsesWebsocketV2
@@ -2626,6 +2631,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	healthTripped := false
 	if s != nil && s.rateLimitService != nil {
 		if success {
+			s.rateLimitService.ObserveQualityUpstreamSuccess(context.Background(), account)
 			// Reset at the synchronous result boundary, before asynchronous
 			// usage recording can reorder this success behind a later failure.
 			s.rateLimitService.resetOpenAIIPUnauthorizedStreak(account)
@@ -2656,6 +2662,9 @@ func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Con
 }
 
 func ignoreOpenAIAccountHealthError(err error) bool {
+	if isGrokRequestScopedFailure(err) {
+		return true
+	}
 	if isExcelBPSRateLimitError(err) || IsOpenAITurnAdmissionError(err) ||
 		errors.Is(err, ErrRandomProxyUnavailable) || errors.Is(err, ErrRandomProxyChanged) {
 		return true

@@ -25,9 +25,9 @@ describe('administrator shared account tiers', () => {
     expect(wrapper.emitted('allocate')).toEqual([[base]])
   })
 
-  it('shows the recognized subscription tier and administrator override source', () => {
-    const wrapper = mount(SharedPoolAdminAccountsTable, { props: { accounts: [{ ...base, subscription_tier: 'pro', subscription_tier_override: 'pro', settlement_multiplier: 0.5 }] } })
-    expect(wrapper.get('[data-test="admin-account-tier"]').text()).toContain('Pro 20x')
+  it.each([['prolite', 'Pro 100'], ['pro', 'Pro 200'], ['promax', 'Pro 500']])('shows recognized tier %s and administrator override source', (tier, label) => {
+    const wrapper = mount(SharedPoolAdminAccountsTable, { props: { accounts: [{ ...base, subscription_tier: tier, subscription_tier_override: tier, settlement_multiplier: 0.5 }] } })
+    expect(wrapper.get('[data-test="admin-account-tier"]').text()).toContain(label)
     expect(wrapper.get('[data-test="admin-account-tier"]').text()).toContain('sharedPool.subscriptionTierManual')
     expect(wrapper.get('[data-test="admin-account-multiplier"]').text()).toContain('0.5x')
   })

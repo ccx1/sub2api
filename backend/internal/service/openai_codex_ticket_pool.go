@@ -62,6 +62,27 @@ func composeCodexTicketPool(tickets []*openAICodexTicket, cfg config.OpenAICodex
 	return current
 }
 
+func composeCodexTicketPoolWithRouteRotation(tickets []*openAICodexTicket, cfg config.OpenAICodexTicketConfig, state *codexTicketRouteRotation) *openAICodexTicket {
+	inventory := composeCodexTicketPool(tickets, cfg)
+	if inventory == nil || state == nil {
+		return inventory
+	}
+	inventory.RouteRotation = cloneCodexTicketRouteRotation(state)
+	if len(inventory.RouteRotation.Cooldowns) == 0 {
+		return inventory
+	}
+	retained := make(map[string]bool)
+	for _, slot := range codexTicketSlots(inventory) {
+		retained[codexTicketConsumptionID(slot)] = true
+	}
+	for id := range inventory.RouteRotation.Cooldowns {
+		if !retained[id] {
+			delete(inventory.RouteRotation.Cooldowns, id)
+		}
+	}
+	return inventory
+}
+
 func codexTicketPoolNeedsRefresh(inventory *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) bool {
 	cfg = resolveCodexTicketCredentialConfig(account, config.NormalizeOpenAICodexTicketConfig(cfg))
 	if inventory == nil {
@@ -75,18 +96,10 @@ func codexTicketPoolNeedsRefresh(inventory *openAICodexTicket, account *Account,
 		return true
 	}
 	if config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket {
-		latest := codexTicketInventoryTime(inventory)
-		if account != nil && account.Extra != nil {
-			history, err := DecodeCodexTicketHistory(account.Extra[OpenAICodexTicketHistoryKey])
-			if err == nil {
-				for _, attempt := range history.Items {
-					if attempt.Model == inventory.Model && attempt.StartedAt.After(latest) {
-						latest = attempt.StartedAt
-					}
-				}
-			}
-		}
-		return !latest.After(now.Add(-time.Hour))
+		// 历史票也要持续采集：满库后由 mergeCodexTicketPublication 按容量
+		// 淘汰旧槽位。实际轮询节奏只由 HarvestProbeIntervalSeconds 控制，
+		// 不能再用固定的一小时门槛覆盖管理员配置。
+		return true
 	}
 	refreshBefore := time.Duration(cfg.RefreshBeforeSeconds) * time.Second
 	if cfg.RefreshStrategy == config.CodexTicketRefreshReplace {
@@ -225,18 +238,43 @@ func codexTicketPoolStatus(model string, inventory *openAICodexTicket, account *
 	hydrateCodexTicketSoftRevalidate(inventory, cfg)
 	tickets := usableCodexTicketPool(inventory, account, cfg, now)
 	selected := selectOpenAICodexTicket(inventory, account, cfg, now)
+	primary := inventory
+	if cfg.UsageMode == config.CodexTicketUsageLatestOnly {
+		primary = codexTicketNewestSlot(inventory)
+	}
+	if cfg.UsageMode == config.CodexTicketUsageLatestOnly {
+		tickets = nil
+		if selected != nil {
+			tickets = []*openAICodexTicket{selected}
+		}
+	}
 	if config.CodexTicketUsageAgedEnabled(cfg) {
 		matured := tickets[:0]
 		for _, ticket := range tickets {
-			if first := ticket.lineageCapturedAt(); !first.IsZero() && now.Sub(first) >= time.Duration(cfg.MinTicketAgeSeconds)*time.Second {
-				matured = append(matured, ticket)
+			if first := ticket.lineageCapturedAt(); first.IsZero() || now.Sub(first) < time.Duration(cfg.MinTicketAgeSeconds)*time.Second {
+				continue
 			}
+			if cfg.SkipSameRouteHost && config.CodexTicketUsesCookies(cfg) && strings.TrimSpace(ticket.SessionID) == "" {
+				continue
+			}
+			if cfg.SkipSameRouteHost && !codexTicketRouteRotationCooldownUntil(inventory, ticket, now).IsZero() {
+				continue
+			}
+			matured = append(matured, ticket)
 		}
 		tickets = matured
 	}
 	status := OpenAICodexTicketStatus{Model: model, Capacity: config.CodexTicketModelCapacity(cfg, model), CredentialState: "missing",
 		AvailableCount: len(tickets), ReserveCount: max(0, len(tickets)-1), Blocked: cfg.FailClosed && selected == nil}
-	setCodexTicketPrimaryStatus(&status, inventory, account, cfg, now)
+	setCodexTicketPrimaryStatus(&status, primary, account, cfg, now)
+	if primary != nil && !primary.HistoricalUsedAt.IsZero() {
+		used := primary.HistoricalUsedAt
+		status.HistoricalUsedAt = &used
+	}
+	if config.CodexTicketUsageAgedEnabled(cfg) && cfg.SkipSameRouteHost &&
+		!codexTicketRouteRotationCooldownUntil(inventory, inventory, now).IsZero() && status.PrimaryReason == "" {
+		status.PrimaryReason, status.PrimaryReady = "route_cooldown", false
+	}
 	if selected == nil {
 		if status.PrimaryReason == "expired" || status.PrimaryReason == "revoked" {
 			status.CredentialState = status.PrimaryReason
@@ -249,12 +287,22 @@ func codexTicketPoolStatus(model string, inventory *openAICodexTicket, account *
 		expires = current.historicalExpires(cfg)
 	}
 	status.Ready, status.Length, status.ExpiresAt = true, current.Length, &expires
-	status.RemainingSeconds = int64(expires.Sub(now) / time.Second)
+	if expires.IsZero() {
+		status.ExpiresAt = nil
+		status.RemainingSeconds = 0
+	} else {
+		status.RemainingSeconds = int64(expires.Sub(now) / time.Second)
+	}
+	status.RouteHost = codexTicketRouteHost(current)
 	origin := current.lineageCapturedAt()
 	if !origin.IsZero() {
 		status.OriginCapturedAt = &origin
 	}
-	status.UsingStandby = !sameCodexTicket(current, inventory)
+	if !current.HistoricalUsedAt.IsZero() {
+		used := current.HistoricalUsedAt
+		status.HistoricalUsedAt = &used
+	}
+	status.UsingStandby = cfg.UsageMode != config.CodexTicketUsageLatestOnly && !sameCodexTicket(current, primary)
 	status.CredentialState = "available"
 	if !current.RevalidateAt.IsZero() {
 		status.RevalidateAt = &current.RevalidateAt
@@ -264,13 +312,16 @@ func codexTicketPoolStatus(model string, inventory *openAICodexTicket, account *
 		status.CredentialState = "revalidation_required"
 	}
 	for _, ticket := range tickets {
+		if ticket.ExpiresAt.IsZero() {
+			continue
+		}
 		if !ticket.ExpiresAt.After(now.Add(time.Duration(cfg.RefreshBeforeSeconds) * time.Second)) {
 			status.ExpiringCount++
 		}
 		if status.NextExpiresAt == nil || ticket.ExpiresAt.Before(*status.NextExpiresAt) {
 			status.NextExpiresAt = &ticket.ExpiresAt
 		}
-		if !sameCodexTicket(ticket, inventory) && !status.StandbyReady {
+		if cfg.UsageMode != config.CodexTicketUsageLatestOnly && !sameCodexTicket(ticket, primary) && !status.StandbyReady {
 			status.StandbyReady, status.StandbyExpiresAt = true, &ticket.ExpiresAt
 		}
 	}

@@ -60,20 +60,22 @@ type SharedPoolAccountRecord struct {
 }
 
 type SharedPoolAccountInput struct {
-	Name               string                   `json:"name"`
-	Platform           string                   `json:"platform"`
-	Type               string                   `json:"type"`
-	Concurrency        int                      `json:"concurrency"`
-	ProxyURL           *string                  `json:"proxy_url"`
-	ProtectionEnabled  bool                     `json:"protection_enabled"`
-	CodexTicketEnabled *bool                    `json:"codex_ticket_enabled"`
-	ExcelBPSEnabled    *bool                    `json:"excel_bps_enabled"`
-	ExcelBPSOptions    *ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
-	ConfirmDisable     bool                     `json:"confirm_disable"`
-	Enabled            bool                     `json:"enabled"`
-	DispatchConsent    bool                     `json:"dispatch_consent"`
-	Credentials        map[string]any           `json:"credentials"`
-	DailyCooldown      *SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
+	Name                string                   `json:"name"`
+	Platform            string                   `json:"platform"`
+	Type                string                   `json:"type"`
+	Concurrency         int                      `json:"concurrency"`
+	ProxyURL            *string                  `json:"proxy_url"`
+	ProtectionEnabled   bool                     `json:"protection_enabled"`
+	CodexTicketEnabled  *bool                    `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled     *bool                    `json:"excel_bps_enabled"`
+	ExcelBPSOptions     *ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
+	PrismBrowserEnabled *bool                    `json:"prism_browser_enabled"`
+	PrismBrowserModels  *[]string                `json:"prism_browser_models,omitempty"`
+	ConfirmDisable      bool                     `json:"confirm_disable"`
+	Enabled             bool                     `json:"enabled"`
+	DispatchConsent     bool                     `json:"dispatch_consent"`
+	Credentials         map[string]any           `json:"credentials"`
+	DailyCooldown       *SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
 }
 
 type SharedPoolAccountUpdate struct {
@@ -85,8 +87,10 @@ type SharedPoolAccountUpdate struct {
 	Fingerprint   string
 	DailyCooldown *SharedPoolDailyCooldown
 	// ExcelBPSChanged 时先清除整族 BPS 键，再写入 ExcelBPSExtra；nil 表示关闭协议。
-	ExcelBPSChanged bool
-	ExcelBPSExtra   map[string]any
+	ExcelBPSChanged     bool
+	ExcelBPSExtra       map[string]any
+	PrismBrowserChanged bool
+	PrismBrowserExtra   map[string]any
 }
 
 type SharedPoolGroupView struct {
@@ -131,6 +135,8 @@ type SharedPoolAccountView struct {
 	CodexTicketRequired bool                     `json:"codex_ticket_required"`
 	ExcelBPSEnabled     *bool                    `json:"excel_bps_enabled,omitempty"`
 	ExcelBPSOptions     *ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
+	PrismBrowserEnabled *bool                    `json:"prism_browser_enabled,omitempty"`
+	PrismBrowserModels  *[]string                `json:"prism_browser_models,omitempty"`
 	DailyCooldown       *SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
 	GroupIDs            []int64                  `json:"group_ids"`
 	Groups              []SharedPoolGroupView    `json:"groups"`

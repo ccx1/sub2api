@@ -781,6 +781,31 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.unrelated).toBe('preserve')
   })
 
+  it('saves and restores the selected Prism models without changing other OAuth settings', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { unrelated: 'preserve' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    await wrapper.get('[data-testid="openai-prism-browser-oauth-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="prism-model-gpt-6-luna"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const saved = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(saved).toMatchObject({ openai_prism_browser: true, unrelated: 'preserve' })
+    expect(saved.openai_prism_browser_models).not.toContain('gpt-6-luna')
+
+    await wrapper.setProps({ account: { ...account, extra: saved } })
+    expect(wrapper.get<HTMLInputElement>('[data-testid="prism-model-gpt-6-luna"]').element.checked).toBe(false)
+    await wrapper.get('[data-testid="openai-prism-browser-oauth-toggle"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('openai_prism_browser')
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra).not.toHaveProperty('openai_prism_browser_models')
+    wrapper.unmount()
+  })
+
   it('does not allow enabling BPS for a known Free plan and allows disabling a legacy setting', async () => {
     const account = buildOpenAIOAuthParentAccount()
     account.credentials.plan_type = ' FREE '

@@ -30,6 +30,7 @@ const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
 	githubRepo     = "ccx1/sub2api"
+	officialRepo   = "Wei-Shaw/sub2api"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -79,6 +80,7 @@ func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, versi
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
+	Official       *VersionSourceInfo `json:"official,omitempty"`
 	Ranxi          *VersionSourceInfo `json:"ranxi,omitempty"`
 	CurrentVersion string             `json:"current_version"`
 	LatestVersion  string             `json:"latest_version"`
@@ -134,12 +136,17 @@ type GitHubAsset struct {
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
 	cached, _ := s.getFromCache(ctx)
 	info := s.checkLocalSource(ctx, force, cached)
+	var officialCached *VersionSourceInfo
+	if cached != nil {
+		officialCached = cached.Official
+	}
+	info.Official = s.checkRemoteSource(ctx, force, officialRepo, officialVersion(s.currentVersion), officialCached)
 	if s.ranxiVersion != "" {
 		var previous *VersionSourceInfo
 		if cached != nil {
 			previous = cached.Ranxi
 		}
-		info.Ranxi = s.checkRanxiSource(ctx, force, previous)
+		info.Ranxi = s.checkRemoteSource(ctx, force, ranxiRepo, s.ranxiVersion, previous)
 	}
 	s.saveToCache(ctx, info)
 	return info, nil

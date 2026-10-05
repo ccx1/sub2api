@@ -208,6 +208,36 @@ async function openCodexImportStep(toggleClicks = 0, bpsToggleClicks = 0) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
+  it('preserves omitted Prism defaults and submits an explicit model scope', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-prism-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="create-prism-model-gpt-6-luna"]').setValue(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.lastCall?.[0].extra).toMatchObject({ openai_prism_browser: true })
+    expect(importCodexSessionMock.mock.lastCall?.[0].extra.openai_prism_browser_models).not.toContain('gpt-6-luna')
+    wrapper.unmount()
+    const untouched = await openCodexImportStep()
+    await untouched.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.lastCall?.[0].extra).not.toHaveProperty('openai_prism_browser')
+    untouched.unmount()
+  })
+  it('submits explicit Prism disablement with an empty scope after toggling off', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-prism-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="create-prism-toggle"]').setValue(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Disabled Prism import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.lastCall?.[0].extra).toMatchObject({ openai_prism_browser: false, openai_prism_browser_models: [] })
+    wrapper.unmount()
+  })
   it.each(['session', 'pat'])('keeps billing region matching through Codex %s import without requiring known billing evidence', async method => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

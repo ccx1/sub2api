@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
 )
 
 // ErrRandomProxyUnavailable is returned when an account explicitly requests
@@ -32,6 +35,26 @@ func RandomProxyUnavailablePolicy(err error) string {
 		return unavailable.Policy
 	}
 	return RandomProxyEmptyPoolPolicyReject
+}
+
+// WithRegionalEgressBypassForAccount preserves an explicit random-proxy direct
+// fallback when the shared transport has operator-managed regional rules.
+func WithRegionalEgressBypassForAccount(ctx context.Context, account *Account) context.Context {
+	if account != nil {
+		ctx = upstreamroute.WithAccountID(ctx, account.ID)
+	}
+	if account != nil && account.randomProxyDirectResolved && account.IsRandomProxy() && account.Proxy == nil && account.ProxyID == nil && account.RandomProxyEmptyPoolPolicy() == RandomProxyEmptyPoolPolicyDirect {
+		return WithRegionalEgressBypass(ctx)
+	}
+	return ctx
+}
+
+func withAccountRegionalEgress(request *http.Request, account *Account) *http.Request {
+	ctx := WithRegionalEgressBypassForAccount(request.Context(), account)
+	if ctx == request.Context() {
+		return request
+	}
+	return request.WithContext(ctx)
 }
 
 type randomProxyAccountDisabler interface {
@@ -81,7 +104,11 @@ func randomProxyUnavailable(account *Account) error {
 // assignment is runtime-only; the allocator retains affinity across requests
 // without persisting a fixed proxy_id on the account.
 func ResolveRandomProxy(ctx context.Context, account *Account, selector RandomProxySelector) error {
-	if account == nil || !account.IsRandomProxy() {
+	if account == nil {
+		return nil
+	}
+	account.randomProxyDirectResolved = false
+	if !account.IsRandomProxy() {
 		return nil
 	}
 	// Clear any association inherited from a stale snapshot before querying the
@@ -99,6 +126,7 @@ func ResolveRandomProxy(ctx context.Context, account *Account, selector RandomPr
 			return errors.New("proxy region selection requires an available proxy pool")
 		}
 		if account.RandomProxyEmptyPoolPolicy() == RandomProxyEmptyPoolPolicyDirect {
+			account.randomProxyDirectResolved = true
 			return nil
 		}
 		return randomProxyUnavailable(account)
@@ -109,6 +137,7 @@ func ResolveRandomProxy(ctx context.Context, account *Account, selector RandomPr
 	}
 	if proxy == nil || !proxy.IsActive() || proxy.IsExpired(time.Now()) {
 		if account.RandomProxyEmptyPoolPolicy() == RandomProxyEmptyPoolPolicyDirect {
+			account.randomProxyDirectResolved = true
 			return nil
 		}
 		return randomProxyUnavailable(account)

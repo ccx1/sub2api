@@ -47,6 +47,22 @@ func ticketTestService(t *testing.T, cfg config.OpenAICodexTicketConfig, upstrea
 	}
 }
 
+func TestShouldUseAstraManagedTicketUsesEffectiveAccountAndModelGates(t *testing.T) {
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
+		Enabled: true,
+		Models:  []string{"gpt-6-astra"},
+	}, nil)
+	account := ticketTestAccount(41)
+
+	require.True(t, shouldUseAstraManagedTicket(svc, context.Background(), account, "gpt-6-astra"), "legacy accounts without the flag remain managed")
+	require.False(t, shouldUseAstraManagedTicket(svc, context.Background(), account, "gpt-5.6-sol"))
+	account.Extra = map[string]any{OpenAICodexTicketEnabledExtraKey: false}
+	require.False(t, shouldUseAstraManagedTicket(svc, context.Background(), account, "gpt-6-astra"))
+	account.Extra[OpenAICodexTicketEnabledExtraKey] = true
+	svc.cfg.Gateway.OpenAICodexTicket.Enabled = false
+	require.False(t, shouldUseAstraManagedTicket(svc, context.Background(), account, "gpt-6-astra"))
+}
+
 func TestApplyOpenAICodexTicket_ReplacesHeader(t *testing.T) {
 	state := fakeCodexTicketState(292)
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{

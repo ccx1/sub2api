@@ -138,7 +138,7 @@ func normalizeAccountImportSettings(settings *AccountImportSettings) error {
 
 func validateAccountImportExtra(extra map[string]any) error {
 	allowed := make(map[string]bool)
-	for _, keys := range [][]string{accountImportRoutingKeys[1:], accountImportRegionKeys, accountImportTicketProxyKeys, accountImportTicketCredentialKeys} {
+	for _, keys := range [][]string{accountImportRoutingKeys[1:], accountImportRegionKeys, accountImportTicketProxyKeys, accountImportTicketCredentialKeys, PrismBrowserExtraKeys()} {
 		for _, key := range keys {
 			allowed[key] = true
 		}
@@ -155,7 +155,7 @@ func validateAccountImportExtra(extra map[string]any) error {
 		}
 	}
 	for _, validate := range []func(map[string]any) error{
-		ValidateRandomProxyPoolExtra, ValidateRandomProxyReuseExtra, ValidateProxyRegionExtra, ValidateCodexTicketProxyExtra,
+		ValidateRandomProxyPoolExtra, ValidateRandomProxyReuseExtra, ValidateProxyRegionExtra, ValidateCodexTicketProxyExtra, NormalizePrismBrowserExtra,
 	} {
 		if err := validate(extra); err != nil {
 			return err

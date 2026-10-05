@@ -44,6 +44,8 @@ export interface SharedAccount {
   // 仅支持 BPS 的 OpenAI OAuth 账号返回；options 仅在开启时返回。
   excel_bps_enabled?: boolean
   excel_bps_options?: ExcelBPSOptions
+  prism_browser_enabled?: boolean
+  prism_browser_models?: string[]
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
   settlement_multiplier?: number | null
@@ -55,16 +57,20 @@ export interface SharedAccountInput {
   codex_ticket_enabled?: boolean
   excel_bps_enabled?: boolean
   excel_bps_options?: ExcelBPSOptions
+  prism_browser_enabled?: boolean
+  prism_browser_models?: string[]
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
 }
 export interface SharedAccountAllocationInput {
   group_ids?: number[]; admin_disabled?: boolean; enabled?: boolean; subscription_tier?: string; priority?: number
 }
-export type SharedAccountUpdateInput = Pick<SharedAccountInput, 'name' | 'platform' | 'type' | 'concurrency' | 'proxy_url' | 'enabled' | 'protection_enabled' | 'daily_cooldown' | 'excel_bps_enabled' | 'excel_bps_options'>
+export type SharedAccountUpdateInput = Pick<SharedAccountInput, 'name' | 'platform' | 'type' | 'concurrency' | 'proxy_url' | 'enabled' | 'protection_enabled' | 'daily_cooldown' | 'excel_bps_enabled' | 'excel_bps_options' | 'prism_browser_enabled' | 'prism_browser_models'>
 export interface SharedAccountImportDefaults {
   protection_enabled: boolean; codex_ticket_enabled: boolean; excel_bps_enabled: boolean
   excel_bps_options: ExcelBPSOptions
+  prism_browser_enabled?: boolean
+  prism_browser_models?: string[]
 }
 export interface SharedConfig extends SharedSettlementPolicy {
   platforms: SharedPlatform[]; max_concurrency: number; platform_rate_bps: number; proxy_rate_bps: number
@@ -76,6 +82,8 @@ export interface SharedImportDefaults {
   codex_ticket_enabled?: boolean
   excel_bps_enabled?: boolean
   excel_bps_options?: ExcelBPSOptions
+  prism_browser_enabled?: boolean
+  prism_browser_models?: string[]
   daily_cooldown?: SharedDailyCooldown
   dispatch_consent?: boolean
 }

@@ -31,14 +31,22 @@ const (
 	CodexTicketWorkspaceOriginRoutingProbe = "probe"
 
 	// CodexTicketUsage* 控制业务请求的取票方式。
-	// immediate: 即取即用，按票池顺序取首张可用票（默认，保持既有行为）。
+	// immediate: 按票池主票、备用票顺序使用，主票不可用时回退（默认）。
+	// latest_only: 仅取首次采集时间最新的票，不回退较旧票。
 	// aged:      只取首次采集后已沉淀满 MinTicketAgeSeconds 的票，最老的优先。
-	CodexTicketUsageImmediate = "immediate"
-	CodexTicketUsageAged      = "aged"
+	CodexTicketUsageImmediate  = "immediate"
+	CodexTicketUsageLatestOnly = "latest_only"
+	CodexTicketUsageAged       = "aged"
 	// MaxCodexTicketMinAgeSeconds 是 aged 模式沉淀时长的硬上限。
-	MaxCodexTicketMinAgeSeconds                 = 30 * 86400
-	DefaultCodexTicketHistoricalValiditySeconds = 8 * 86400
-	MaxCodexTicketHistoricalValiditySeconds     = 30 * 86400
+	MaxCodexTicketMinAgeSeconds                  = 30 * 86400
+	DefaultCodexTicketHistoricalValiditySeconds  = 8 * 86400
+	MaxCodexTicketHistoricalValiditySeconds      = 30 * 86400
+	DefaultHistoricalQualityCheckBeforeSeconds   = 120
+	DefaultHistoricalQualityCheckIntervalSeconds = 30
+	DefaultHistoricalQualityExtendSeconds        = 30
+	MaxHistoricalQualitySeconds                  = 86400
+	DefaultCodexTicketSameRouteCooldownHours     = 1
+	MaxCodexTicketSameRouteCooldownHours         = 168
 )
 
 // CodexTicketUsageAgedEnabled 报告是否启用了“只用沉淀满指定时长的票”。
@@ -51,7 +59,10 @@ func CodexTicketUsageAgedEnabled(cfg OpenAICodexTicketConfig) bool {
 func WithoutCodexTicketUsagePolicy(cfg OpenAICodexTicketConfig) OpenAICodexTicketConfig {
 	cfg.UsageMode, cfg.MinTicketAgeSeconds, cfg.ConsumeAfterUse = "", 0, false
 	cfg.HistoricalTicketValiditySeconds = 0
+	cfg.HistoricalQualityEnabled = false
+	cfg.HistoricalQualityCheckBeforeSeconds, cfg.HistoricalQualityCheckIntervalSeconds, cfg.HistoricalQualityExtendSeconds = 0, 0, 0
 	cfg.CookieRefreshMode = ""
+	cfg.SkipSameRouteHost, cfg.SameRouteCooldownHours = false, 0
 	return cfg
 }
 
@@ -78,6 +89,30 @@ func CodexTicketModelCapacity(cfg OpenAICodexTicketConfig, model string) int {
 
 // ValidateCodexTicketUsage 校验并规范化取票机制；空值按即取即用处理，旧配置保持原行为。
 func ValidateCodexTicketUsage(cfg *OpenAICodexTicketConfig) error {
+	if cfg.HistoricalQualityCheckBeforeSeconds == 0 {
+		cfg.HistoricalQualityCheckBeforeSeconds = DefaultHistoricalQualityCheckBeforeSeconds
+	}
+	if cfg.HistoricalQualityCheckIntervalSeconds == 0 {
+		cfg.HistoricalQualityCheckIntervalSeconds = DefaultHistoricalQualityCheckIntervalSeconds
+	}
+	if cfg.HistoricalQualityExtendSeconds == 0 {
+		cfg.HistoricalQualityExtendSeconds = DefaultHistoricalQualityExtendSeconds
+	}
+	if cfg.HistoricalQualityCheckBeforeSeconds < 5 || cfg.HistoricalQualityCheckBeforeSeconds > MaxHistoricalQualitySeconds {
+		return fmt.Errorf("historical_quality_check_before_seconds 必须在 5 到 %d 之间", MaxHistoricalQualitySeconds)
+	}
+	if cfg.HistoricalQualityCheckIntervalSeconds < 5 || cfg.HistoricalQualityCheckIntervalSeconds > MaxHistoricalQualitySeconds {
+		return fmt.Errorf("historical_quality_check_interval_seconds 必须在 5 到 %d 之间", MaxHistoricalQualitySeconds)
+	}
+	if cfg.HistoricalQualityExtendSeconds < 1 || cfg.HistoricalQualityExtendSeconds > MaxHistoricalQualitySeconds {
+		return fmt.Errorf("historical_quality_extend_seconds 必须在 1 到 %d 之间", MaxHistoricalQualitySeconds)
+	}
+	if cfg.SameRouteCooldownHours == 0 {
+		cfg.SameRouteCooldownHours = DefaultCodexTicketSameRouteCooldownHours
+	}
+	if cfg.SameRouteCooldownHours < 1 || cfg.SameRouteCooldownHours > MaxCodexTicketSameRouteCooldownHours {
+		return fmt.Errorf("same_route_cooldown_hours 必须在 1 到 %d 之间", MaxCodexTicketSameRouteCooldownHours)
+	}
 	if cfg.HistoricalTicketValiditySeconds == 0 {
 		cfg.HistoricalTicketValiditySeconds = DefaultCodexTicketHistoricalValiditySeconds
 	}
@@ -91,17 +126,17 @@ func ValidateCodexTicketUsage(cfg *OpenAICodexTicketConfig) error {
 	switch cfg.UsageMode {
 	case "":
 		cfg.UsageMode = CodexTicketUsageImmediate
-	case CodexTicketUsageImmediate, CodexTicketUsageAged:
+	case CodexTicketUsageImmediate, CodexTicketUsageLatestOnly, CodexTicketUsageAged:
 	default:
-		return fmt.Errorf("取票机制必须是 immediate 或 aged")
+		return fmt.Errorf("取票机制必须是 immediate、latest_only 或 aged")
 	}
 	if cfg.UsageMode != CodexTicketUsageAged {
 		cfg.MinTicketAgeSeconds = 0
 		return nil
 	}
-	limit := min(MaxCodexTicketMinAgeSeconds, cfg.HistoricalTicketValiditySeconds-1)
+	limit := MaxCodexTicketMinAgeSeconds
 	if cfg.MinTicketAgeSeconds < 1 || cfg.MinTicketAgeSeconds > limit {
-		return fmt.Errorf("min_ticket_age_seconds 必须在 1 到 %d 之间，且小于历史票有效期", limit)
+		return fmt.Errorf("min_ticket_age_seconds 必须在 1 到 %d 之间", limit)
 	}
 	return nil
 }
@@ -139,6 +174,22 @@ func NormalizeOpenAICodexTicketConfig(cfg OpenAICodexTicketConfig) OpenAICodexTi
 		cfg.HistoricalTicketValiditySeconds = DefaultCodexTicketHistoricalValiditySeconds
 	}
 	cfg.HistoricalTicketValiditySeconds = min(cfg.HistoricalTicketValiditySeconds, MaxCodexTicketHistoricalValiditySeconds)
+	if cfg.HistoricalQualityCheckBeforeSeconds <= 0 {
+		cfg.HistoricalQualityCheckBeforeSeconds = DefaultHistoricalQualityCheckBeforeSeconds
+	}
+	if cfg.HistoricalQualityCheckIntervalSeconds <= 0 {
+		cfg.HistoricalQualityCheckIntervalSeconds = DefaultHistoricalQualityCheckIntervalSeconds
+	}
+	if cfg.HistoricalQualityExtendSeconds <= 0 {
+		cfg.HistoricalQualityExtendSeconds = DefaultHistoricalQualityExtendSeconds
+	}
+	cfg.HistoricalQualityCheckBeforeSeconds = min(cfg.HistoricalQualityCheckBeforeSeconds, MaxHistoricalQualitySeconds)
+	cfg.HistoricalQualityCheckIntervalSeconds = min(cfg.HistoricalQualityCheckIntervalSeconds, MaxHistoricalQualitySeconds)
+	cfg.HistoricalQualityExtendSeconds = min(cfg.HistoricalQualityExtendSeconds, MaxHistoricalQualitySeconds)
+	if cfg.SameRouteCooldownHours <= 0 {
+		cfg.SameRouteCooldownHours = DefaultCodexTicketSameRouteCooldownHours
+	}
+	cfg.SameRouteCooldownHours = min(cfg.SameRouteCooldownHours, MaxCodexTicketSameRouteCooldownHours)
 	if cfg.VerifyBusiness == nil {
 		enabled := true
 		cfg.VerifyBusiness = &enabled
@@ -222,9 +273,11 @@ func NormalizeOpenAICodexTicketConfig(cfg OpenAICodexTicketConfig) OpenAICodexTi
 	}
 	// 取票机制默认即取即用；非法或缺失沉淀时长的 aged 回落即取即用，避免误配置把业务请求全部挡住。
 	if cfg.UsageMode != CodexTicketUsageAged || cfg.MinTicketAgeSeconds <= 0 {
-		cfg.UsageMode = CodexTicketUsageImmediate
+		if cfg.UsageMode != CodexTicketUsageLatestOnly {
+			cfg.UsageMode = CodexTicketUsageImmediate
+		}
 		cfg.MinTicketAgeSeconds = 0
 	}
-	cfg.MinTicketAgeSeconds = min(cfg.MinTicketAgeSeconds, MaxCodexTicketMinAgeSeconds, cfg.HistoricalTicketValiditySeconds-1)
+	cfg.MinTicketAgeSeconds = min(cfg.MinTicketAgeSeconds, MaxCodexTicketMinAgeSeconds)
 	return cfg
 }

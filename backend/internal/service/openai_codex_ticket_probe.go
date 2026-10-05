@@ -215,7 +215,11 @@ func (s *OpenAIGatewayService) buildOpenAICodexTicketProbeRequest(ctx context.Co
 		req.Header.Set(openAICodexTurnStateHeader, in.State)
 	}
 	if cookies := codexTicketBusinessCookieSnapshotForProbe(in); cookies != nil {
-		if !cookies.cookieUsable(time.Now(), *in.Config) {
+		historicalQuality := in.BackgroundQuality && in.FreezeCredentials &&
+			in.Config.HistoricalQualityEnabled && config.CodexTicketUsageAgedEnabled(*in.Config) &&
+			cookies.historicalUsable(time.Now(), in.Account, *in.Config) &&
+			cookies.historicalExpiresAt.After(time.Now())
+		if !historicalQuality && !cookies.cookieUsable(time.Now(), *in.Config) {
 			return nil, &codexTicketProbeResponseError{reason: "ticket_rejected"}
 		}
 		cookies.applyHeaders(req.Header)

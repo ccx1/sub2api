@@ -11,7 +11,7 @@
         v-if="hasUpdate"
         class="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium"
         :class="[updateColors.badge, updateColors.text]"
-      >{{ t(kind === 'ranxi' ? 'version.ranxiUpdateAvailable' : 'version.localUpdateAvailable') }}</span>
+      >{{ t(kind === 'official' ? 'version.officialUpdateAvailable' : kind === 'ranxi' ? 'version.ranxiUpdateAvailable' : 'version.localUpdateAvailable') }}</span>
     </div>
     <dl class="mt-2 space-y-1 text-xs">
       <div class="flex justify-between gap-2">
@@ -28,6 +28,18 @@
     <p v-if="!warning && !latestVersion" class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('version.unavailable') }}</p>
     <p v-else-if="!warning && !hasUpdate" class="mt-2 text-xs text-green-700 dark:text-green-400">{{ t('version.upToDate') }}</p>
     <p v-if="hint" class="mt-2 text-xs leading-relaxed" :class="hasUpdate ? updateColors.text : 'text-gray-500 dark:text-dark-400'">{{ hint }}</p>
+    <div v-if="kind === 'ranxi' && hasUpdate" class="mt-2 flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <p id="ranxi-version-ignore-label" class="text-xs font-medium text-gray-700 dark:text-dark-200">{{ t('version.ranxiIgnoreVersion') }}</p>
+        <p v-if="ignored" data-testid="ranxi-version-ignored" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('version.ranxiIgnoredHint') }}</p>
+      </div>
+      <Toggle
+        :model-value="ignored"
+        data-testid="ranxi-version-ignore-toggle"
+        aria-labelledby="ranxi-version-ignore-label"
+        @update:model-value="emit('update:ignored', $event)"
+      />
+    </div>
     <details v-if="source?.release_info?.body" class="mt-2 text-xs">
       <summary class="cursor-pointer text-gray-600 dark:text-dark-300">{{ t('version.releaseNotes') }}</summary>
       <p class="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-gray-500 dark:text-dark-400">{{ source.release_info.body }}</p>
@@ -46,13 +58,16 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { VersionSourceInfo } from '@/api/admin/system'
+import Toggle from '@/components/common/Toggle.vue'
 
 const props = withDefaults(defineProps<{
   title: string
   source?: VersionSourceInfo | null
   hint?: string
-  kind?: 'local' | 'ranxi'
-}>(), { kind: 'local' })
+  kind?: 'local' | 'official' | 'ranxi'
+  ignored?: boolean
+}>(), { kind: 'local', ignored: false })
+const emit = defineEmits<{ (event: 'update:ignored', value: boolean): void }>()
 const { t } = useI18n()
 const latestVersion = computed(() => props.source?.warning && !props.source.cached ? '' : props.source?.latest_version)
 const hasUpdate = computed(() => !!props.source?.has_update && !!latestVersion.value)

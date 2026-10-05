@@ -22,10 +22,12 @@ func (s *OpenAIGatewayService) EnrichCodexRouteAffinityStatus(ctx context.Contex
 		status := &statuses[i]
 		status.RouteAffinityStatus = CodexRouteAffinityOff
 		status.RouteAffinityConnections = 0
-		applyCodexTicketRouteNodeStatus(status, account)
+		status.RouteExpiresAt = nil
 		if !enabled || policy.RouteAffinityMode == CodexRouteAffinityOff {
+			clearCodexTicketRouteNodeStatus(status)
 			continue
 		}
+		applyCodexTicketRouteNodeStatus(status, account)
 		status.RouteAffinityStatus = "unknown"
 		if openAIModelRouteCooling(account, status.Model) {
 			status.RouteAffinityStatus = "unavailable"
@@ -88,10 +90,14 @@ func codexTicketRouteAffinityFromInventory(account *Account, model string) (stri
 	return "", time.Time{}
 }
 
-// applyCodexTicketRouteNodeStatus 展示首张未过期 Cookie 票的计算节点；节点身份与亲和开关无关。
-func applyCodexTicketRouteNodeStatus(status *OpenAICodexTicketStatus, account *Account) {
+// 路由策略关闭后清除旧摘要中的节点信息。
+func clearCodexTicketRouteNodeStatus(status *OpenAICodexTicketStatus) {
 	status.RouteNode, status.RouteNodeCountry, status.RouteNodeRegion = "", "", ""
 	status.RouteMacroRegion, status.RouteEgressCountry, status.RouteCrossRegion = "", "", false
+}
+
+func applyCodexTicketRouteNodeStatus(status *OpenAICodexTicketStatus, account *Account) {
+	clearCodexTicketRouteNodeStatus(status)
 	if account == nil || account.Extra == nil {
 		return
 	}

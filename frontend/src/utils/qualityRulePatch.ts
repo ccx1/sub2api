@@ -70,11 +70,15 @@ export function buildQualityRulePatch(
     patch.cron_expression = draft.cron_expression.trim()
   }
   if (fields.includes('enabled')) patch.enabled = draft.enabled
-  if (!fields.some(field => ['test', 'action', 'restore'].includes(field))) return patch
+  if (!fields.some(field => ['test', 'action', 'restore'].includes(field)) && !(fields.includes('model') && ((draft.pelican_config.model_ids?.length || 0) > 1 || (plan.pelican_config?.model_ids?.length || 0) > 1))) return patch
 
   if (!plan.pelican_config?.quality) throw new Error('qualityOps.ruleConfigMissing')
   const config: PelicanTestConfig & { quality: QualityPolicy } = JSON.parse(JSON.stringify(plan.pelican_config))
   const source = draft.pelican_config
+  if (fields.includes('model')) {
+    config.model_ids = source.model_ids?.length ? [...source.model_ids] : [draft.model_id.trim()]
+    patch.model_id = config.model_ids[0]
+  }
   if (fields.includes('test')) {
     config.question_kind = source.question_kind
     if (source.test_channel) config.test_channel = source.test_channel
@@ -95,6 +99,16 @@ export function buildQualityRulePatch(
   if (fields.includes('action')) {
     config.quality.action = source.quality.action
     config.quality.remove_group_ids = source.quality.action === 'remove_groups' ? [...source.quality.remove_group_ids] : []
+    if (source.quality.action === 'remove_models') {
+      config.quality.remove_models = [...(source.quality.remove_models || [])]
+      config.quality.trigger_on_upstream_5xx = !!source.quality.trigger_on_upstream_5xx
+      config.quality.recovery_concurrency = source.quality.recovery_concurrency ?? 5
+    } else {
+      delete config.quality.remove_models
+      delete config.quality.trigger_on_upstream_5xx
+      delete config.quality.recovery_concurrency
+    }
+    if (config.quality.action === 'remove_models' && !config.quality.remove_models?.length) throw new Error('qualityOps.cooldownModelsRequired')
     if (config.quality.action === 'remove_groups' && !config.quality.remove_group_ids.length) throw new Error('qualityOps.selectGroups')
     if (config.quality.action === 'enable_bps') {
       if (!source.quality.bps) throw new Error('qualityOps.bpsTriggerRequired')

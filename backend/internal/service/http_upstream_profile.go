@@ -6,10 +6,34 @@ import "context"
 // transport policy.
 type HTTPUpstreamProfile string
 
+type regionalEgressBypassContextKey struct{}
+type astraManagedTicketContextKey struct{}
+
+// WithRegionalEgressBypass preserves an account's explicit direct-egress
+// decision when the shared transport also has operator-managed regional rules.
+func WithRegionalEgressBypass(ctx context.Context) context.Context {
+	return context.WithValue(ctx, regionalEgressBypassContextKey{}, true)
+}
+
+func RegionalEgressBypassFromContext(ctx context.Context) bool {
+	bypass, _ := ctx.Value(regionalEgressBypassContextKey{}).(bool)
+	return bypass
+}
+
+func WithAstraManagedTicket(ctx context.Context) context.Context {
+	return context.WithValue(ctx, astraManagedTicketContextKey{}, true)
+}
+
+func AstraManagedTicketFromContext(ctx context.Context) bool {
+	value, _ := ctx.Value(astraManagedTicketContextKey{}).(bool)
+	return value
+}
+
 const (
 	HTTPUpstreamProfileDefault       HTTPUpstreamProfile = ""
 	HTTPUpstreamProfileOpenAI        HTTPUpstreamProfile = "openai"
 	HTTPUpstreamProfileOpenAIHarvest HTTPUpstreamProfile = "openai_harvest"
+	HTTPUpstreamProfileExcelBPS     HTTPUpstreamProfile = "excel_bps"
 	HTTPUpstreamProfileGrok          HTTPUpstreamProfile = "grok"
 	HTTPUpstreamProfileLongStream    HTTPUpstreamProfile = "long_stream"
 )
@@ -39,7 +63,7 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 		return HTTPUpstreamProfileDefault
 	}
 	switch profile {
-	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
+	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileExcelBPS, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
 		return profile
 	default:
 		return HTTPUpstreamProfileDefault

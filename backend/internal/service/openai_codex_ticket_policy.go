@@ -108,19 +108,23 @@ func (ticket *openAICodexTicket) usable(now time.Time, account *Account, cfg con
 }
 
 func (ticket *openAICodexTicket) historicalExpires(cfg config.OpenAICodexTicketConfig) time.Time {
-	first := ticket.lineageCapturedAt()
-	if first.IsZero() {
+	if ticket == nil || ticket.HistoricalUsedAt.IsZero() {
 		return time.Time{}
 	}
 	seconds := cfg.HistoricalTicketValiditySeconds
 	if seconds <= 0 {
 		seconds = config.DefaultCodexTicketHistoricalValiditySeconds
 	}
-	return first.Add(time.Duration(seconds) * time.Second)
+	base := ticket.HistoricalUsedAt.Add(time.Duration(seconds) * time.Second)
+	if ticket.HistoricalExtendedExpiresAt.After(base) {
+		return ticket.HistoricalExtendedExpiresAt
+	}
+	return base
 }
 
 func (ticket *openAICodexTicket) historicalUsable(now time.Time, account *Account, cfg config.OpenAICodexTicketConfig) bool {
-	if ticket.Revoked || !ticket.historicalExpires(cfg).After(now) {
+	expires := ticket.historicalExpires(cfg)
+	if ticket.Revoked || !expires.IsZero() && !expires.After(now) {
 		return false
 	}
 	if config.CodexTicketUsesCookies(cfg) {

@@ -16,6 +16,13 @@
     </div>
     <p class="input-hint">{{ t('admin.accountImportSettings.protectionHint') }}</p>
     <p class="input-hint">{{ t('admin.accountImportSettings.excelBPSHint') }}</p>
+    <div class="space-y-3">
+      <label class="flex items-center gap-2 text-sm">
+        <input v-model="prismBrowserEnabled" type="checkbox" data-testid="import-settings-prism-toggle" :disabled="disabled" />
+        <span>{{ t('admin.accounts.openai.prismBrowser') }}</span>
+      </label>
+      <PrismBrowserOptionsFields v-if="prismBrowserEnabled" v-model="prismBrowserOptions" :disabled="disabled" test-id-prefix="import-settings-prism" />
+    </div>
     <ExcelBPSOptionsFields v-if="settings.excel_bps_enabled" v-model="excelBPSOptions" :disabled="disabled" test-id-prefix="import-settings-excel-bps" allow-group-move :groups="groups"
       class="rounded-lg border border-gray-200 p-3 dark:border-dark-700" />
     <label class="block">
@@ -64,6 +71,8 @@ import RandomProxySettings from '@/components/account/RandomProxySettings.vue'
 import AccountProxyRegionSettings from '@/components/account/AccountProxyRegionSettings.vue'
 import CodexTicketProxySettings from '@/components/account/CodexTicketProxySettings.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import PrismBrowserOptionsFields from '@/components/account/PrismBrowserOptionsFields.vue'
+import { normalizePrismBrowserOptions } from '@/utils/prismBrowserOptions'
 import { normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { accountProxyRegionExtra, accountProxyRegionValidationError, BILLING_CURRENCY_COUNTRIES, filterProxiesByRegion, normalizeProxyRegionCountry, readAccountProxyRegion, resolveAccountProxyRegion } from '@/utils/accountProxyRegion'
 import { codexTicketProxyExtra, codexTicketProxyValidationError, isAvailableCodexTicketProxy, readCodexTicketProxy } from '@/utils/codexTicketProxy'
@@ -76,6 +85,14 @@ const { t } = useI18n()
 const proxyModes = ['preserve', 'direct', 'fixed', 'random'] as const
 const groupError = ref<string | null>(null)
 const updateExtra = (patch: Record<string, unknown>) => { settings.value.extra = { ...settings.value.extra, ...patch } }
+const prismBrowserEnabled = computed({
+  get: () => settings.value.extra.openai_prism_browser === true,
+  set: value => updateExtra({ openai_prism_browser: value, openai_prism_browser_models: value ? prismBrowserOptions.value.models : [] })
+})
+const prismBrowserOptions = computed({
+  get: () => normalizePrismBrowserOptions({ models: settings.value.extra.openai_prism_browser_models as string[] | undefined }),
+  set: value => updateExtra({ openai_prism_browser_models: normalizePrismBrowserOptions(value).models })
+})
 function clearExtra(prefix: string) {
   const extra = { ...settings.value.extra }
   for (const key of Object.keys(extra)) if (key.startsWith(prefix)) delete extra[key]

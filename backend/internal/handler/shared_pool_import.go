@@ -28,18 +28,20 @@ type sharedImportSource struct {
 }
 
 type sharedImportDefaults struct {
-	Name               string                           `json:"name"`
-	Platform           string                           `json:"platform"`
-	Type               string                           `json:"type"`
-	Concurrency        int                              `json:"concurrency"`
-	ProxyURL           *string                          `json:"proxy_url"`
-	Enabled            bool                             `json:"enabled"`
-	DispatchConsent    bool                             `json:"dispatch_consent"`
-	ProtectionEnabled  *bool                            `json:"protection_enabled"`
-	CodexTicketEnabled *bool                            `json:"codex_ticket_enabled"`
-	ExcelBPSEnabled    *bool                            `json:"excel_bps_enabled"`
-	ExcelBPSOptions    *service.ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
-	DailyCooldown      *service.SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
+	Name                string                           `json:"name"`
+	Platform            string                           `json:"platform"`
+	Type                string                           `json:"type"`
+	Concurrency         int                              `json:"concurrency"`
+	ProxyURL            *string                          `json:"proxy_url"`
+	Enabled             bool                             `json:"enabled"`
+	DispatchConsent     bool                             `json:"dispatch_consent"`
+	ProtectionEnabled   *bool                            `json:"protection_enabled"`
+	CodexTicketEnabled  *bool                            `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled     *bool                            `json:"excel_bps_enabled"`
+	ExcelBPSOptions     *service.ExcelBPSOptions         `json:"excel_bps_options,omitempty"`
+	PrismBrowserEnabled *bool                            `json:"prism_browser_enabled"`
+	PrismBrowserModels  *[]string                        `json:"prism_browser_models,omitempty"`
+	DailyCooldown       *service.SharedPoolDailyCooldown `json:"daily_cooldown,omitempty"`
 }
 
 type sharedImportRequest struct {

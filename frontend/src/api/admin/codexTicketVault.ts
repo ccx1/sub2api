@@ -4,6 +4,7 @@ import type { CodexTicketNodeInfo } from './codexTicketDiagnostics'
 // 账号票库只含元数据：后端不返回 STATE、Cookie 值、会话 ID 或账号凭据。
 export type CodexTicketVaultStatus =
   | 'available'
+  | 'not_selected'
   | 'maturing'
   | 'revoked'
   | 'consumed'
@@ -63,7 +64,7 @@ export interface CodexTicketVault {
   ttl_seconds: number
   cookie_ttl_seconds: number
   policy: {
-    usage_mode: 'immediate' | 'aged' | string
+    usage_mode: 'immediate' | 'latest_only' | 'aged' | string
     min_ticket_age_seconds: number
     historical_ticket_validity_seconds?: number
     consume_after_use: boolean

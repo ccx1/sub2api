@@ -1,15 +1,18 @@
 import type { AdminGroup } from '@/types'
 import type { SharedPlatform, SharedSettlementPolicy } from '@/api/sharedPool'
+import { openAIPlanTypes, openAIPlanTypeLabel } from '@/utils/planType'
 
 export const sharedPlatforms: SharedPlatform[] = ['openai', 'anthropic', 'gemini', 'antigravity']
 export const sharedPlatformNames: Record<SharedPlatform, string> = { openai: 'OpenAI', anthropic: 'Claude', gemini: 'Gemini', antigravity: 'Antigravity' }
 export const subscriptionTierOptions = {
-  openai: [
-    { value: 'free', label: 'Free' }, { value: 'plus', label: 'Plus' },
-    { value: 'pro', label: 'Pro 20x' }, { value: 'prolite', label: 'Pro 5x' },
-    { value: 'team', label: 'Business Standard' }, { value: 'self_serve_business_prolite', label: 'Business Premium' },
-    { value: 'business', label: 'Business' }, { value: 'enterprise', label: 'Enterprise' }
-  ],
+  openai: openAIPlanTypes.filter(tier => tier !== 'unknown')
+    .map(value => ({ value, label: openAIPlanTypeLabel(value) }))
+    // 同名 SKU 的分组和倍率可独立配置，标签需要保留区分依据。
+    .map((option, _, options) => ({
+      ...option,
+      label: options.some(other => other.value !== option.value && other.label === option.label)
+        ? `${option.label} (${option.value})` : option.label
+    })),
   anthropic: [],
   gemini: [
     { value: 'google_one_free', label: 'Google One Free' }, { value: 'google_ai_pro', label: 'Google AI Pro' },

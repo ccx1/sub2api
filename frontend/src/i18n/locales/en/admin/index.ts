@@ -8,6 +8,7 @@ import settings from './settings'
 import audit from './audit'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
+import astraGateway from './astraGateway'
 
 export default {
   ...requestCapture,
@@ -20,4 +21,5 @@ export default {
   ...audit,
   ...promptAudit,
   ...plugins,
+  ...astraGateway,
 }

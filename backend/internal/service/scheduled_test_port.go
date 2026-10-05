@@ -7,31 +7,39 @@ import (
 
 // PelicanTestConfig stores intelligence test inputs; a missing kind preserves legacy HTML plans.
 type PelicanTestConfig struct {
-	Quality         *QualityPolicy `json:"quality,omitempty"`
-	QuestionKind    string         `json:"question_kind,omitempty"`
-	Prompt          string         `json:"prompt"`
-	ReasoningEffort string         `json:"reasoning_effort"`
-	ParallelCount   int            `json:"parallel_count"`
+	ModelIDs             []string          `json:"model_ids,omitempty"`
+	QualityModelOutcomes map[string]string `json:"quality_model_outcomes,omitempty"`
+	QualityModelActions  map[string]string `json:"quality_model_actions,omitempty"`
+	TriggerSource        string            `json:"trigger_source,omitempty"`
+	Quality              *QualityPolicy    `json:"quality,omitempty"`
+	QuestionKind         string            `json:"question_kind,omitempty"`
+	Prompt               string            `json:"prompt"`
+	ReasoningEffort      string            `json:"reasoning_effort"`
+	ParallelCount        int               `json:"parallel_count"`
 	// ModelID is recorded with each result so later edits do not relabel history.
 	ModelID string `json:"model_id,omitempty"`
 }
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
-	AccountName    string             `json:"account_name,omitempty"`
-	PelicanConfig  *PelicanTestConfig `json:"pelican_config,omitempty"`
-	RunningUntil   *time.Time         `json:"running_until,omitempty"`
-	ID             int64              `json:"id"`
-	AccountID      int64              `json:"account_id"`
-	ModelID        string             `json:"model_id"`
-	CronExpression string             `json:"cron_expression"`
-	Enabled        bool               `json:"enabled"`
-	MaxResults     int                `json:"max_results"`
-	AutoRecover    bool               `json:"auto_recover"`
-	LastRunAt      *time.Time         `json:"last_run_at"`
-	NextRunAt      *time.Time         `json:"next_run_at"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	QualityModelOutcomes map[string]string  `json:"-"`
+	QualityModelActions  map[string]string  `json:"-"`
+	Quality5xxEpisode    int64              `json:"-"`
+	TriggerSource        string             `json:"-"`
+	AccountName          string             `json:"account_name,omitempty"`
+	PelicanConfig        *PelicanTestConfig `json:"pelican_config,omitempty"`
+	RunningUntil         *time.Time         `json:"running_until,omitempty"`
+	ID                   int64              `json:"id"`
+	AccountID            int64              `json:"account_id"`
+	ModelID              string             `json:"model_id"`
+	CronExpression       string             `json:"cron_expression"`
+	Enabled              bool               `json:"enabled"`
+	MaxResults           int                `json:"max_results"`
+	AutoRecover          bool               `json:"auto_recover"`
+	LastRunAt            *time.Time         `json:"last_run_at"`
+	NextRunAt            *time.Time         `json:"next_run_at"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
 }
 
 // ScheduledTestResult represents a single test execution result.
@@ -91,9 +99,10 @@ type ScheduledTestResultRepository interface {
 
 type QualityHistoryResult struct {
 	PelicanHistoryResult
-	PassedCount int     `json:"passed_count"`
-	TotalCount  int     `json:"total_count"`
-	ResultIDs   []int64 `json:"result_ids"`
+	PassedCount  int     `json:"passed_count"`
+	TotalCount   int     `json:"total_count"`
+	SkippedCount int     `json:"skipped_count"`
+	ResultIDs    []int64 `json:"result_ids"`
 }
 type QualityHistoryPage struct {
 	Items      []*QualityHistoryResult `json:"items"`

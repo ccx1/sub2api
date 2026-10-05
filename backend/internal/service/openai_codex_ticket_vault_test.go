@@ -154,6 +154,20 @@ func TestCodexTicketVaultListsMetadataWithoutSecrets(t *testing.T) {
 	require.Zero(t, repo.writes, "查看票库不写库")
 }
 
+func TestCodexTicketVaultLatestOnlyCountsSelectedTicket(t *testing.T) {
+	now := time.Now()
+	old := usageTestTicket("O", 2*time.Hour, now)
+	latest := usageTestTicket("N", time.Hour, now)
+	svc, _ := vaultTestService(t, config.OpenAICodexTicketConfig{FailClosed: true, UsageMode: config.CodexTicketUsageLatestOnly}, old, latest)
+	vault, err := svc.GetOpenAICodexTicketVault(context.Background(), 41)
+	require.NoError(t, err)
+	require.Equal(t, config.CodexTicketUsageLatestOnly, vault.Policy.UsageMode)
+	require.Equal(t, 1, vault.Models[0].Available)
+	require.Equal(t, "not_selected", vaultTestSlot(t, vault, "primary").Status)
+	require.Equal(t, CodexTicketVaultStatusAvailable, vaultTestSlot(t, vault, "standby").Status)
+	require.True(t, vaultTestSlot(t, vault, "standby").BusinessSelected)
+}
+
 func TestCodexTicketVaultShowsHistoricalDeadlineAfterStateExpiry(t *testing.T) {
 	now := time.Now()
 	ticket := usageTestTicket("H", 7*24*time.Hour+time.Hour, now)

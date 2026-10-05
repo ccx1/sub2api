@@ -1591,14 +1591,15 @@ func isRetryableCodexModelsManifestTransportError(err error) bool {
 }
 
 type openAIModelsRequest struct {
-	url                 string
-	headers             http.Header
-	proxyURL            string
-	accountID           int64
-	credentialAccountID int64
-	credentialAccount   *Account
-	accountConcurrency  int
-	useAPIKeyUpstream   bool
+	url                  string
+	headers              http.Header
+	proxyURL             string
+	accountID            int64
+	credentialAccountID  int64
+	credentialAccount    *Account
+	accountConcurrency   int
+	useAPIKeyUpstream    bool
+	regionalEgressBypass bool
 	// Cached bodies have already been converted to their requested format.
 	standardModelsList bool
 }
@@ -1776,14 +1777,15 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	}
 
 	request := openAIModelsRequest{
-		url:                 requestURL.String(),
-		headers:             headers,
-		proxyURL:            proxyURL,
-		accountID:           account.ID,
-		credentialAccountID: credAccount.ID,
-		credentialAccount:   credAccount,
-		accountConcurrency:  account.Concurrency,
-		useAPIKeyUpstream:   useAPIKeyUpstream,
+		url:                  requestURL.String(),
+		headers:              headers,
+		proxyURL:             proxyURL,
+		accountID:            account.ID,
+		credentialAccountID:  credAccount.ID,
+		credentialAccount:    credAccount,
+		accountConcurrency:   account.Concurrency,
+		useAPIKeyUpstream:    useAPIKeyUpstream,
+		regionalEgressBypass: RegionalEgressBypassFromContext(WithRegionalEgressBypassForAccount(ctx, account)),
 	}
 	if useAPIKeyUpstream {
 		return s.fetchCachedOpenAIModels(ctx, request, s.fetchCodexModelsManifestUpstreamForRequest(request), ifNoneMatch)
@@ -1955,6 +1957,9 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
 		}
 		req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+		if request.regionalEgressBypass {
+			req = req.WithContext(WithRegionalEgressBypass(req.Context()))
+		}
 		resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
 	} else {
 		handled := false
@@ -2574,7 +2579,7 @@ func validateCodexModelsManifestEnvelope(body []byte) error {
 
 func buildOpenAIModelsCacheKey(request openAIModelsRequest) string {
 	hasher := sha256.New()
-	_, _ = fmt.Fprintf(hasher, "%d\n%d\n%t\n%s\n%s\n", request.accountID, request.credentialAccountID, request.standardModelsList, request.proxyURL, request.url)
+	_, _ = fmt.Fprintf(hasher, "%d\n%d\n%t\n%s\n%s\n%t\n", request.accountID, request.credentialAccountID, request.standardModelsList, request.proxyURL, request.url, request.regionalEgressBypass)
 	headerNames := make([]string, 0, len(request.headers))
 	for name := range request.headers {
 		headerNames = append(headerNames, name)

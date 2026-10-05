@@ -45,10 +45,17 @@ type qualityGroup struct {
 	AllowedModels json.RawMessage `json:"allowed_models"`
 }
 type qualityState struct {
-	Action         string          `json:"action"`
-	AccountVersion time.Time       `json:"account_version"`
-	Removed        []qualityGroup  `json:"removed"`
-	Remaining      json.RawMessage `json:"remaining"`
+	Quality5xxEpisode   int64                      `json:"quality_5xx_episode,omitempty"`
+	Pending             bool                       `json:"pending,omitempty"`
+	ModelRateLimits     map[string]json.RawMessage `json:"model_rate_limits,omitempty"`
+	ModelApplied        map[string]json.RawMessage `json:"model_applied,omitempty"`
+	PreviousConcurrency *int                       `json:"previous_concurrency,omitempty"`
+	AppliedConcurrency  *int                       `json:"applied_concurrency,omitempty"`
+	RecoveryTarget      *int                       `json:"recovery_target,omitempty"`
+	Action              string                     `json:"action"`
+	AccountVersion      time.Time                  `json:"account_version"`
+	Removed             []qualityGroup             `json:"removed"`
+	Remaining           json.RawMessage            `json:"remaining"`
 }
 
 // Lease/version checks, account mutation, ownership and scheduler invalidation
@@ -89,11 +96,34 @@ func (r *scheduledTestPlanRepository) ApplyQualityOutcome(ctx context.Context, p
 			return "", err
 		}
 	}
+	if state.Quality5xxEpisode != plan.Quality5xxEpisode {
+		return "stale_run", nil
+	}
+	q := plan.PelicanConfig.Quality
+	if state.Action == service.QualityActionRemoveModel || state.Action == "" && q.Action == service.QualityActionRemoveModel {
+		if status != "active" || !schedulable {
+			return "restore_conflict", nil
+		}
+		var otherOwner bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_quality_states s JOIN scheduled_test_plans p ON p.id=s.plan_id WHERE p.account_id=$1 AND p.id<>$2 AND COALESCE(s.state->>'action','')<>'')`, plan.AccountID, plan.ID).Scan(&otherOwner); err != nil {
+			return "", err
+		}
+		if otherOwner {
+			return "action_conflict", nil
+		}
+		action, err := applyQualityModelOutcome(ctx, tx, plan, state, outcome)
+		if err != nil {
+			return "", err
+		}
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+		return action, nil
+	}
 	groups, err := qualityGroups(ctx, tx, plan.AccountID)
 	if err != nil {
 		return "", err
 	}
-	q := plan.PelicanConfig.Quality
 	action := "no_change"
 	changed := false
 	switch {
@@ -239,6 +269,7 @@ func (r *scheduledTestResultRepository) ListQualityHistory(ctx context.Context, 
  SELECT r.*, a.id AS account_id,a.name AS account_name,
  row_number() OVER round_window AS row_in_round,
  count(*) FILTER (WHERE r.status='success') OVER round_window AS passed_count,
+ count(*) FILTER (WHERE r.status='skipped') OVER round_window AS skipped_count,
  GREATEST(count(*) OVER round_window,COALESCE((r.pelican_config->>'parallel_count')::int,0)) AS total_count,
  array_agg(r.id) OVER round_window AS result_ids,
  min(r.started_at) OVER round_window AS round_started_at,
@@ -250,7 +281,7 @@ func (r *scheduledTestResultRepository) ListQualityHistory(ctx context.Context, 
  WINDOW round_window AS (PARTITION BY r.plan_id,COALESCE(NULLIF(r.quality_round_id,''),r.id::text) ORDER BY r.id DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
  ) SELECT id,plan_id,CASE WHEN all_passed THEN 'success' ELSE 'failed' END,
  CASE WHEN any_wrong THEN 'answer_mismatch' ELSE error_message END,
- latency_ms,round_started_at,round_finished_at,created_at,pelican_config,quality_action,quality_judgment,account_id,account_name,passed_count,total_count,result_ids
+ latency_ms,round_started_at,round_finished_at,created_at,pelican_config,quality_action,quality_judgment,account_id,account_name,passed_count,total_count,skipped_count,result_ids
  FROM rounds WHERE row_in_round=1 AND ($1::bigint=0 OR id<$1) ORDER BY id DESC LIMIT $2`, beforeID, limit)
 	if err != nil {
 		return nil, err
@@ -260,7 +291,7 @@ func (r *scheduledTestResultRepository) ListQualityHistory(ctx context.Context, 
 	for rows.Next() {
 		item := &service.QualityHistoryResult{}
 		var cfg, judgment []byte
-		if err := rows.Scan(&item.ID, &item.PlanID, &item.Status, &item.ErrorMessage, &item.LatencyMs, &item.StartedAt, &item.FinishedAt, &item.CreatedAt, &cfg, &item.QualityAction, &judgment, &item.AccountID, &item.AccountName, &item.PassedCount, &item.TotalCount, pq.Array(&item.ResultIDs)); err != nil {
+		if err := rows.Scan(&item.ID, &item.PlanID, &item.Status, &item.ErrorMessage, &item.LatencyMs, &item.StartedAt, &item.FinishedAt, &item.CreatedAt, &cfg, &item.QualityAction, &judgment, &item.AccountID, &item.AccountName, &item.PassedCount, &item.TotalCount, &item.SkippedCount, pq.Array(&item.ResultIDs)); err != nil {
 			return nil, err
 		}
 		if len(cfg) > 0 {

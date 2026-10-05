@@ -79,6 +79,7 @@
             <label class="block space-y-1">
               <span class="input-label">{{ t('codexTicketSettings.usageMode') }}</span>
               <select v-model="form.usage_mode" data-testid="usage-mode" class="input w-full" @change="onUsageModeChange">
+                <option value="latest_only">{{ t('codexTicketSettings.usageLatestOnly') }}</option>
                 <option value="immediate">{{ t('codexTicketSettings.usageImmediate') }}</option>
                 <option value="aged">{{ t('codexTicketSettings.usageAged') }}</option>
               </select>
@@ -91,9 +92,41 @@
             </label>
             <label v-if="form.usage_mode === 'aged'" class="block space-y-1">
               <span class="input-label">{{ t('codexTicketSettings.historicalTicketValidity') }}</span>
-              <input v-model.number="form.historical_ticket_validity_seconds" data-testid="historical-ticket-validity-seconds" type="number" min="2" max="2592000" step="1" class="input w-full" />
+              <input v-model.number="form.historical_ticket_validity_seconds" data-testid="historical-ticket-validity-seconds" type="number" min="1" max="2592000" step="1" class="input w-full" />
               <span class="block input-hint">{{ t('codexTicketSettings.historicalTicketValidityHint') }}</span>
             </label>
+            <template v-if="form.usage_mode === 'aged'">
+              <label class="flex items-start gap-3">
+                <input v-model="form.historical_quality_enabled" type="checkbox" data-testid="historical-quality-enabled" class="mt-1 h-4 w-4" />
+                <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.historicalQualityEnabled') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.historicalQualityEnabledHint') }}</span></span>
+              </label>
+              <div class="grid gap-4 sm:grid-cols-3">
+                <label class="block space-y-1">
+                  <span class="input-label">{{ t('codexTicketSettings.historicalQualityCheckBefore') }}</span>
+                  <input v-model.number="form.historical_quality_check_before_seconds" data-testid="historical-quality-check-before-seconds" type="number" min="5" max="86400" step="1" :disabled="!form.historical_quality_enabled" class="input w-full" />
+                  <span class="block input-hint">{{ t('codexTicketSettings.historicalQualityCheckBeforeHint') }}</span>
+                </label>
+                <label class="block space-y-1">
+                  <span class="input-label">{{ t('codexTicketSettings.historicalQualityCheckInterval') }}</span>
+                  <input v-model.number="form.historical_quality_check_interval_seconds" data-testid="historical-quality-check-interval-seconds" type="number" min="5" max="86400" step="1" :disabled="!form.historical_quality_enabled" class="input w-full" />
+                  <span class="block input-hint">{{ t('codexTicketSettings.historicalQualityCheckIntervalHint') }}</span>
+                </label>
+                <label class="block space-y-1">
+                  <span class="input-label">{{ t('codexTicketSettings.historicalQualityExtend') }}</span>
+                  <input v-model.number="form.historical_quality_extend_seconds" data-testid="historical-quality-extend-seconds" type="number" min="1" max="86400" step="1" :disabled="!form.historical_quality_enabled" class="input w-full" />
+                  <span class="block input-hint">{{ t('codexTicketSettings.historicalQualityExtendHint') }}</span>
+                </label>
+              </div>
+              <label class="flex items-start gap-3">
+                <input v-model="form.skip_same_route_host" type="checkbox" data-testid="skip-same-route-host" class="mt-1 h-4 w-4" />
+                <span class="text-sm text-gray-900 dark:text-white">{{ t('codexTicketSettings.skipSameRouteHost') }}<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.skipSameRouteHostHint') }}</span></span>
+              </label>
+              <label class="block space-y-1">
+                <span class="input-label">{{ t('codexTicketSettings.sameRouteCooldownHours') }}</span>
+                <input v-model.number="form.same_route_cooldown_hours" data-testid="same-route-cooldown-hours" type="number" min="1" max="168" step="1" :disabled="!form.skip_same_route_host" class="input w-full" />
+                <span class="block input-hint">{{ t('codexTicketSettings.sameRouteCooldownHoursHint') }}</span>
+              </label>
+            </template>
             <label class="block space-y-1">
               <span class="input-label">{{ t('codexTicketSettings.accountPoolCapacity') }}</span>
               <input v-model.number="form.account_pool_capacity" data-testid="account-pool-capacity" type="number" :min="form.models.length" max="1000" step="1" class="input w-full" />
@@ -216,6 +249,7 @@
           <div class="flex justify-end"><button type="submit" class="btn btn-primary" data-testid="save-settings" :disabled="saving || !!validationError">{{ t(saving ? 'codexTicketSettings.saving' : 'codexTicketSettings.save') }}</button></div>
         </footer>
       </form>
+      <HarvestGatewayBorrowPanel />
     </div>
   </AppLayout>
 </template>
@@ -227,6 +261,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
 import CodexTicketIPProtection from '@/components/admin/CodexTicketIPProtection.vue'
+import HarvestGatewayBorrowPanel from '@/components/admin/HarvestGatewayBorrowPanel.vue'
 import { getCodexTicketSettings, saveCodexTicketSettings, type CodexTicketSettings } from '@/api/admin/codexTicketSettings'
 import { defaultTicketProtection, readTicketProtection, splitTicketList, ticketCookieFields, ticketNumericGroups, ticketProtectionFields, ticketRejectionRetryFields, validateTicketSettings } from '@/components/admin/codexTicketSettingsForm'
 import { readTicketTierSelections, writeTicketTierSelections, ticketTierOptions, ticketModelOptions, type TicketTierRow } from '@/components/admin/codexTicketSelections'
@@ -241,7 +276,7 @@ const saveError = ref('')
 const form = ref<CodexTicketSettings | null>(null)
 const isAutoLength = computed(() => form.value?.length_mode === 'auto')
 const usesCookie = computed(() => form.value?.credential_mode === 'cookie' || form.value?.credential_mode === 'cookie_state')
-const maxTicketAge = computed(() => Math.max(1, (form.value?.historical_ticket_validity_seconds ?? 691200) - 1))
+const maxTicketAge = 2592000
 const backoffText = ref('')
 const rejectedText = ref('')
 const protection = ref(defaultTicketProtection())
@@ -277,6 +312,10 @@ const validationError = computed(() => {
 function numericFieldLabel(key: string) {
   if (key === 'min_ticket_age_seconds') return t('codexTicketSettings.minTicketAge')
   if (key === 'historical_ticket_validity_seconds') return t('codexTicketSettings.historicalTicketValidity')
+  if (key === 'historical_quality_check_before_seconds') return t('codexTicketSettings.historicalQualityCheckBefore')
+  if (key === 'historical_quality_check_interval_seconds') return t('codexTicketSettings.historicalQualityCheckInterval')
+  if (key === 'historical_quality_extend_seconds') return t('codexTicketSettings.historicalQualityExtend')
+  if (key === 'same_route_cooldown_hours') return t('codexTicketSettings.sameRouteCooldownHours')
   if (key === 'account_pool_capacity') return t('codexTicketSettings.accountPoolCapacity')
   const timingFields = ['ttl_seconds', 'refresh_before_seconds', 'cookie_ttl_seconds', 'cookie_refresh_before_seconds']
   const group = form.value?.refresh_strategy === 'replace' && timingFields.includes(key) ? 'updateFields' : 'fields'
@@ -289,6 +328,12 @@ function setForm(settings: CodexTicketSettings) {
     usage_mode: settings.usage_mode ?? 'immediate',
     min_ticket_age_seconds: settings.min_ticket_age_seconds ?? 0,
     historical_ticket_validity_seconds: settings.historical_ticket_validity_seconds ?? 691200,
+    historical_quality_enabled: settings.historical_quality_enabled ?? false,
+    historical_quality_check_before_seconds: settings.historical_quality_check_before_seconds ?? 120,
+    historical_quality_check_interval_seconds: settings.historical_quality_check_interval_seconds ?? 30,
+    historical_quality_extend_seconds: settings.historical_quality_extend_seconds ?? 30,
+    skip_same_route_host: settings.skip_same_route_host ?? false,
+    same_route_cooldown_hours: settings.same_route_cooldown_hours ?? 1,
     account_pool_capacity: settings.account_pool_capacity || undefined,
     cookie_refresh_mode: settings.cookie_refresh_mode ?? 'fresh_per_ticket',
     consume_after_use: settings.consume_after_use ?? false,
@@ -314,7 +359,7 @@ function setForm(settings: CodexTicketSettings) {
 }
 function onUsageModeChange() {
   if (form.value?.usage_mode === 'aged' && !form.value.min_ticket_age_seconds) {
-    form.value.min_ticket_age_seconds = Math.min(300, maxTicketAge.value)
+    form.value.min_ticket_age_seconds = Math.min(300, maxTicketAge)
   }
 }
 function addRule() {

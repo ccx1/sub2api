@@ -85,6 +85,16 @@ func (r *sharedPoolRepository) UpdateSharedAccount(ctx context.Context, ownerID,
 			return err
 		}
 	}
+	if in.PrismBrowserChanged {
+		raw, e := json.Marshal(in.PrismBrowserExtra)
+		if e != nil {
+			return e
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=(COALESCE(extra,'{}'::jsonb)-$2::text[])||$3::jsonb WHERE id=$1`,
+			id, pq.Array(service.PrismBrowserExtraKeys()), string(raw)); err != nil {
+			return err
+		}
+	}
 	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		return err
 	}

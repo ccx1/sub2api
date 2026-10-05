@@ -110,19 +110,42 @@ func isGrokContentPolicyCode(value string) bool {
 func isGrokAccountAccessCode(value string) bool {
 	switch normalizeGrokErrorMarker(value) {
 	case "account_suspended",
+		"deactivated_account",
 		"account_disabled",
 		"user_suspended",
 		"user_disabled",
 		"subscription_required",
 		"entitlement_required",
 		"not_entitled",
-		"plan_required":
+		"plan_required",
+		"invalid_token", "access_token_invalid", "token_revoked", "token_invalidated",
+		"invalid_credentials", "credential_invalid":
 		// permission-denied is omitted: xAI reuses it for both entitlement
 		// refusals and request-scoped safety blocks, so the message decides.
 		return true
 	default:
 		return false
 	}
+}
+
+func isGrokUnknownForbidden(statusCode int, responseBody []byte) bool {
+	return statusCode == http.StatusForbidden &&
+		!isGrokContentPolicyRejection(statusCode, responseBody) &&
+		!grokRecognizedForbiddenAccountState(responseBody)
+}
+
+func grokRecognizedForbiddenAccountState(responseBody []byte) bool {
+	if grokAccountAccessMessage(string(responseBody)) || isGrokSpendingLimitError(responseBody) ||
+		isOpenAIHTTPUpstreamAccessStateError(http.StatusForbidden, "", responseBody) || openAIStreamCredentialAuthFailure(responseBody) {
+		return true
+	}
+	decision := classifyGrokUpstreamFailure(http.StatusForbidden, responseBody, "")
+	switch decision.Class {
+	case GrokFailureFreeUsage, GrokFailureBilling, GrokFailureRateLimit:
+		return true
+	}
+	var payload any
+	return json.Unmarshal(responseBody, &payload) == nil && grokStructuredAccountAccessMarker(payload)
 }
 
 func grokAccountAccessMessage(value string) bool {

@@ -94,6 +94,17 @@ describe('CodexTicketVaultModal', () => {
     expect(wrapper.findAll('[data-testid="vault-revoke"]')).toHaveLength(2)
   })
 
+  it('shows retained older tickets outside latest-only selection', async () => {
+    const data = vault()
+    data.policy.usage_mode = 'latest_only'
+    data.models![0]!.slots![0]!.status = 'not_selected'
+    mocks.load.mockResolvedValueOnce(data)
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="vault-overview"]').text()).toContain(`${prefix}.usageModes.latest_only`)
+    expect(wrapper.findAll('[data-testid="vault-slot"]')[0]!.text()).toContain(`${prefix}.statuses.not_selected`)
+  })
+
   it('shows the account-wide capacity and allocated model capacity', async () => {
     const data = vault()
     data.account_pool_capacity = 1000

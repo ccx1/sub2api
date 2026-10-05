@@ -69,6 +69,13 @@ func (s *SharedPoolService) Create(ctx context.Context, userID int64, in SharedP
 	if bpsExtra != nil {
 		replaceExcelBPSExtra(extra, bpsExtra)
 	}
+	prismExtra, err := sharedPrismBrowserExtra(in, &Account{Platform: in.Platform, Type: in.Type, Credentials: credentials})
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range prismExtra {
+		extra[key] = value
+	}
 	proxyID, err := s.applyProxy(ctx, userID, in.ProxyURL, extra)
 	if err != nil {
 		return nil, err
@@ -123,6 +130,10 @@ func (s *SharedPoolService) Update(ctx context.Context, userID, id int64, in Sha
 	}
 	input := SharedPoolAccountUpdate{Name: strings.TrimSpace(in.Name), Concurrency: in.Concurrency,
 		ProxyChanged: in.ProxyURL != nil, DailyCooldown: dailyCooldown}
+	if input.PrismBrowserExtra, err = sharedPrismBrowserExtra(in, a); err != nil {
+		return nil, err
+	}
+	input.PrismBrowserChanged = in.PrismBrowserEnabled != nil
 	if input.ProxyChanged {
 		input.ProxyID, err = s.applyProxy(ctx, userID, in.ProxyURL, map[string]any{})
 		if err != nil {

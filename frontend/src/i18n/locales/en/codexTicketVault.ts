@@ -10,7 +10,7 @@ export default {
     revokeRemaining: '{count} ticket(s) could not be marked revoked in the database (blocked on this instance). Please retry later.',
     seconds: '{count}s',
     summary: { total: 'Stored', available: 'Available', maturing: 'Maturing' },
-    usageModes: { immediate: 'Use immediately', aged: 'Use aged tickets' },
+    usageModes: { immediate: 'Primary + backup', latest_only: 'Latest only', aged: 'Use aged tickets' },
     fields: {
       ticketEnabled: 'Account tickets', harvestEnabled: 'Account harvest', configEnabled: 'Global tickets', proxy: 'Proxy', credentialMode: 'Credential mode',
       poolCapacity: 'Legacy per-model capacity', accountPoolCapacity: 'Account total capacity', ttl: 'Ticket TTL', cookieTtl: 'Cookie retention', usageMode: 'Usage mode', minAge: 'Minimum ticket age', historicalValidity: 'Historical ticket validity',
@@ -23,7 +23,7 @@ export default {
     },
     credentialState: 'STATE length {length}', credentialCookies: 'Cookies: {names}', remaining: '{count}s left', origin: 'First captured {time}',
     statuses: {
-      available: 'Available', maturing: 'Maturing', revoked: 'Revoked', consumed: 'Used', binding: 'Binding mismatch', credential: 'Credential mode mismatch',
+      available: 'Available', not_selected: 'Not selected in latest-only mode', maturing: 'Maturing', revoked: 'Revoked', consumed: 'Used', binding: 'Binding mismatch', credential: 'Credential mode mismatch',
       cookie_missing: 'Cookie missing', expired: 'Expired', unverified: 'Unverified', unavailable: 'Unavailable'
     },
     reasons: { admin_revoked: 'Revoked by admin in ticket vault' },

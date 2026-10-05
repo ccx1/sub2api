@@ -136,29 +136,16 @@
               <button
                 type="button"
                 data-testid="usage-column-settings"
-                @click="showColumnDropdown = !showColumnDropdown"
+                ref="columnDropdownButtonRef"
+                @click.stop="toggleColumnDropdown"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('admin.users.columnSettings')"
+                aria-haspopup="menu"
+                :aria-expanded="showColumnDropdown"
               >
                 <Icon name="grid" size="sm" />
                 <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
               </button>
-              <div
-                v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-              >
-                <button
-                  v-for="col in currentToggleableColumns"
-                  :key="col.key"
-                  type="button"
-                  :data-testid="`usage-column-toggle-${col.key}`"
-                  @click="toggleCurrentColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon v-if="isCurrentColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
-                </button>
-              </div>
             </div>
             <button v-if="activeTab !== 'errors'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
               {{ exporting ? t('usage.exporting') : t('usage.exportCsv') }}
@@ -216,10 +203,36 @@
     </div>
   </AppLayout>
 
+  <Teleport to="body">
+    <div
+      v-if="showColumnDropdown"
+      ref="columnDropdownMenuRef"
+      class="fixed z-[100000020] w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+      :style="columnDropdownStyle"
+      role="menu"
+      data-test="usage-column-settings-menu"
+      @click.stop
+    >
+      <button
+        v-for="col in currentToggleableColumns"
+        :key="col.key"
+        type="button"
+        :data-testid="`usage-column-toggle-${col.key}`"
+        @click="toggleCurrentColumn(col.key)"
+        class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+        role="menuitemcheckbox"
+        :aria-checked="isCurrentColumnVisible(col.key)"
+      >
+        <span>{{ col.label }}</span>
+        <Icon v-if="isCurrentColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
+      </button>
+    </div>
+  </Teleport>
+
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
@@ -810,11 +823,82 @@ const toggleCurrentColumn = (key: string) => {
 
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)
+const columnDropdownButtonRef = ref<HTMLButtonElement | null>(null)
+const columnDropdownMenuRef = ref<HTMLElement | null>(null)
+const columnDropdownStyle = ref<Record<string, string>>({
+  position: 'fixed',
+  top: '0px',
+  left: '0px',
+  zIndex: '100000020',
+  maxHeight: 'min(20rem, calc(100vh - 16px))',
+  maxWidth: 'calc(100vw - 16px)',
+})
+
+const COLUMN_DROPDOWN_WIDTH = 192
+const COLUMN_DROPDOWN_MARGIN = 8
+
+const updateColumnDropdownPosition = () => {
+  const button = columnDropdownButtonRef.value
+  if (!button) return
+
+  const rect = button.getBoundingClientRect()
+  const menu = columnDropdownMenuRef.value
+  const width = menu?.offsetWidth || COLUMN_DROPDOWN_WIDTH
+  const height = Math.min(
+    menu?.offsetHeight || 320,
+    window.innerHeight - COLUMN_DROPDOWN_MARGIN * 2,
+  )
+  const maxLeft = window.innerWidth - COLUMN_DROPDOWN_MARGIN - width
+  const left = Math.max(
+    COLUMN_DROPDOWN_MARGIN,
+    Math.min(rect.right - width, maxLeft),
+  )
+
+  let top = rect.bottom + 6
+  if (top + height > window.innerHeight - COLUMN_DROPDOWN_MARGIN) {
+    const topWhenFlipped = rect.top - height - 6
+    top = topWhenFlipped >= COLUMN_DROPDOWN_MARGIN
+      ? topWhenFlipped
+      : Math.max(COLUMN_DROPDOWN_MARGIN, window.innerHeight - COLUMN_DROPDOWN_MARGIN - height)
+  }
+
+  columnDropdownStyle.value = {
+    position: 'fixed',
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
+    zIndex: '100000020',
+    maxHeight: `min(20rem, calc(100vh - ${COLUMN_DROPDOWN_MARGIN * 2}px))`,
+    maxWidth: `calc(100vw - ${COLUMN_DROPDOWN_MARGIN * 2}px)`,
+  }
+}
+
+const toggleColumnDropdown = async () => {
+  showColumnDropdown.value = !showColumnDropdown.value
+  if (!showColumnDropdown.value) return
+  updateColumnDropdownPosition()
+  await nextTick()
+  updateColumnDropdownPosition()
+}
+
 const handleColumnClickOutside = (event: MouseEvent) => {
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as HTMLElement)) {
+  const target = event.target as Node | null
+  if (!target) return
+  const clickedTrigger = columnDropdownRef.value?.contains(target)
+  const clickedMenu = columnDropdownMenuRef.value?.contains(target)
+  if (!clickedTrigger && !clickedMenu) {
     showColumnDropdown.value = false
   }
 }
+
+watch(showColumnDropdown, (isOpen) => {
+  if (isOpen) {
+    window.addEventListener('scroll', updateColumnDropdownPosition, true)
+    window.addEventListener('resize', updateColumnDropdownPosition)
+  } else {
+    window.removeEventListener('scroll', updateColumnDropdownPosition, true)
+    window.removeEventListener('resize', updateColumnDropdownPosition)
+  }
+})
 
 const loadApiKeys = async () => {
   const firstPage = await keysAPI.list(1, 100)
@@ -909,6 +993,8 @@ onMounted(() => {
 onUnmounted(() => {
   abortController?.abort()
   document.removeEventListener('click', handleColumnClickOutside)
+  window.removeEventListener('scroll', updateColumnDropdownPosition, true)
+  window.removeEventListener('resize', updateColumnDropdownPosition)
 })
 
 watch(endpointDistributionSource, () => {

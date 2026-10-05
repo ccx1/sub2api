@@ -903,6 +903,12 @@ export default {
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
+        prismBrowser: 'Use Prism browser protocol automatically',
+        prismBrowserBulk: 'Apply Prism settings in this update',
+        prismBrowserDesc: 'Uses this OpenAI OAuth account with the server-managed Prism adapter. Supports text for four models and client function/custom tools for 6.1 Sol.',
+        prismBrowserModels: 'Models to route through Prism',
+        prismBrowserModelsHint: 'Matches model names after account mapping. Only selected models use Prism; others keep their Codex / Excel routing. Selecting none disables Prism routing.',
+        prismBrowserManagedEndpoint: 'Enabled: requests are routed to the server-managed Prism adapter.',
         apiKeyHint: 'Your OpenAI API Key',
         oauthPassthrough: 'Auto passthrough (auth only)',
         excelBPS: 'Excel / BPS protocol',
@@ -1080,6 +1086,9 @@ export default {
         codexTicketPoolNextExpiry: 'Next expiry {time}',
         codexTicketHistoryCapturedAt: 'History ticket first captured: {time}',
         codexTicketHistoryRemaining: 'History ticket validity left: {time}',
+        codexTicketHistoryCountdown: 'Countdown {time}',
+        codexTicketHistoryHost: 'Current route host: {host}',
+        codexTicketHistoryNotUsed: 'Not used yet',
         codexTicketHistoryExpired: 'Expired',
         codexTicketHistoryUnknown: 'Unknown',
         codexTicketHistoryDaysHours: '{days}d {hours}h',
@@ -1106,6 +1115,7 @@ export default {
         codexTicketPrimaryExpired: 'Primary expired',
         codexTicketPrimaryCredential: 'Primary credentials mismatch',
         codexTicketPrimaryCookieMissing: 'Primary Cookie missing',
+        codexTicketPrimaryRouteCooldown: 'Primary cooling after same route',
         codexTicketPrimaryUnavailable: 'Primary unavailable',
         codexTicketPrimaryExpires: 'Primary expires: {time}',
         codexTurnTicketDesc: 'Ticket status for the configured models. Requests are paused without a valid ticket only when fail-closed is enabled.',
@@ -1317,6 +1327,10 @@ export default {
           cli: 'Grok Build CLI',
           official: 'Official API'
         }
+      },
+      grokSkipForbiddenPause: {
+        title: 'Keep scheduling after unclassified Grok 403',
+        hint: 'Off by default. Allows one alternate account for an unclassified inference 403 without pausing this account. Credentials, subscription, quota, content and administrator protections still apply.'
       },
       grokClientToolCache: {
         title: 'Client Tool Cache (May Change Automatic Tool Selection)',

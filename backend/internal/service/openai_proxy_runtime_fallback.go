@@ -131,6 +131,12 @@ func runtimeProxyErrorAttribution(account *Account, err error) (*int64, string) 
 // Keep plugin routing inside each attempt, including a preselected healthy
 // egress. No request is sent to both a plugin and the native transport.
 func (s *OpenAIGatewayService) doOpenAIProxyAttempt(req *http.Request, account *Account, target runtimeProxyEgress) (resp *http.Response, err error) {
+	if target.url == "" && (account.Proxy != nil || s.codexTicketPinsEgress(req, account)) {
+		// 已签发票据和明确的直连回退不能再次被地区路由替换出口。
+		req = req.WithContext(WithRegionalEgressBypass(req.Context()))
+	} else {
+		req = withAccountRegionalEgress(req, account)
+	}
 	req, timingTrace := requesttiming.StartAttempt(req, account.ID, target.proxyID)
 	defer func() { timingTrace.Response(resp, err) }()
 	defer func() {

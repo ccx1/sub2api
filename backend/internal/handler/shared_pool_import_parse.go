@@ -171,6 +171,11 @@ func normalizeSharedImportEntry(value any, defaults sharedImportDefaults, index 
 	if entry.input.Platform == service.PlatformOpenAI && entry.input.Type == service.AccountTypeOAuth {
 		entry.input.CodexTicketEnabled = defaults.CodexTicketEnabled
 		entry.input.ExcelBPSEnabled = defaults.ExcelBPSEnabled
+		entry.input.PrismBrowserEnabled = defaults.PrismBrowserEnabled
+		if defaults.PrismBrowserModels != nil {
+			models := append([]string{}, (*defaults.PrismBrowserModels)...)
+			entry.input.PrismBrowserModels = &models
+		}
 		if defaults.ExcelBPSEnabled != nil && *defaults.ExcelBPSEnabled && defaults.ExcelBPSOptions != nil {
 			options := *defaults.ExcelBPSOptions
 			if options.Models != nil {
@@ -183,6 +188,11 @@ func normalizeSharedImportEntry(value any, defaults sharedImportDefaults, index 
 	if objectValue && hasCredentials && entry.item.Message == "" {
 		if err := applySharedImportFileBPS(&entry.input, object); err != nil {
 			entry.item.Message = "文件中的 Excel / BPS 配置无效"
+		}
+	}
+	if objectValue && entry.item.Message == "" {
+		if err := applySharedImportFilePrism(&entry.input, object); err != nil {
+			entry.item.Message = "文件中的 Prism 配置无效"
 		}
 	}
 	for i, warning := range entry.warnings {

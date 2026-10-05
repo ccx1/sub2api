@@ -3163,6 +3163,13 @@
       </div>
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
+      <div v-if="form.platform === 'openai' && form.type === 'oauth'" class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="prismBrowserEnabled" type="checkbox" data-testid="create-prism-toggle" @change="prismBrowserTouched = true" />
+          <span>{{ t('admin.accounts.openai.prismBrowser') }}</span>
+        </label>
+        <PrismBrowserOptionsFields v-if="prismBrowserEnabled" v-model="prismBrowserOptions" test-id-prefix="create-prism" />
+      </div>
       <div v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="flex items-center justify-between gap-4">
@@ -4036,6 +4043,8 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import PrismBrowserOptionsFields from '@/components/account/PrismBrowserOptionsFields.vue'
+import { defaultPrismBrowserOptions, normalizePrismBrowserOptions } from '@/utils/prismBrowserOptions'
 import { defaultExcelBPSOptions, isKnownFreePlan, normalizeExcelBPSOptions } from '@/utils/excelBPSOptions'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -4547,6 +4556,9 @@ const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
 const excelBPSEnabled = ref(false)
+const prismBrowserEnabled = ref(false)
+const prismBrowserTouched = ref(false)
+const prismBrowserOptions = ref(defaultPrismBrowserOptions())
 const excelBPSTouched = ref(false)
 const excelBPSOptions = ref(defaultExcelBPSOptions())
 const excelBPSGroups = computed(() => props.groups
@@ -5570,6 +5582,9 @@ const resetForm = () => {
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
   excelBPSEnabled.value = false
+  prismBrowserEnabled.value = false
+  prismBrowserTouched.value = false
+  prismBrowserOptions.value = defaultPrismBrowserOptions()
   excelBPSTouched.value = false
   excelBPSOptions.value = defaultExcelBPSOptions()
   openAICompactMode.value = 'auto'
@@ -5640,6 +5655,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (form.type === 'oauth' && prismBrowserTouched.value) {
+    extra.openai_prism_browser = prismBrowserEnabled.value
+    extra.openai_prism_browser_models = prismBrowserEnabled.value ? normalizePrismBrowserOptions(prismBrowserOptions.value).models : []
+  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_excel_bps = excelBPSEnabled.value
     if (excelBPSEnabled.value) {

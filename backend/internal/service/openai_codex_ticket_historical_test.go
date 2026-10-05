@@ -20,12 +20,29 @@ func historicalTestConfig(capacity int) config.OpenAICodexTicketConfig {
 	})
 }
 
+func TestHistoricalTicketValidityStartsAfterFirstUse(t *testing.T) {
+	now := time.Now()
+	account := ticketTestAccount(41)
+	cfg := historicalTestConfig(1)
+	cfg.HistoricalTicketValiditySeconds = 300
+	ticket := usageTestTicket("U", 24*time.Hour, now)
+
+	require.Zero(t, ticket.historicalExpires(cfg))
+	require.True(t, ticket.usable(now, account, cfg), "未使用的历史票不应因采集时间过期")
+
+	ticket.HistoricalUsedAt = now
+	require.WithinDuration(t, now.Add(300*time.Second), ticket.historicalExpires(cfg), time.Second)
+	require.True(t, ticket.usable(now.Add(299*time.Second), account, cfg))
+	require.False(t, ticket.usable(now.Add(301*time.Second), account, cfg))
+}
+
 func TestHistoricalTicketUsesSevenDayOldStateUntilIndependentDeadline(t *testing.T) {
 	now := time.Now()
 	account := ticketTestAccount(41)
 	cfg := historicalTestConfig(2)
 	young := usageTestTicket("Y", time.Hour, now)
 	old := usageTestTicket("O", 7*24*time.Hour+time.Hour, now)
+	young.HistoricalUsedAt, old.HistoricalUsedAt = now, now
 	old.StateExpiresAt, old.ExpiresAt = now.Add(-6*24*time.Hour), now.Add(-6*24*time.Hour)
 	pool := usageTestPool(young, old)
 	require.False(t, old.valid(now, 292), "协议硬期限已过")
@@ -36,13 +53,13 @@ func TestHistoricalTicketUsesSevenDayOldStateUntilIndependentDeadline(t *testing
 	require.True(t, status.Ready)
 	require.Equal(t, "maturing", status.PrimaryReason)
 	require.False(t, status.PrimaryReady)
-	require.WithinDuration(t, young.CapturedAt.Add(8*24*time.Hour), *status.PrimaryExpiresAt, time.Second)
+	require.WithinDuration(t, now.Add(8*24*time.Hour), *status.PrimaryExpiresAt, time.Second)
 	require.Greater(t, status.PrimaryRemainingSeconds, int64(7*24*time.Hour/time.Second))
 	require.False(t, status.RevalidationRequired)
 	require.WithinDuration(t, old.CapturedAt, *status.OriginCapturedAt, time.Second)
-	require.WithinDuration(t, old.CapturedAt.Add(8*24*time.Hour), *status.ExpiresAt, time.Second)
-	require.InDelta(t, 23*3600, status.RemainingSeconds, 2)
-	require.Nil(t, selectOpenAICodexTicket(pool, account, cfg, old.CapturedAt.Add(8*24*time.Hour)))
+	require.WithinDuration(t, now.Add(8*24*time.Hour), *status.ExpiresAt, time.Second)
+	require.InDelta(t, 8*24*3600, status.RemainingSeconds, 2)
+	require.Nil(t, selectOpenAICodexTicket(pool, account, cfg, now.Add(8*24*time.Hour)))
 	youngOnly := codexTicketPoolStatus(usageTestModel, usageTestPool(young), account, cfg, now)
 	require.False(t, youngOnly.Ready)
 	require.True(t, youngOnly.Blocked)
@@ -56,6 +73,7 @@ func TestHistoricalCookieFollowsTicketWindowOnOutboundRequest(t *testing.T) {
 	cfg := historicalTestConfig(1)
 	cfg.CredentialMode = config.CodexTicketCredentialCookie
 	ticket := usageTestTicket("C", 7*24*time.Hour+time.Hour, now)
+	ticket.HistoricalUsedAt = now
 	ticket.State, ticket.Length, ticket.CredentialMode = "", 0, config.CodexTicketCredentialCookie
 	ticket.Cookies = []*http.Cookie{{Name: "session", Value: "old", Domain: "chatgpt.com", Path: "/backend-api", Secure: true, Expires: now.Add(-time.Hour)}}
 	selected := selectOpenAICodexTicket(ticket, account, cfg, now)
@@ -73,6 +91,7 @@ func TestHistoricalStatusReportsSelectedTicketAndRecentHarvestAttempt(t *testing
 	account := ticketTestAccount(41)
 	young := usageTestTicket("Y", time.Hour, now)
 	old := usageTestTicket("O", 7*24*time.Hour+time.Hour, now)
+	old.HistoricalUsedAt = now
 	attempt := CodexTicketAttempt{Model: usageTestModel, StartedAt: now.Add(-time.Minute), Reason: "verified", Success: true}
 	account.Extra = map[string]any{
 		openAICodexTicketExtraKey(usageTestModel): usageTestPool(young, old),
@@ -82,7 +101,7 @@ func TestHistoricalStatusReportsSelectedTicketAndRecentHarvestAttempt(t *testing
 	require.Equal(t, config.CodexTicketUsageAged, status.UsageMode)
 	require.True(t, status.Ready)
 	require.WithinDuration(t, old.CapturedAt, *status.OriginCapturedAt, time.Second)
-	require.WithinDuration(t, old.CapturedAt.Add(8*24*time.Hour), *status.ExpiresAt, time.Second)
+	require.WithinDuration(t, now.Add(8*24*time.Hour), *status.ExpiresAt, time.Second)
 	require.WithinDuration(t, attempt.StartedAt, *status.LastAttemptAt, time.Second)
 	require.True(t, *status.LastAttemptSuccess)
 	require.Equal(t, "verified", status.LastAttemptReason)

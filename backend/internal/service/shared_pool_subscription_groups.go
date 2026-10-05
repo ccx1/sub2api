@@ -30,7 +30,17 @@ func canonicalSharedSubscriptionTier(platform, raw string) string {
 			return "prolite"
 		case "selfservebusinessprolite":
 			return "self_serve_business_prolite"
-		case "free", "plus", "pro", "prolite", "team", "business", "enterprise":
+		case "selfservebusinessusagebased":
+			return "self_serve_business_usage_based"
+		case "enterprisecbpusagebased":
+			return "enterprise_cbp_usage_based"
+		case "enterprisecbpautomation":
+			return "enterprise_cbp_automation"
+		case "eduplus":
+			return "edu_plus"
+		case "edupro":
+			return "edu_pro"
+		case "free", "go", "plus", "pro", "prolite", "promax", "team", "business", "enterprise", "ent26", "edu":
 			return value
 		}
 	case PlatformGemini:

@@ -122,7 +122,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = s.httpUpstream.Do(withAccountRegionalEgress(upstreamReq, account), proxyURL, account.ID, account.Concurrency)
 		if resp != nil {
 			RecordRandomProxyUsage(ctx, account, s.accountRepo)
 		} else if proxyURL != "" {

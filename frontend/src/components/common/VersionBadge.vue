@@ -81,15 +81,18 @@
             <template v-else>
               <div class="mb-4 space-y-3">
                 <VersionSourceCard
-                  :title="t('version.localVersion')"
-                  :source="localVersionInfo"
-                  :hint="t('version.localUpdateHint')"
+                  kind="official"
+                  :title="t('version.officialVersion')"
+                  :source="appStore.officialVersionInfo"
+                  :hint="t('version.officialMergeHint')"
                 />
                 <VersionSourceCard
                   kind="ranxi"
                   :title="t('version.ranxiVersion')"
                   :source="appStore.ranxiVersionInfo"
                   :hint="t('version.ranxiMergeHint')"
+                  :ignored="ranxiVersionIgnored"
+                  @update:ignored="setRanxiVersionIgnore"
                 />
               </div>
               <p class="mb-2 text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('version.localActions') }}</p>
@@ -622,6 +625,7 @@ import Icon from '@/components/icons/Icon.vue'
 import VersionSourceCard from './VersionSourceCard.vue'
 
 const GITHUB_REPO = 'ccx1/sub2api'
+const RANXI_IGNORED_VERSION_STORAGE_KEY = 'version.ranxi.ignored_candidate'
 
 const { t } = useI18n()
 
@@ -642,25 +646,32 @@ const loading = computed(() => appStore.versionLoading)
 const currentVersion = computed(() => appStore.currentVersion || props.version || '')
 const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate && !!latestVersion.value && (!appStore.versionWarning || appStore.versionCached))
-const hasRanxiUpdate = computed(() => {
-  const source = appStore.ranxiVersionInfo
+const officialSource = computed(() => appStore.officialVersionInfo)
+const hasOfficialUpdate = computed(() => {
+  const source = officialSource.value
   return !!source?.has_update && !!source.latest_version && (!source.warning || source.cached)
 })
-const hasAnyUpdate = computed(() => hasUpdate.value || hasRanxiUpdate.value)
+const ranxiSource = computed(() => appStore.ranxiVersionInfo)
+const ranxiLatestVersion = computed(() => ranxiSource.value?.latest_version?.trim() || '')
+const hasRanxiUpdate = computed(() => {
+  const source = ranxiSource.value
+  return !!source?.has_update && !!ranxiLatestVersion.value && (!source.warning || source.cached)
+})
+const ranxiUpdateCandidate = computed(() => {
+  const repository = ranxiSource.value?.repository?.trim() || 'ranxi2001/sub2api'
+  return ranxiLatestVersion.value ? `${repository}@${ranxiLatestVersion.value}` : ''
+})
+const ignoredRanxiCandidate = ref(readIgnoredRanxiVersion())
+const ranxiVersionIgnored = computed(() => hasRanxiUpdate.value && ignoredRanxiCandidate.value === ranxiUpdateCandidate.value)
+const hasAnyUpdate = computed(() => hasUpdate.value || hasOfficialUpdate.value || (hasRanxiUpdate.value && !ranxiVersionIgnored.value))
 const updateTitle = computed(() => {
-  if (hasUpdate.value && hasRanxiUpdate.value) return t('version.bothUpdatesTitle')
+  if (hasOfficialUpdate.value && (hasUpdate.value || (hasRanxiUpdate.value && !ranxiVersionIgnored.value))) return t('version.multipleUpdatesTitle')
+  if (hasUpdate.value && hasRanxiUpdate.value && !ranxiVersionIgnored.value) return t('version.bothUpdatesTitle')
   if (hasUpdate.value) return t('version.localUpdateTitle')
-  if (hasRanxiUpdate.value) return t('version.ranxiUpdateTitle')
+  if (hasOfficialUpdate.value) return t('version.officialUpdateTitle')
+  if (hasRanxiUpdate.value && !ranxiVersionIgnored.value) return t('version.ranxiUpdateTitle')
   return t('version.versionDetails')
 })
-const localVersionInfo = computed(() => ({
-  current_version: currentVersion.value,
-  latest_version: latestVersion.value,
-  has_update: hasUpdate.value,
-  release_info: appStore.releaseInfo || undefined,
-  cached: appStore.versionCached,
-  warning: appStore.versionWarning
-}))
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
 
@@ -700,6 +711,30 @@ function toggleDropdown() {
 
 function closeDropdown() {
   dropdownOpen.value = false
+}
+
+function readIgnoredRanxiVersion(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(RANXI_IGNORED_VERSION_STORAGE_KEY)?.trim() || ''
+  } catch {
+    return ''
+  }
+}
+
+function setRanxiVersionIgnore(ignored: boolean) {
+  if (!hasRanxiUpdate.value || !ranxiUpdateCandidate.value) return
+  try {
+    if (ignored) {
+      window.localStorage.setItem(RANXI_IGNORED_VERSION_STORAGE_KEY, ranxiUpdateCandidate.value)
+      ignoredRanxiCandidate.value = ranxiUpdateCandidate.value
+    } else {
+      window.localStorage.removeItem(RANXI_IGNORED_VERSION_STORAGE_KEY)
+      ignoredRanxiCandidate.value = ''
+    }
+  } catch {
+    // 浏览器禁用持久化时保持当前提醒状态，避免把一次点击伪装为已忽略。
+  }
 }
 
 async function refreshVersion(force = true) {

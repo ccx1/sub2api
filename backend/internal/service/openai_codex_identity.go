@@ -171,6 +171,25 @@ func codexClientVersionFromUA(ua string) string {
 	return version
 }
 
+// applyOpenAIAPIKeyIdentityHeaders keeps standard OpenAI API-key requests on
+// the same canonical client identity as OAuth forwarding. Provider-specific
+// headers and explicit account overrides are applied afterward.
+func applyOpenAIAPIKeyIdentityHeaders(h http.Header, account *Account, overrideUA string) {
+	if h == nil || account == nil || !account.IsOpenAIApiKey() || !codexIdentityEnforcement.Load() {
+		return
+	}
+	identity := resolveCodexOutboundIdentity(overrideUA)
+	for key := range h {
+		switch strings.ToLower(key) {
+		case "user-agent", "originator", "version":
+			delete(h, key)
+		}
+	}
+	h.Set("User-Agent", identity.userAgent)
+	h.Set("Originator", identity.originator)
+	h.Set("Version", identity.version)
+}
+
 // ensureCodexIdentityHeaders 补齐 OAuth（ChatGPT 内部接口）出站请求所需的 Codex 身份头。
 // 已有 User-Agent 与 version 保持不变，交给紧随其后的 enforceCodexIdentityHeaders 收口。
 func ensureCodexIdentityHeaders(h http.Header) {

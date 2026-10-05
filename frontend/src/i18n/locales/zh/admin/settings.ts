@@ -1,5 +1,14 @@
 export default {
     settings: {
+      prismBrowser: {
+        title: 'Prism 浏览器桥',
+        enabled: '启用',
+        baseURL: '适配器地址',
+        apiKey: '桥接 API Key',
+        keepKey: '留空保留当前密钥',
+        keyConfigured: '适配器密钥已配置',
+        keyMissing: '适配器密钥未配置，需与适配器使用同一密钥',
+      },
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {

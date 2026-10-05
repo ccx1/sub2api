@@ -586,6 +586,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.validateCodexTicketProxyAccountUpdate(ctx, account, account.Extra); err != nil {
 		return nil, err
 	}
+	if err := ValidatePrismBrowserAccount(account); err != nil {
+		return nil, err
+	}
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
@@ -830,6 +833,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
 	}
 	account.Extra = NormalizeProxyModeExtra(account.Extra)
+	if err := ValidatePrismBrowserAccount(account); err != nil {
+		return nil, err
+	}
 	BoundAccountProtectionConcurrency(account)
 	if err := ValidateAccountProtectionConfiguration(account); err != nil {
 		return nil, err
@@ -1053,6 +1059,24 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	ctx = WithAccountProxyRegionWrite(ctx, updates)
+	if hasAccountImportExtra(updates, PrismBrowserExtraKeys()) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := NormalizePrismBrowserExtra(updates); err != nil {
+			return err
+		}
+		candidate := *account
+		candidate.Extra = cloneAccountImportMap(account.Extra)
+		if candidate.Extra == nil {
+			candidate.Extra = map[string]any{}
+		}
+		maps.Copy(candidate.Extra, updates)
+		if err := ValidatePrismBrowserAccount(&candidate); err != nil {
+			return err
+		}
+	}
 	routingUpdates := maps.Clone(updates)
 	if hasRandomProxyGroupUpdates(updates) {
 		account, err := s.accountRepo.GetByID(ctx, id)

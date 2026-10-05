@@ -4,6 +4,7 @@ import SharedAccountDialog from '../SharedAccountDialog.vue'
 import SharedAccountImportDialog from '../SharedAccountImportDialog.vue'
 import SharedCredentialsForm from '../SharedCredentialsForm.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import PrismBrowserOptionsFields from '@/components/account/PrismBrowserOptionsFields.vue'
 import type { SharedAccount, SharedConfig, SharedImportDefaults } from '@/api/sharedPool'
 import { defaultExcelBPSOptions, type ExcelBPSOptions } from '@/utils/excelBPSOptions'
 
@@ -15,7 +16,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: { grok: { getCapabilities: vi.fn() } }
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copied: false, copyToClipboard: vi.fn() }) }))
 vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { props: ['modelValue'], emits: ['update:modelValue'], template: '<div />' } }))
 
-type GlobalDefaults = { protection_enabled: boolean; codex_ticket_enabled: boolean; excel_bps_enabled: boolean; excel_bps_options: ExcelBPSOptions }
+type GlobalDefaults = { protection_enabled: boolean; codex_ticket_enabled: boolean; excel_bps_enabled: boolean; excel_bps_options: ExcelBPSOptions; prism_browser_enabled?: boolean; prism_browser_models?: string[] }
 const configured: GlobalDefaults = {
   protection_enabled: false, codex_ticket_enabled: false, excel_bps_enabled: true,
   excel_bps_options: {
@@ -64,6 +65,43 @@ describe('shared account global import defaults', () => {
     importAccounts.mockResolvedValue({ total: 1, created: 1, failed: 0, items: [], warnings: [] })
   })
   afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount() })
+
+  it('creates and imports with an explicit Prism scope ahead of global defaults', async () => {
+    const global = { ...configured, prism_browser_enabled: true, prism_browser_models: ['gpt-6.1-sol'] }
+    const wrapper = creation(global)
+    expect(wrapper.getComponent(PrismBrowserOptionsFields).props('modelValue')).toEqual({ models: ['gpt-6.1-sol'] })
+    expect(await saveCreation(wrapper)).toMatchObject({ prism_browser_enabled: true, prism_browser_models: ['gpt-6.1-sol'] })
+    const scoped = importing(global, { concurrency: 1, enabled: true, protection_enabled: true, prism_browser_enabled: true, prism_browser_models: [] })
+    expect(await saveImport(scoped)).toMatchObject({ prism_browser_enabled: true, prism_browser_models: [] })
+    const disabled = importing(global, { concurrency: 1, enabled: true, protection_enabled: true, prism_browser_enabled: false })
+    expect(await saveImport(disabled)).toMatchObject({ prism_browser_enabled: false, prism_browser_models: [] })
+  })
+
+  it('edits Prism only after a local change and clears its scope when disabled', async () => {
+    const account = { id: 7, name: 'Existing', platform: 'openai', type: 'oauth', concurrency: 4, enabled: false, protection_enabled: true,
+      prism_browser_enabled: true, prism_browser_models: ['gpt-5.6-sol'] } as SharedAccount
+    const wrapper = creation({ ...configured, prism_browser_enabled: true, prism_browser_models: ['gpt-6.1-sol'] }, account)
+    expect(wrapper.getComponent(PrismBrowserOptionsFields).props('modelValue')).toEqual({ models: ['gpt-5.6-sol'] })
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(update.mock.lastCall?.[1]).not.toHaveProperty('prism_browser_enabled')
+    await wrapper.get('[data-testid="shared-prism-model-gpt-6-luna"]').setValue(true)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(update.mock.lastCall?.[1]).toMatchObject({ prism_browser_enabled: true, prism_browser_models: ['gpt-5.6-sol', 'gpt-6-luna'] })
+    await wrapper.get('#shared-prism').trigger('click')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(update.mock.lastCall?.[1]).toMatchObject({ prism_browser_enabled: false, prism_browser_models: [] })
+  })
+
+  it('omits Prism for API-key and other platform account creation', async () => {
+    const wrapper = creation({ ...configured, prism_browser_enabled: true, prism_browser_models: ['gpt-6.1-sol'] })
+    for (const selector of ['[data-account-type="apikey"]', '[data-platform="anthropic"]']) {
+      await wrapper.get(selector).trigger('click')
+      expect(wrapper.find('#shared-prism').exists()).toBe(false)
+      const payload = await saveCreation(wrapper)
+      expect(payload).not.toHaveProperty('prism_browser_enabled')
+      expect(payload).not.toHaveProperty('prism_browser_models')
+    }
+  })
 
   it('seeds creation with only the approved global fields and retains shared rules', async () => {
     const wrapper = creation(configured)

@@ -17,6 +17,12 @@ func TestCodexTicketUsageSettingsPersistenceAndLegacyRead(t *testing.T) {
 	require.Equal(t, config.CodexTicketUsageImmediate, legacy.UsageMode, "默认即取即用")
 	require.Zero(t, legacy.MinTicketAgeSeconds)
 	require.False(t, legacy.ConsumeAfterUse)
+	require.False(t, legacy.SkipSameRouteHost)
+	require.Equal(t, 1, legacy.SameRouteCooldownHours)
+	require.False(t, legacy.HistoricalQualityEnabled)
+	require.Equal(t, 120, legacy.HistoricalQualityCheckBeforeSeconds)
+	require.Equal(t, 30, legacy.HistoricalQualityCheckIntervalSeconds)
+	require.Equal(t, 30, legacy.HistoricalQualityExtendSeconds)
 
 	// 升级前保存的规则没有取票字段，读取后按即取即用处理。
 	encoded, err := json.Marshal(legacy)
@@ -24,7 +30,8 @@ func TestCodexTicketUsageSettingsPersistenceAndLegacyRead(t *testing.T) {
 	var document map[string]any
 	require.NoError(t, json.Unmarshal(encoded, &document))
 	require.Equal(t, config.CodexTicketUsageImmediate, document["usage_mode"])
-	for _, key := range []string{"usage_mode", "min_ticket_age_seconds", "consume_after_use"} {
+	for _, key := range []string{"usage_mode", "min_ticket_age_seconds", "consume_after_use", "skip_same_route_host", "same_route_cooldown_hours",
+		"historical_quality_enabled", "historical_quality_check_before_seconds", "historical_quality_check_interval_seconds", "historical_quality_extend_seconds"} {
 		delete(document, key)
 	}
 	encoded, err = json.Marshal(document)
@@ -35,8 +42,15 @@ func TestCodexTicketUsageSettingsPersistenceAndLegacyRead(t *testing.T) {
 	require.Equal(t, config.CodexTicketUsageImmediate, loaded.UsageMode)
 	require.Zero(t, loaded.MinTicketAgeSeconds)
 	require.False(t, loaded.ConsumeAfterUse)
+	require.False(t, loaded.SkipSameRouteHost)
+	require.Equal(t, 1, loaded.SameRouteCooldownHours)
+	require.False(t, loaded.HistoricalQualityEnabled)
+	require.Equal(t, 120, loaded.HistoricalQualityCheckBeforeSeconds)
 
 	loaded.UsageMode, loaded.MinTicketAgeSeconds, loaded.ConsumeAfterUse = config.CodexTicketUsageAged, 300, true
+	loaded.SkipSameRouteHost, loaded.SameRouteCooldownHours = true, 6
+	loaded.HistoricalQualityEnabled = true
+	loaded.HistoricalQualityCheckBeforeSeconds, loaded.HistoricalQualityCheckIntervalSeconds, loaded.HistoricalQualityExtendSeconds = 300, 60, 45
 	stored, err := svc.UpdateCodexTicketSettings(ctx, loaded)
 	require.NoError(t, err)
 	require.Equal(t, config.CodexTicketUsageAged, stored.UsageMode)
@@ -44,6 +58,12 @@ func TestCodexTicketUsageSettingsPersistenceAndLegacyRead(t *testing.T) {
 	require.Equal(t, config.CodexTicketUsageAged, runtime.UsageMode)
 	require.Equal(t, 300, runtime.MinTicketAgeSeconds)
 	require.True(t, runtime.ConsumeAfterUse)
+	require.True(t, runtime.SkipSameRouteHost)
+	require.Equal(t, 6, runtime.SameRouteCooldownHours)
+	require.True(t, runtime.HistoricalQualityEnabled)
+	require.Equal(t, 300, runtime.HistoricalQualityCheckBeforeSeconds)
+	require.Equal(t, 60, runtime.HistoricalQualityCheckIntervalSeconds)
+	require.Equal(t, 45, runtime.HistoricalQualityExtendSeconds)
 
 	restarted := NewSettingService(repo, svc.cfg)
 	reloaded, err := restarted.GetCodexTicketSettings(ctx)
@@ -51,6 +71,12 @@ func TestCodexTicketUsageSettingsPersistenceAndLegacyRead(t *testing.T) {
 	require.Equal(t, config.CodexTicketUsageAged, reloaded.UsageMode)
 	require.Equal(t, 300, reloaded.MinTicketAgeSeconds)
 	require.True(t, reloaded.ConsumeAfterUse)
+	require.True(t, reloaded.SkipSameRouteHost)
+	require.Equal(t, 6, reloaded.SameRouteCooldownHours)
+	require.True(t, reloaded.HistoricalQualityEnabled)
+	require.Equal(t, 300, reloaded.HistoricalQualityCheckBeforeSeconds)
+	require.Equal(t, 60, reloaded.HistoricalQualityCheckIntervalSeconds)
+	require.Equal(t, 45, reloaded.HistoricalQualityExtendSeconds)
 }
 
 func TestCodexTicketUsageSettingsValidation(t *testing.T) {

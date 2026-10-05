@@ -44,6 +44,7 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  const officialVersionInfo = ref<VersionSourceInfo | null>(null)
   const ranxiVersionInfo = ref<VersionSourceInfo | null>(null)
   const versionWarning = ref('')
   const versionCached = ref(false)
@@ -253,6 +254,7 @@ export const useAppStore = defineStore('app', () => {
         has_update: hasUpdate.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
+        official: officialVersionInfo.value || undefined,
         ranxi: ranxiVersionInfo.value || undefined,
         warning: versionWarning.value || undefined,
         cached: true
@@ -272,15 +274,20 @@ export const useAppStore = defineStore('app', () => {
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
+      officialVersionInfo.value = data.official || null
       ranxiVersionInfo.value = data.ranxi || null
       versionWarning.value = data.warning || ''
       versionCached.value = data.cached
-      versionLoaded.value = !data.warning && !data.ranxi?.warning
+      versionLoaded.value = !data.warning && !data.official?.warning && !data.ranxi?.warning
       return data
     } catch (error) {
       console.error('Failed to fetch version:', error)
       versionWarning.value = i18n.global.t('version.checkFailed')
       versionCached.value = !!latestVersion.value
+      if (officialVersionInfo.value) {
+        officialVersionInfo.value = { ...officialVersionInfo.value,
+          cached: !!officialVersionInfo.value.latest_version, warning: versionWarning.value }
+      }
       if (ranxiVersionInfo.value) {
         ranxiVersionInfo.value = { ...ranxiVersionInfo.value,
           cached: !!ranxiVersionInfo.value.latest_version, warning: versionWarning.value }
@@ -298,6 +305,7 @@ export const useAppStore = defineStore('app', () => {
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    officialVersionInfo.value = null
     ranxiVersionInfo.value = null
     versionWarning.value = ''
     versionCached.value = false
@@ -476,6 +484,7 @@ export const useAppStore = defineStore('app', () => {
     cachedPublicSettings,
 
     // Version state
+    officialVersionInfo,
     ranxiVersionInfo,
     versionWarning,
     versionCached,

@@ -269,7 +269,7 @@ export interface PublicSettings {
   balance_low_notify_threshold: number
   channel_monitor_enabled: boolean
   /** Exclusive mode: v1 active probes or v2 passive aggregation. Default v2. */
-  channel_monitor_mode?: 'v1' | 'v2'
+  channel_monitor_mode?: 'v1' | 'v2' | 'v3'
   channel_monitor_default_interval_seconds: number
   /** When true, user monitor hides RPM/TPM so scale cannot be reverse-estimated. */
   channel_monitor_hide_throughput?: boolean
@@ -1400,13 +1400,15 @@ export interface Account {
   ollama_cloud_usage?: OllamaCloudUsageState
   codex_turn_tickets?: Array<{
     model: string
-    usage_mode?: 'immediate' | 'aged'
+    usage_mode?: 'latest_only' | 'immediate' | 'aged'
     length?: number
     ready: boolean
     remaining_seconds: number
     blocked: boolean
     expires_at?: string
     origin_captured_at?: string
+    historical_used_at?: string
+    route_host?: string
     last_attempt_at?: string
     last_attempt_success?: boolean
     last_attempt_reason?: string
@@ -2757,10 +2759,13 @@ export interface QualityJudgment {
 export interface QualityPolicy {
   judge?: QualityJudgeConfig
   expected_answer: string
-  action: 'remove_groups' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
+  action: 'remove_groups' | 'disable_scheduling' | 'enable_bps' | 'observe_only' | 'remove_models'
   remove_group_ids: number[]
   auto_restore: boolean
   bps?: QualityBPSPolicy
+  trigger_on_upstream_5xx?: boolean
+  remove_models?: string[]
+  recovery_concurrency?: number
 }
 
 export interface QualityBPSPolicy {
@@ -2783,6 +2788,10 @@ export interface QualityBPSPolicy {
 }
 
 export interface PelicanTestConfig {
+  model_ids?: string[]
+  quality_model_outcomes?: Record<string, string>
+  quality_model_actions?: Record<string, string>
+  trigger_source?: string
   quality?: QualityPolicy
   question_kind?: 'candy' | 'pelican' | 'state_probe'
   test_channel?: string

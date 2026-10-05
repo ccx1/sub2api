@@ -47,7 +47,8 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		proxyURL: upstreamModelsProxyURL(account), accountID: account.ID,
 		credentialAccountID: credentialAccount.ID, credentialAccount: credentialAccount,
 		accountConcurrency: account.Concurrency, useAPIKeyUpstream: true,
-		standardModelsList: true,
+		standardModelsList:   true,
+		regionalEgressBypass: RegionalEgressBypassFromContext(WithRegionalEgressBypassForAccount(ctx, account)),
 	}
 	response, err := s.fetchCachedOpenAIModels(ctx, request, func(fetchCtx context.Context, etag string) (*OpenAIModelsResponse, error) {
 		response, err := s.fetchOpenAIModelsUpstream(fetchCtx, request, etag)

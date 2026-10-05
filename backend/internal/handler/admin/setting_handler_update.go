@@ -23,6 +23,9 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	PrismBrowserEnabled bool   `json:"prism_browser_enabled"`
+	PrismBrowserBaseURL string `json:"prism_browser_base_url"`
+	PrismBrowserAPIKey  string `json:"prism_browser_api_key"`
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
@@ -244,6 +247,7 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
+	UpstreamErrorRetry                    *service.UpstreamErrorRetrySettings `json:"upstream_error_retry"`
 	OpenAITTFTMode                         *string `json:"openai_ttft_mode"`
 	EnableFingerprintUnification           *bool   `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough              *bool   `json:"enable_metadata_passthrough"`
@@ -593,6 +597,26 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	previousAuthSourceDefaults, err := h.settingService.GetAuthSourceDefaultSettings(c.Request.Context())
+	if _, sent := sentFields[service.SettingKeyPrismBrowserEnabled]; !sent {
+		req.PrismBrowserEnabled = previousSettings.PrismBrowserEnabled
+	}
+	if _, sent := sentFields[service.SettingKeyPrismBrowserBaseURL]; !sent {
+		req.PrismBrowserBaseURL = previousSettings.PrismBrowserBaseURL
+	}
+	if req.PrismBrowserAPIKey != "" && len(strings.TrimSpace(req.PrismBrowserAPIKey)) < 32 {
+		response.BadRequest(c, "Prism bridge API key must contain at least 32 characters")
+		return
+	}
+	prismKey := strings.TrimSpace(req.PrismBrowserAPIKey)
+	if prismKey == "" {
+		prismKey = previousSettings.PrismBrowserAPIKey
+	}
+	if _, enabledSent := sentFields[service.SettingKeyPrismBrowserEnabled]; enabledSent || req.PrismBrowserAPIKey != "" || sentFields[service.SettingKeyPrismBrowserBaseURL] != nil {
+		if prismErr := service.ValidatePrismBrowserRuntime(service.PrismBrowserRuntime{Enabled: req.PrismBrowserEnabled, BaseURL: strings.TrimSpace(req.PrismBrowserBaseURL), APIKey: prismKey}); prismErr != nil {
+			response.BadRequest(c, prismErr.Error())
+			return
+		}
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1618,6 +1642,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
 
 		RegistrationEnabled:                 req.RegistrationEnabled,
+		PrismBrowserEnabled:                 req.PrismBrowserEnabled,
+		PrismBrowserBaseURL:                 req.PrismBrowserBaseURL,
+		PrismBrowserAPIKey:                  req.PrismBrowserAPIKey,
 		EmailVerifyEnabled:                  req.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:    req.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled: registrationEmailDomainQuotaEnabled,
@@ -1903,6 +1930,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.OpenAITTFTMode
 			}
 			return previousSettings.OpenAITTFTMode
+		}(),
+		UpstreamErrorRetry: func() *service.UpstreamErrorRetrySettings {
+			if req.UpstreamErrorRetry != nil {
+				return req.UpstreamErrorRetry
+			}
+			return previousSettings.UpstreamErrorRetry
 		}(),
 		EnableMetadataPassthrough: func() bool {
 			if req.EnableMetadataPassthrough != nil {
@@ -2440,6 +2473,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	harvestProxyURL, harvestProxyMode, harvestProxyID := h.codexTicketHarvestProxyView(c.Request.Context(), updatedSettings)
 
 	payload := dto.SystemSettings{
+		PrismBrowserEnabled:                                    updatedSettings.PrismBrowserEnabled,
+		PrismBrowserBaseURL:                                    updatedSettings.PrismBrowserBaseURL,
+		PrismBrowserAPIKeyConfigured:                           updatedSettings.PrismBrowserAPIKeyConfigured,
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,
@@ -2592,6 +2628,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                                   updatedSettings.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:                            updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                                     updatedSettings.BackendModeEnabled,
+		UpstreamErrorRetry:                                     updatedSettings.UpstreamErrorRetry,
 		EnableFingerprintUnification:                           updatedSettings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                       updatedSettings.EnableCCHSigning,

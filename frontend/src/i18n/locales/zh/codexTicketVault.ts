@@ -10,7 +10,7 @@ export default {
     revokeRemaining: '仍有 {count} 张票未能写入作废标记（本机已停用），请稍后重试。',
     seconds: '{count} 秒',
     summary: { total: '存票', available: '可用', maturing: '沉淀中' },
-    usageModes: { immediate: '即取即用', aged: '使用沉淀后的票' },
+    usageModes: { immediate: '主票 + 备用', latest_only: '仅最新票', aged: '使用沉淀后的票' },
     fields: {
       ticketEnabled: '账号打票', harvestEnabled: '账号采集', configEnabled: '全局打票', proxy: '代理', credentialMode: '凭据模式',
       poolCapacity: '旧版每模型容量', accountPoolCapacity: '账号总容量', ttl: '票据 TTL', cookieTtl: 'Cookie 保留时间', usageMode: '取票机制', minAge: '最小票龄', historicalValidity: '历史票有效期',
@@ -23,7 +23,7 @@ export default {
     },
     credentialState: 'STATE 长度 {length}', credentialCookies: 'Cookie：{names}', remaining: '剩余 {count} 秒', origin: '首次采集 {time}',
     statuses: {
-      available: '可用', maturing: '沉淀中', revoked: '已作废', consumed: '已使用', binding: '绑定不匹配', credential: '凭据模式不匹配',
+      available: '可用', not_selected: '仅最新模式未选中', maturing: '沉淀中', revoked: '已作废', consumed: '已使用', binding: '绑定不匹配', credential: '凭据模式不匹配',
       cookie_missing: '缺少 Cookie', expired: '已过期', unverified: '未验证', unavailable: '不可用'
     },
     reasons: { admin_revoked: '管理员在票库作废' },

@@ -50,6 +50,13 @@ describe('shared account resource overview', () => {
     expect(cards[1].get('[data-test="tier-status"]').text()).toBe('sharedPool.overviewAvailable')
   })
 
+  it('shows all Pro SKU capacities as separate tiers with their current labels', () => {
+    const wrapper = render(overview({ tiers: ['prolite', 'pro', 'promax'].map(value => tier({ tier: value })) }))
+    expect(wrapper.findAll('[data-test="tier-card"]').map(card => card.get('h3').text())).toEqual([
+      'Pro 100', 'Pro 200', 'Pro 500'
+    ])
+  })
+
   it('marks a stale snapshot and hides availability and concurrent use while retaining account totals', () => {
     const wrapper = render(overview(), true)
     expect(wrapper.get('[role="status"]').text()).toContain('sharedPool.overviewStale')

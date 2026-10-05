@@ -15,12 +15,14 @@ import (
 // Process-local only: multi-instance deployments each learn the block from their
 // own 429s. Prefer short TTLs so drift self-heals.
 type grokTeamModelRateLimit struct {
-	Until time.Time
+	Until    time.Time
+	Sequence uint64
 }
 
 type grokTeamModelRateLimitStore struct {
-	mu    sync.Mutex
-	items map[string]grokTeamModelRateLimit
+	mu       sync.Mutex
+	items    map[string]grokTeamModelRateLimit
+	sequence uint64
 }
 
 var globalGrokTeamModelRateLimits = &grokTeamModelRateLimitStore{
@@ -75,10 +77,13 @@ func markGrokTeamModelRateLimit(account *Account, model string, until time.Time)
 	key := grokTeamModelRateLimitKey(fp, model)
 	globalGrokTeamModelRateLimits.mu.Lock()
 	defer globalGrokTeamModelRateLimits.mu.Unlock()
+	globalGrokTeamModelRateLimits.sequence++
 	if cur, ok := globalGrokTeamModelRateLimits.items[key]; ok && cur.Until.After(until) {
+		cur.Sequence = globalGrokTeamModelRateLimits.sequence
+		globalGrokTeamModelRateLimits.items[key] = cur
 		return
 	}
-	globalGrokTeamModelRateLimits.items[key] = grokTeamModelRateLimit{Until: until}
+	globalGrokTeamModelRateLimits.items[key] = grokTeamModelRateLimit{Until: until, Sequence: globalGrokTeamModelRateLimits.sequence}
 	// Opportunistic prune of expired entries.
 	for k, v := range globalGrokTeamModelRateLimits.items {
 		if !v.Until.After(now) {
@@ -138,7 +143,7 @@ func filterGrokTeamModelRateLimitedAccounts(accounts []Account, model string, no
 // resolveGrokTeamRateLimitUntil derives a team cool window from an observed
 // account rate-limit reset, with sane clamps.
 func resolveGrokTeamRateLimitUntil(resetAt, now time.Time) time.Time {
-	if resetAt.After(now.Add(grokTeamRateLimitMinTTL)) {
+	if resetAt.After(now) {
 		maxUntil := now.Add(grokTeamRateLimitMaxTTL)
 		if resetAt.After(maxUntil) {
 			return maxUntil

@@ -76,6 +76,7 @@ func (s *OpenAIGatewayService) scanCodexModelQuality(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			s.scheduleHistoricalQualityExtension(ctx, &accounts[i], model, p)
 			result := s.scheduleCodexModelQuality(ctx, &accounts[i], model, "automatic", p)
 			switch result.Reason {
 			case "capacity":

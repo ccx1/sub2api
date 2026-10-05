@@ -13,10 +13,12 @@ type sharedAccountImportSettings interface {
 
 // 只公开共享池允许继承的配置，代理和分组仍由共享池自己的规则决定。
 type sharedAccountImportDefaults struct {
-	ProtectionEnabled  bool                    `json:"protection_enabled"`
-	CodexTicketEnabled bool                    `json:"codex_ticket_enabled"`
-	ExcelBPSEnabled    bool                    `json:"excel_bps_enabled"`
-	ExcelBPSOptions    service.ExcelBPSOptions `json:"excel_bps_options"`
+	ProtectionEnabled   bool                    `json:"protection_enabled"`
+	CodexTicketEnabled  bool                    `json:"codex_ticket_enabled"`
+	ExcelBPSEnabled     bool                    `json:"excel_bps_enabled"`
+	ExcelBPSOptions     service.ExcelBPSOptions `json:"excel_bps_options"`
+	PrismBrowserEnabled bool                    `json:"prism_browser_enabled"`
+	PrismBrowserModels  []string                `json:"prism_browser_models"`
 }
 
 type sharedAccountCreateRequest struct {
@@ -38,6 +40,8 @@ func (h *SharedPoolHandler) accountImportDefaults(ctx context.Context) (*sharedA
 	return &sharedAccountImportDefaults{
 		ProtectionEnabled: settings.ProtectionEnabled, CodexTicketEnabled: settings.CodexTicketEnabled,
 		ExcelBPSEnabled: settings.ExcelBPSEnabled, ExcelBPSOptions: sharedImportExcelBPSOptions(settings.ExcelBPSOptions),
+		PrismBrowserEnabled: settings.Extra["openai_prism_browser"] == true,
+		PrismBrowserModels:  sharedImportPrismModels(settings.Extra),
 	}, nil
 }
 
@@ -63,6 +67,11 @@ func applySharedAccountImportDefaults(input *service.SharedPoolAccountInput, def
 		return
 	}
 	input.CodexTicketEnabled = new(defaults.CodexTicketEnabled)
+	if input.PrismBrowserEnabled == nil && input.PrismBrowserModels == nil && choices.PrismBrowserEnabled == nil && choices.PrismBrowserModels == nil {
+		input.PrismBrowserEnabled = new(defaults.PrismBrowserEnabled)
+		models := append([]string{}, defaults.PrismBrowserModels...)
+		input.PrismBrowserModels = &models
+	}
 	account := &service.Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
 	// 与后台导入一致：显式填写任一 BPS 字段时，整个配置族使用当次提交值。
 	if input.ExcelBPSEnabled != nil || input.ExcelBPSOptions != nil || choices.ExcelBPSEnabled != nil || choices.ExcelBPSOptions != nil || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() ||

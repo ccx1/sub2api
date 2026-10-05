@@ -117,7 +117,7 @@ describe('shared pool subscription group settings', () => {
 
   it('adds a supported tier and preserves defaults, rates and other platform rules', async () => {
     const wrapper = render({ ...original, subscription_group_ids: { gemini: { google_ai_pro: [5] }, antigravity: { ultra: [6] } } })
-    await addRule(wrapper, 'openai', 'Pro 5x', 2)
+    await addRule(wrapper, 'openai', 'Pro 100', 2)
     await save(wrapper)
     expect(saveSettings).toHaveBeenCalledWith({ ...persistedOriginal, subscription_group_ids: { openai: { prolite: [2] }, gemini: { google_ai_pro: [5] }, antigravity: { ultra: [6] } } })
     expect(showSuccess).toHaveBeenCalledWith('已保存')
@@ -128,6 +128,20 @@ describe('shared pool subscription group settings', () => {
     await wrapper.get('[data-remove-rule]').trigger('click')
     await save(wrapper)
     expect(saveSettings).toHaveBeenCalledWith({ ...persistedOriginal, subscription_group_ids: {} })
+  })
+
+  it('preserves new OpenAI SKU routing rules and saves a new Pro 500 rule', async () => {
+    const openai = {
+      go: [1], self_serve_business_usage_based: [2], ent26: [1],
+      enterprise_cbp_usage_based: [2], enterprise_cbp_automation: [1],
+      edu: [2], edu_plus: [1], edu_pro: [2]
+    }
+    const wrapper = render({ ...original, subscription_group_ids: { openai } })
+    await addRule(wrapper, 'openai', 'Pro 500', 2)
+    await save(wrapper)
+    expect(saveSettings).toHaveBeenCalledWith({
+      ...persistedOriginal, subscription_group_ids: { openai: { ...openai, promax: [2] } }
+    })
   })
 
   it('offers active paid standard groups, including exclusive groups, for tier routing', async () => {
@@ -168,7 +182,7 @@ describe('shared pool subscription group settings', () => {
 
   it('allows tier rules without a default group so unmatched accounts can await allocation', async () => {
     const wrapper = render({ ...original, default_group_ids: { gemini: 5 } })
-    await addRule(wrapper, 'openai', 'Pro 20x', 2)
+    await addRule(wrapper, 'openai', 'Pro 200', 2)
     await save(wrapper)
     expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ default_group_ids: { gemini: [5] }, subscription_group_ids: { openai: { pro: [2] } } }))
     await choose(defaultSelect(wrapper).getComponent(Select), 'Group 1 · 1x')

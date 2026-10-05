@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -26,6 +25,7 @@ const PelicanDeliveryContract = "所有账号使用相同交付约定：直接�
 var pelicanHTMLPattern = regexp.MustCompile(`(?i)<(?:!doctype\s+html|html|svg)[\s>]`)
 
 func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID int64, model string, cfg *PelicanTestConfig) (*ScheduledTestResult, error) {
+	ctx = context.WithValue(ctx, qualityProbeContextKey{}, true)
 	// Recognize the exact built-in question in legacy HTML plans as well.
 	if isBuiltinCandyPlan(cfg) {
 		copy := *cfg
@@ -67,6 +67,7 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 }
 
 func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *ScheduledTestPlan) {
+	ctx = context.WithValue(ctx, qualityProbeContextKey{}, true)
 	now := time.Now()
 	next, err := nextPlanRun(plan, now)
 	if err != nil {
@@ -83,25 +84,23 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	if err != nil || !claimed {
 		return
 	}
+	snapshot := *plan.PelicanConfig
+	snapshot.TriggerSource = plan.TriggerSource
+	if snapshot.TriggerSource == "" {
+		snapshot.TriggerSource = "scheduled"
+	}
+	plan.PelicanConfig = &snapshot
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	results := make([]*ScheduledTestResult, plan.PelicanConfig.ParallelCount)
-	var wg sync.WaitGroup
-	for i := range results {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			results[index] = s.runPelicanSample(runCtx, plan)
-		}(i)
-	}
-	wg.Wait()
+	results := s.runQualitySamples(runCtx, plan)
 	// Persist timeout failures with a fresh context even after the request deadline.
 	saveCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
 	qualityAction := ""
 	if plan.PelicanConfig.Quality != nil {
+		plan.QualityModelOutcomes = qualityModelOutcomes(results, qualityPlanModels(plan))
 		var actionErr error
-		qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityOutcome(results))
+		qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityRoundOutcome(results))
 		if actionErr != nil {
 			qualityAction = "action_error"
 			logger.LegacyPrintf("service.scheduled_test_runner", "quality plan=%d action failed: %v", plan.ID, actionErr)
@@ -112,6 +111,9 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		result.QualityAction = qualityAction
 		if plan.PelicanConfig.Quality != nil {
 			result.QualityRoundID = until.Format(time.RFC3339Nano)
+			cfg := *result.PelicanConfig
+			cfg.QualityModelOutcomes, cfg.QualityModelActions = plan.QualityModelOutcomes, plan.QualityModelActions
+			result.PelicanConfig = &cfg
 		}
 		if result.Status == "success" {
 			succeeded = true

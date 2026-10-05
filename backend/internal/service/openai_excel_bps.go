@@ -174,7 +174,7 @@ func (s *OpenAIGatewayService) doExcelBPSUpstream(req *http.Request, proxyURL st
 	if _, err = resolveMode1TLSProfile(account); err != nil {
 		return nil, err
 	}
-	req = req.WithContext(withOpenAIPluginBypass(req.Context()))
+	req = req.WithContext(WithRegionalEgressBypass(withOpenAIPluginBypass(req.Context())))
 	defer func() {
 		if observeRandomProxyHTTPResult(req, account, s.accountRepo, resp, err) {
 			err = &randomProxyReportedTransportError{err}

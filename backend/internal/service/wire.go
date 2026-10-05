@@ -4,10 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -299,6 +303,60 @@ func ProvideAccountTestService(
 	service.SetOpenAIGatewayService(openAIGatewayService)
 	service.SetSettingService(settingService)
 	service.SetPluginManager(pluginManager)
+	if provider, ok := httpUpstream.(AstraGatewayRuntimeProvider); ok {
+		provider.SetAstraGatewayPreparer(service.prepareAstraGatewaySource)
+	}
+	var managedMihomoMu sync.Mutex
+	var managedMihomo *mihomo.Manager
+	dataRoot := strings.TrimSpace(os.Getenv("DATA_DIR"))
+	if dataRoot == "" {
+		dataRoot = strings.TrimSpace(cfg.Pricing.DataDir)
+	}
+	if dataRoot == "" {
+		dataRoot = "./data"
+	}
+	ensureMihomo := func(settings config.AstraRoutingSettings) {
+		if !settings.CookiePool.RotateNodes {
+			return
+		}
+		managedMihomoMu.Lock()
+		defer managedMihomoMu.Unlock()
+		if managedMihomo == nil {
+			managedMihomo = mihomo.New(filepath.Join(dataRoot, "mihomo"))
+		}
+	}
+	settingService.SetAstraRoutingOnSaved(func(settings config.AstraRoutingSettings) {
+		ensureMihomo(settings)
+		service.StartAstraAutomaticSetup(settings)
+	})
+	if savedAstra, err := settingService.GetAstraRouting(context.Background()); err == nil {
+		ensureMihomo(savedAstra)
+		service.StartAstraAutomaticSetup(savedAstra)
+	}
+	if recorder, ok := httpUpstream.(AstraGatewayHistoryRecorder); ok {
+		if history, ok := settingService.settingRepo.(AstraGatewayHistoryRepository); ok {
+			recorder.SetAstraGatewayHistoryRecorder(func(row AstraGatewayHistoryRecord, passed bool) {
+				if row.Gateway == "" {
+					return
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := history.RecordAstraGateway(ctx, row, passed); err != nil {
+					logger.L().Warn("astra gateway history persistence failed")
+				}
+			})
+		}
+	}
+	stopScheduling := service.startAstraAccountScheduling()
+	openAIGatewayService.stopAstraSetup = func() {
+		stopScheduling()
+		service.StopAstraAutomaticSetup()
+		managedMihomoMu.Lock()
+		if managedMihomo != nil {
+			managedMihomo.Close()
+		}
+		managedMihomoMu.Unlock()
+	}
 	return service
 }
 
@@ -671,9 +729,11 @@ func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
 	resultRepo ScheduledTestResultRepository,
 	showcase *PelicanShowcaseService,
+	accountTestSvc *AccountTestService,
 ) *ScheduledTestService {
 	svc := NewScheduledTestService(planRepo, resultRepo)
 	svc.showcase = showcase
+	svc.ConfigureQualityModels(accountTestSvc)
 	return svc
 }
 
@@ -912,6 +972,7 @@ var ProviderSet = wire.NewSet(
 	NewAdminService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
+	ProvideOpenAIGatewayOptions,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
@@ -1028,6 +1089,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorQuotaFetcher,
 	ProvideChannelMonitorV2Service,
 	ProvideChannelMonitorV2Aggregator,
+	ProvideChannelMonitorV3Service,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
 )
@@ -1038,6 +1100,12 @@ func ProvideAntiDegradeService(admin AdminService, cfg *config.Config, plugins *
 	svc := NewAntiDegradeServiceWithSettings(admin, settings, accounts)
 	svc.cfg, svc.pluginManager = cfg, plugins
 	return svc
+}
+
+func ProvideOpenAIGatewayOptions() []OpenAIGatewayOption { return nil }
+
+func ProvideChannelMonitorV3Service(repo ChannelMonitorV3Repository, groups GroupRepository) *ChannelMonitorV3Service {
+	return NewChannelMonitorV3Service(repo, groups)
 }
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。

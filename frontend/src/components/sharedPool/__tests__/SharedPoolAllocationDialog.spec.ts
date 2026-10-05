@@ -81,7 +81,7 @@ describe('shared account dispatch group allocation', () => {
     expect(allocate).toHaveBeenLastCalledWith(7, { subscription_tier: 'pro' })
     wrapper.unmount()
     const overridden = render({ type: 'oauth', subscription_tier: 'pro', subscription_tier_override: 'pro' })
-    expect(overridden.get('[data-test="admin-effective-tier"]').text()).toContain('Pro 20x')
+    expect(overridden.get('[data-test="admin-effective-tier"]').text()).toContain('Pro 200')
     expect(overridden.get('[data-test="admin-effective-tier"]').text()).toContain('sharedPool.subscriptionTierManual')
     overridden.getComponent(Select).vm.$emit('update:modelValue', '')
     await overridden.vm.$nextTick()
@@ -96,10 +96,38 @@ describe('shared account dispatch group allocation', () => {
     expect(allocate).toHaveBeenCalledWith(7, { group_ids: [1] })
   })
 
-  it('hides tier editing for API keys and rejects an unsupported tier emitted by a control', async () => {
+  it.each([
+    ['free', 'Free'], ['go', 'Go'], ['plus', 'Plus'],
+    ['prolite', 'Pro 100'], ['pro', 'Pro 200'], ['promax', 'Pro 500'],
+    ['team', 'Business (team)'], ['self_serve_business_usage_based', 'Business (self_serve_business_usage_based)'],
+    ['self_serve_business_prolite', 'Business Premium'], ['business', 'Enterprise (business)'],
+    ['enterprise', 'Enterprise (enterprise)'], ['ent26', 'Enterprise (ent26)'],
+    ['enterprise_cbp_usage_based', 'Enterprise (enterprise_cbp_usage_based)'], ['enterprise_cbp_automation', 'Enterprise (Automation)'],
+    ['edu', 'Edu'], ['edu_plus', 'Edu Plus'], ['edu_pro', 'Edu Pro']
+  ])('displays and saves the distinct OpenAI SKU %s as %s', async (tier, label) => {
+    const wrapper = render({ type: 'oauth', subscription_tier: tier })
+    expect(wrapper.get('[data-test="admin-effective-tier"]').text()).toContain(label)
+    const select = wrapper.getComponent(Select)
+    expect(select.props('options')).toContainEqual({ value: tier, label })
+    expect(select.props('options').some(option => option.value === 'unknown')).toBe(false)
+    select.vm.$emit('update:modelValue', tier)
+    await wrapper.vm.$nextTick()
+    await save(wrapper); await flushPromises()
+    expect(allocate).toHaveBeenCalledWith(7, { subscription_tier: tier })
+    wrapper.unmount()
+  })
+
+  it('makes every OpenAI subscription option distinguishable by its visible label', () => {
+    const wrapper = render({ type: 'oauth' })
+    const labels = wrapper.getComponent(Select).props('options').map(option => option.label)
+    expect(new Set(labels).size).toBe(labels.length)
+    wrapper.unmount()
+  })
+
+  it.each(['google_ai_pro', 'unknown', 'future_plan'])('hides API key tier editing and rejects unsupported tier %s', async tier => {
     expect(render().findComponent(Select).exists()).toBe(false)
     const wrapper = render({ type: 'oauth' })
-    wrapper.getComponent(Select).vm.$emit('update:modelValue', 'google_ai_pro')
+    wrapper.getComponent(Select).vm.$emit('update:modelValue', tier)
     await save(wrapper); await flushPromises()
     expect(allocate).not.toHaveBeenCalled()
   })

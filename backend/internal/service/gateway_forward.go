@@ -399,7 +399,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		lastWireBody = wireBody
 
 		// 发送请求
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		resp, err = s.httpUpstream.DoWithTLS(withAccountRegionalEgress(upstreamReq, account), proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if resp != nil {
 			RecordRandomProxyUsage(ctx, account, s.accountRepo)
 		} else if proxyURL != "" {
@@ -465,7 +465,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					if buildErr == nil {
-						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						retryResp, retryErr := s.httpUpstream.DoWithTLS(withAccountRegionalEgress(retryReq, account), proxyURL, account.ID, account.Concurrency, tlsProfile)
 						if retryResp == nil && proxyURL != "" {
 							ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, retryErr)
 						}
@@ -509,7 +509,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
 									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(ctx, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									if buildErr2 == nil {
-										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(withAccountRegionalEgress(retryReq2, account), proxyURL, account.ID, account.Concurrency, tlsProfile)
 										if retryResp2 == nil && proxyURL != "" {
 											ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, retryErr2)
 										}
@@ -593,7 +593,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(ctx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						if buildErr == nil {
-							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(withAccountRegionalEgress(budgetRetryReq, account), proxyURL, account.ID, account.Concurrency, tlsProfile)
 							if budgetRetryResp == nil && proxyURL != "" {
 								ReportRandomProxyTransportFailure(ctx, account, s.accountRepo, retryErr)
 							}

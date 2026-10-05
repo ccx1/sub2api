@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
@@ -104,6 +105,50 @@ func TestCodexTicketPoolRefreshIncludesPrimarySoftDeadline(t *testing.T) {
 	require.True(t, codexTicketPoolNeedsRefresh(primary, account, cfg, now))
 	primary.RevalidateAt = now.Add(time.Hour)
 	require.False(t, codexTicketPoolNeedsRefresh(primary, account, cfg, now))
+}
+
+func TestCodexTicketHistoricalPoolKeepsRefreshingWhenFull(t *testing.T) {
+	now := time.Now()
+	_, account, primary, _ := ticketWatchdogFixture(t)
+	primary.CapturedAt = now.Add(-8 * 24 * time.Hour)
+	primary.OriginCapturedAt = primary.CapturedAt
+	primary.ExpiresAt = now.Add(time.Hour)
+	primary.Standby = inventoryTestTicket(primary, "S", time.Second)
+	primary.Standby.CapturedAt = now.Add(-8 * 24 * time.Hour)
+	primary.Standby.OriginCapturedAt = primary.Standby.CapturedAt
+	primary.Standby.ExpiresAt = now.Add(time.Hour)
+	cfg := config.NormalizeOpenAICodexTicketConfig(config.OpenAICodexTicketConfig{
+		PoolCapacity: 2, UsageMode: config.CodexTicketUsageAged, MinTicketAgeSeconds: int(time.Hour / time.Second),
+		HistoricalTicketValiditySeconds: 9 * 24 * 60 * 60,
+	})
+	require.True(t, codexTicketPoolNeedsRefresh(primary, account, cfg, now),
+		"满库历史票仍应按配置轮询间隔继续采集")
+}
+
+func TestCodexTicketHistoricalStatusReportsRouteHost(t *testing.T) {
+	now := time.Now()
+	account := ticketTestAccount(41)
+	ticket := usageTestTicket("H", 8*24*time.Hour, now)
+	ticket.State = ""
+	ticket.Length = 0
+	ticket.Verified = true
+	ticket.CredentialMode = config.CodexTicketCredentialCookie
+	ticket.SessionID = "session-h"
+	ticket.Cookies = []*http.Cookie{{
+		Name:    codexOAILBCookieName,
+		Value:   encodeTestOAILB(t, `{"host":"gateway.unified-42.api.openai.com","exp":`+jsonInt(now.Add(time.Hour).Unix())+`}`),
+		Path:    "/backend-api",
+		Expires: now.Add(time.Hour),
+	}}
+	cfg := config.NormalizeOpenAICodexTicketConfig(config.OpenAICodexTicketConfig{
+		Enabled: true, Models: []string{usageTestModel}, PoolCapacity: 1,
+		UsageMode: config.CodexTicketUsageAged, MinTicketAgeSeconds: int(time.Hour / time.Second),
+		HistoricalTicketValiditySeconds: 9 * 24 * 60 * 60, CredentialMode: config.CodexTicketCredentialCookie,
+	})
+
+	status := codexTicketPoolStatus(usageTestModel, ticket, account, cfg, now)
+	require.True(t, status.Ready)
+	require.Equal(t, "gateway.unified-42.api.openai.com", status.RouteHost)
 }
 
 func TestCodexTicketPoolSoftDeadlineUsesLastSuccessfulRevalidation(t *testing.T) {

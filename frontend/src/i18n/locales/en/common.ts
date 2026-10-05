@@ -30,6 +30,9 @@ export default {
       hint: '↑ ↓ Select · Enter Open · Esc Close'
     },
     filter: 'Filter',
+    sortBy: 'Sort by',
+    sortAscending: 'Sort ascending',
+    sortDescending: 'Sort descending',
     export: 'Export',
     import: 'Import',
     actions: 'Actions',

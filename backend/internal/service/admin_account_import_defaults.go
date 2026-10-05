@@ -40,6 +40,9 @@ func (s *adminServiceImpl) applyAccountImportDefaults(ctx context.Context, input
 	}
 	copyAccountImportExtraFamily(prepared.Extra, settings.Extra, accountImportRegionKeys)
 	applyAccountImportExcelBPSDefault(&prepared, settings)
+	if prepared.Platform == PlatformOpenAI && prepared.Type == AccountTypeOAuth {
+		copyAccountImportExtraFamily(prepared.Extra, settings.Extra, PrismBrowserExtraKeys())
+	}
 	// BPS 账号不走打票链路，打票默认值不适用。
 	if isOpenAICodexTicketAccount(&Account{Platform: prepared.Platform, Type: prepared.Type, Credentials: prepared.Credentials, Extra: prepared.Extra}) {
 		if prepared.CodexTicketEnabled == nil && !hasAccountImportExtra(prepared.Extra, []string{OpenAICodexTicketEnabledExtraKey}) {

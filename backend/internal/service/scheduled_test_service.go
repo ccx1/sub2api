@@ -13,8 +13,10 @@ var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom 
 
 // ScheduledTestService provides CRUD operations for scheduled test plans and results.
 type ScheduledTestService struct {
-	planRepo   ScheduledTestPlanRepository
-	resultRepo ScheduledTestResultRepository
+	accountTests  *AccountTestService
+	qualityModels func(context.Context, int64) ([]string, error)
+	planRepo      ScheduledTestPlanRepository
+	resultRepo    ScheduledTestResultRepository
 	// showcase copies successful Pelican HTML results to the user gallery; nil disables it.
 	showcase *PelicanShowcaseService
 }
@@ -35,6 +37,9 @@ func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTe
 	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("invalid test schedule: %w", err)
+	}
+	if err := s.validateQualityAccountModels(ctx, plan); err != nil {
+		return nil, err
 	}
 	plan.NextRunAt = &nextRun
 
@@ -60,6 +65,11 @@ func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTe
 	nextRun, err := nextPlanRun(plan, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("invalid test schedule: %w", err)
+	}
+	if plan.Enabled {
+		if err := s.validateQualityAccountModels(ctx, plan); err != nil {
+			return nil, err
+		}
 	}
 	plan.NextRunAt = &nextRun
 
@@ -100,6 +110,10 @@ func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
 
 func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 	if cfg := plan.PelicanConfig; cfg != nil {
+		cfg.QualityModelOutcomes, cfg.QualityModelActions, cfg.TriggerSource = nil, nil, ""
+		if err := normalizeQualityPlanModels(plan); err != nil {
+			return time.Time{}, err
+		}
 		if strings.TrimSpace(cfg.Prompt) == "" || len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
 			return time.Time{}, fmt.Errorf("pelican prompt and model are required (maximum 32000/100 bytes)")
 		}
@@ -120,6 +134,9 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 		}
 		if plan.MaxResults < 1 || plan.MaxResults > 200 {
 			return time.Time{}, fmt.Errorf("pelican history retention must be 1–200 results")
+		}
+		if len(cfg.ModelIDs) > 1 && (len(cfg.ModelIDs)*cfg.ParallelCount > 100 || plan.MaxResults < len(cfg.ModelIDs)*cfg.ParallelCount) {
+			return time.Time{}, fmt.Errorf("quality retention must cover a complete round of at most 100 samples")
 		}
 		cfg.ModelID = plan.ModelID
 	}

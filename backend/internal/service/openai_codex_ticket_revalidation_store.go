@@ -39,6 +39,17 @@ func (s *OpenAIGatewayService) replaceRevalidatedCodexTicket(ctx context.Context
 	for _, slot := range codexTicketSlots(replacement) {
 		if sameCodexTicket(slot, old) {
 			standby, reserve := slot.Standby, slot.Reserve
+			if sameCodexTicketLineage(slot, next) {
+				if slot.HistoricalUsedAt.After(next.HistoricalUsedAt) {
+					next.HistoricalUsedAt = slot.HistoricalUsedAt
+				}
+				if slot.HistoricalExtendedExpiresAt.After(next.HistoricalExtendedExpiresAt) {
+					next.HistoricalExtendedExpiresAt = slot.HistoricalExtendedExpiresAt
+				}
+				if slot.HistoricalQualityCheckedAt.After(next.HistoricalQualityCheckedAt) {
+					next.HistoricalQualityCheckedAt = slot.HistoricalQualityCheckedAt
+				}
+			}
 			*slot = *codexTicketLeaf(next)
 			slot.Standby, slot.Reserve = standby, reserve
 			break

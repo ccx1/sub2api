@@ -17,6 +17,21 @@ vi.mock('@/api/admin/accounts', () => ({ list: vi.fn().mockResolvedValue({ items
 vi.mock('@/api/admin/groups', () => ({ getModelAllowlistCandidates: vi.fn().mockResolvedValue(["test-judge"]), getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 21, name: 'Quality pool', status:'active' }]) }))
 const mountView = () => mount(AccountQualityView, { global: { plugins: [createPinia()], stubs: { Teleport: true, AppLayout: { template: '<main><slot /></main>' } } } })
 describe('quality operations', () => {
+  it('creates a multi-model cooldown rule with an explicitly enabled upstream trigger', async () => {
+    const wrapper = mountView(); await flushPromises()
+    const vm = wrapper.vm as any
+    vm.newPlan(); await flushPromises()
+    vm.selectedAccounts = [1]
+    vm.form.pelican_config.quality.judge = { group_id: 21, model_id: 'test-judge', prompt: 'Grade the answer' }
+    await wrapper.get('[data-testid="quality-model-selection"]').setValue('model-a, model-b')
+    await wrapper.get('input[value="remove_models"]').setValue(true)
+    expect(wrapper.get('[data-testid="quality-upstream-5xx"]').element).toHaveProperty('checked', false)
+    vm.form.pelican_config.quality.remove_models = ['model-b']
+    await wrapper.get('[data-testid="quality-upstream-5xx"]').setValue(true)
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ model_id: 'model-a', pelican_config: expect.objectContaining({ model_ids: ['model-a', 'model-b'], quality: expect.objectContaining({ action: 'remove_models', remove_models: ['model-b'], trigger_on_upstream_5xx: true }) }) }))
+    wrapper.unmount()
+  })
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(scheduledTests.update).mockReset(); vi.mocked(accountsAPI.list).mockReset().mockResolvedValue({ items: [{ id: 1, name: 'Test account' }], total: 1 } as any); vi.mocked(listQualityPlans).mockResolvedValue([]); vi.mocked(listQualityOperations).mockResolvedValue({items:[],next_cursor:0}) })
   const rules = (): ScheduledTestPlan[] => [1, 2, 3].map(id => ({
     id, account_id: id, account_name: `Account ${id}`, model_id: `model-${id}`, cron_expression: '*/30 * * * *', enabled: true,

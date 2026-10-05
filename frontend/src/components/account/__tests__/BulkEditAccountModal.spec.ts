@@ -94,6 +94,31 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it.each(['selected', 'filtered'])('applies Prism only when participating to the complete %s target', async mode => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'], target: {
+      mode, selectedPrismEligible: true, filters: mode === 'filtered' ? { platform: 'openai' } : undefined, previewCount: 25
+    } })
+    await wrapper.get('[data-testid="bulk-prism-participate"]').setValue(true)
+    await wrapper.get('[data-testid="bulk-prism-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="bulk-prism-model-gpt-6-luna"]').setValue(false)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = () => vi.mocked(adminAPI.accounts.bulkUpdate).mock.lastCall?.[mode === 'selected' ? 1 : 0] as { extra?: Record<string, unknown> }
+    expect(payload().extra).toMatchObject({ openai_prism_browser: true })
+    expect(payload().extra?.openai_prism_browser_models).not.toContain('gpt-6-luna')
+    await wrapper.get('[data-testid="bulk-prism-toggle"]').setValue(false)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(payload().extra).toMatchObject({ openai_prism_browser: false, openai_prism_browser_models: [] })
+    await wrapper.get('[data-testid="bulk-prism-participate"]').setValue(false)
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(payload().extra).toBeUndefined()
+    await wrapper.setProps({ target: { mode, selectedPrismEligible: false } })
+    expect(wrapper.find('[data-testid="bulk-prism-participate"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('only applies region fields when explicitly enabled and leaves proxy settings untouched', async () => {
     const wrapper = mountModal()
     await wrapper.get('#bulk-edit-proxy-region-enabled').setValue(true)

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { baseCompile } from '@intlify/message-compiler'
@@ -27,21 +27,36 @@ const render = (tickets?: TicketStatus[] | null, locale = 'zh') => mount(CodexTi
 
 describe('CodexTicketPoolStatus', () => {
   it.each([
-    ['zh', '历史票首次采集：2026-10-03 04:05:06', '历史票有效期剩余：7天 2小时', '最近打票：成功'],
-    ['en', 'History ticket first captured: 2026-10-03 04:05:06', 'History ticket validity left: 7d 2h', 'Last harvest: Succeeded']
+    ['zh', '历史票首次采集：2026-10-03 04:05:06', '历史票有效期剩余：倒计时 170:00:00', '最近打票：成功'],
+    ['en', 'History ticket first captured: 2026-10-03 04:05:06', 'History ticket validity left: Countdown 170:00:00', 'Last harvest: Succeeded']
   ])('shows historical ticket time, long validity and actual harvest result (%s)', (locale, captureText, remainingText, harvestText) => {
     const captured = new Date(2026, 9, 3, 4, 5, 6).toISOString()
     const expires = new Date(Date.now() + (7 * 86400 + 2 * 3600) * 1000).toISOString()
     const wrapper = render([ticket({
       usage_mode: 'aged', origin_captured_at: captured, expires_at: expires,
+      historical_used_at: new Date(Date.now() - 10 * 1000).toISOString(),
+      route_host: 'chat.gateway.unified-88.api.openai.com',
       remaining_seconds: 7 * 86400 + 2 * 3600, primary_remaining_seconds: 7 * 86400 + 2 * 3600,
       last_attempt_at: captured, last_attempt_success: true
     })], locale)
     expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain(captureText)
     expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain(remainingText)
-    expect(wrapper.get('[data-testid="primary-status"]').text()).toContain(locale === 'zh' ? '7天 2小时' : '7d 2h')
+    expect(wrapper.get('[data-testid="history-ticket-host"]').text()).toContain('chat.gateway.unified-88.api.openai.com')
+    expect(wrapper.get('[data-testid="primary-status"]').text()).toContain('170:00:00')
     expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain(harvestText)
     expect(wrapper.get('[data-testid="ticket-harvest-status"] time').attributes('datetime')).toBe(captured)
+    wrapper.unmount()
+  })
+
+  it('decrements the historical countdown every second', async () => {
+    vi.useFakeTimers()
+    const captured = new Date('2026-10-03T04:05:06Z')
+    vi.setSystemTime(captured)
+    const expires = new Date(captured.getTime() + 3665 * 1000).toISOString()
+    const wrapper = render([ticket({ usage_mode: 'aged', origin_captured_at: captured.toISOString(), historical_used_at: captured.toISOString(), expires_at: expires, remaining_seconds: 3665 })])
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('倒计时 01:01:05')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('倒计时 01:01:03')
     wrapper.unmount()
   })
 
@@ -49,18 +64,25 @@ describe('CodexTicketPoolStatus', () => {
     const wrapper = render([ticket({ usage_mode: 'aged', ready: false, remaining_seconds: 0,
       origin_captured_at: undefined, expires_at: undefined, last_attempt_at: undefined, last_attempt_success: undefined })])
     expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('历史票首次采集：未知')
-    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('历史票有效期剩余：未知')
+    expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('历史票有效期剩余：尚未使用')
     expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain('最近打票：暂无记录')
     wrapper.unmount()
   })
 
   it('shows expired history and the last failed harvest independently', () => {
-    const wrapper = render([ticket({ usage_mode: 'aged', expires_at: new Date(Date.now() - 1000).toISOString(),
+    const usedAt = new Date(Date.now() - 10 * 1000).toISOString()
+    const wrapper = render([ticket({ usage_mode: 'aged', historical_used_at: usedAt, expires_at: new Date(Date.now() - 1000).toISOString(),
       remaining_seconds: 0, last_attempt_at: new Date(2026, 9, 3, 4, 5, 6).toISOString(),
       last_attempt_success: false, last_attempt_reason: 'upstream timeout' })])
     expect(wrapper.get('[data-testid="history-ticket-status"]').text()).toContain('已过期')
     expect(wrapper.get('[data-testid="ticket-harvest-status"]').text()).toContain('最近打票：失败')
     expect(wrapper.get('[data-testid="ticket-harvest-status"] span').attributes('title')).toBe('upstream timeout')
+    wrapper.unmount()
+  })
+
+  it.each(['revoked', 'expired', 'credential'])('keeps an unavailable historical primary reason when the ticket was not used (%s)', primary_reason => {
+    const wrapper = render([ticket({ usage_mode: 'aged', historical_used_at: undefined, primary_ready: false, primary_reason, ready: false })])
+    expect(wrapper.get('[data-testid="primary-status"]').text()).not.toContain('尚未使用')
     wrapper.unmount()
   })
 
@@ -116,6 +138,12 @@ describe('CodexTicketPoolStatus', () => {
     expect(wrapper.get('[data-testid="current-status"]').text()).toContain('备用 12m00s')
     expect(wrapper.get('[data-testid="primary-status"]').text()).toContain('主票已过期')
     expect(wrapper.get('[data-testid="pool-available"]').text()).toContain('可用 2/5 张')
+    wrapper.unmount()
+  })
+
+  it('labels a cooled primary ticket', () => {
+    const wrapper = render([ticket({ ready: true, primary_ready: false, primary_reason: 'route_cooldown', using_standby: true })])
+    expect(wrapper.get('[data-testid="primary-status"]').text()).toContain('主票同路由冷却中')
     wrapper.unmount()
   })
 
@@ -189,9 +217,10 @@ describe('CodexTicketPoolStatus', () => {
     wrapper.unmount()
   })
 
-  it.each([undefined, 'off'] as const)('hides route affinity for legacy or disabled settings (%s)', route_affinity_status => {
-    const wrapper = render([ticket({ route_affinity_status, route_affinity_connections: 0 })])
+  it.each([undefined, 'off'] as const)('hides route affinity and node for legacy or disabled settings (%s)', route_affinity_status => {
+    const wrapper = render([ticket({ route_affinity_status, route_affinity_connections: 0, route_node: 'unified-39' })])
     expect(wrapper.find('[data-testid="ticket-route-affinity"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ticket-route-node"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -201,7 +230,7 @@ describe('CodexTicketPoolStatus', () => {
     ['en', 'GB', false, 'Harvest egress GB'],
     ['en', 'JP', true, 'Harvest egress JP'],
   ] as const)('shows the compute node and flags only cross macro-region routes (%s, %s)', (locale, route_egress_country, route_cross_region, egress) => {
-    const wrapper = render([ticket({ route_node: 'unified-39', route_node_country: 'ES', route_node_region: 'Madrid',
+    const wrapper = render([ticket({ route_affinity_status: 'available', route_node: 'unified-39', route_node_country: 'ES', route_node_region: 'Madrid',
       route_macro_region: 'EU', route_egress_country, route_cross_region })], locale)
     const row = wrapper.get('[data-testid="ticket-route-node"]')
     expect(row.text()).toContain('unified-39')
@@ -260,4 +289,8 @@ describe('CodexTicketPoolStatus', () => {
     expect(wrapper.find('[data-testid="codex-ticket-pool"]').exists()).toBe(false)
     wrapper.unmount()
   })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })

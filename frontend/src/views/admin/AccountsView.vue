@@ -702,6 +702,7 @@ type AccountBulkEditTarget =
       selectedTypes: AccountType[]
       selectedPlanTypes: string[]
       selectedExcelBPSEligible: boolean
+      selectedPrismEligible: boolean
     }
   | {
       mode: 'filtered'
@@ -720,6 +721,7 @@ type AccountBulkEditTarget =
       selectedTypes: AccountType[]
       selectedPlanTypes: string[]
       selectedExcelBPSEligible: boolean
+      selectedPrismEligible: boolean
     }
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
@@ -2348,7 +2350,10 @@ const collectSelectionMetadata = (rows: Account[]) => {
       typeof mode === 'string' && ['personalaccesstoken', 'personal_access_token'].includes(mode.trim().toLowerCase())
     )
   })
-  return { selectedPlatforms, selectedTypes, selectedPlanTypes, selectedExcelBPSEligible }
+  const selectedPrismEligible = rows.length > 0 && rows.every(account =>
+    account.platform === 'openai' && account.type === 'oauth' && account.parent_account_id == null
+  )
+  return { selectedPlatforms, selectedTypes, selectedPlanTypes, selectedExcelBPSEligible, selectedPrismEligible }
 }
 
 const selectionMetadataLoading = ref(false)

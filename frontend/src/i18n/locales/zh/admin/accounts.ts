@@ -1021,6 +1021,12 @@ export default {
       // OpenAI specific hints
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',
+        prismBrowser: '自动使用 Prism 浏览器协议',
+        prismBrowserBulk: '本次修改 Prism 配置',
+        prismBrowserDesc: '使用此 OpenAI OAuth 账号接入服务器管理的 Prism 适配器。支持四个模型的文本请求，以及 6.1 Sol 的客户端函数和自定义工具。',
+        prismBrowserModels: '勾选使用 Prism 的模型',
+        prismBrowserModelsHint: '按账号映射后的模型名称匹配。仅勾选模型走 Prism，未选模型保留原 Codex / Excel 路由；全部取消时不使用 Prism。',
+        prismBrowserManagedEndpoint: '已启用：请求将自动发送到服务器的 Prism 适配器。',
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自动透传（仅替换认证）',
         excelBPS: 'Excel / BPS 协议',
@@ -1189,6 +1195,9 @@ export default {
         codexTicketPoolNextExpiry: '最早到期 {time}',
         codexTicketHistoryCapturedAt: '历史票首次采集：{time}',
         codexTicketHistoryRemaining: '历史票有效期剩余：{time}',
+        codexTicketHistoryCountdown: '倒计时 {time}',
+        codexTicketHistoryHost: '当前路由 host：{host}',
+        codexTicketHistoryNotUsed: '尚未使用',
         codexTicketHistoryExpired: '已过期',
         codexTicketHistoryUnknown: '未知',
         codexTicketHistoryDaysHours: '{days}天 {hours}小时',
@@ -1215,6 +1224,7 @@ export default {
         codexTicketPrimaryExpired: '主票已过期',
         codexTicketPrimaryCredential: '主票凭据不匹配',
         codexTicketPrimaryCookieMissing: '主票缺少 Cookie',
+        codexTicketPrimaryRouteCooldown: '主票同路由冷却中',
         codexTicketPrimaryUnavailable: '主票不可用',
         codexTicketPrimaryExpires: '主票到期：{time}',
         codexTurnTicketDesc: '显示已配置模型的门票状态。仅在启用缺票拦截时，没有有效门票的模型才会暂停调度。',
@@ -1419,6 +1429,10 @@ export default {
           cli: 'Grok Build CLI',
           official: '官方 API'
         }
+      },
+      grokSkipForbiddenPause: {
+        title: '未分类 Grok 403 后保持调度',
+        hint: '默认关闭。未分类推理 403 最多尝试一个备用账号，不暂停当前账号；凭据、订阅、配额、内容与管理员保护仍然生效。'
       },
       grokClientToolCache: {
         title: '客户端工具缓存（可能改变自动工具选择）',

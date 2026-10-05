@@ -32,6 +32,19 @@
       </div>
 
       <!-- Excel / BPS protocol (ChatGPT OAuth only) -->
+      <div v-if="allPrismEligible" class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="enablePrismBrowser" type="checkbox" data-testid="bulk-prism-participate" />
+          <span>{{ t('admin.accounts.openai.prismBrowserBulk') }}</span>
+        </label>
+        <fieldset :disabled="!enablePrismBrowser" class="space-y-3" :class="!enablePrismBrowser && 'opacity-50'">
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="prismBrowserEnabled" type="checkbox" data-testid="bulk-prism-toggle" />
+            <span>{{ t('admin.accounts.openai.prismBrowser') }}</span>
+          </label>
+          <PrismBrowserOptionsFields v-if="prismBrowserEnabled" v-model="prismBrowserOptions" :disabled="!enablePrismBrowser" test-id-prefix="bulk-prism" />
+        </fieldset>
+      </div>
       <div v-if="allOpenAIExcelBPSEligible" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
@@ -1683,6 +1696,8 @@ import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldown
 import { randomProxyExtra, isValidRandomProxyReuseMinutes, normalizeRandomProxyGroupId, type RandomProxyEmptyPoolPolicy, type RandomProxyPoolScope, type RandomProxyRegionFallback } from '@/utils/randomProxy'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import PrismBrowserOptionsFields from '@/components/account/PrismBrowserOptionsFields.vue'
+import { defaultPrismBrowserOptions, normalizePrismBrowserOptions } from '@/utils/prismBrowserOptions'
 import Icon from '@/components/icons/Icon.vue'
 import {
   buildModelMappingObject as buildModelMappingPayload,
@@ -1721,6 +1736,7 @@ interface Props {
     selectedTypes?: AccountType[]
     selectedPlanTypes?: string[]
     selectedExcelBPSEligible?: boolean
+    selectedPrismEligible?: boolean
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
@@ -1781,6 +1797,7 @@ const allOpenAIOAuthOnly = computed(() => {
 const allOpenAIExcelBPSEligible = computed(() =>
   allOpenAIOAuthOnly.value && props.target?.selectedExcelBPSEligible === true
 )
+const allPrismEligible = computed(() => allOpenAIOAuthOnly.value && props.target?.selectedPrismEligible === true)
 
 const allOpenAIAPIKey = computed(() => {
   return (
@@ -1862,6 +1879,9 @@ const enableGroupRateMultiplier = ref(false)
 const groupRateMultiplier = ref(1)
 const enableStatus = ref(false)
 const enableGroups = ref(false)
+const enablePrismBrowser = ref(false)
+const prismBrowserEnabled = ref(false)
+const prismBrowserOptions = ref(defaultPrismBrowserOptions())
 const enableExcelBPS = ref(false)
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
@@ -2258,6 +2278,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (enablePrismBrowser.value && allPrismEligible.value) {
+    const extra = ensureExtra()
+    extra.openai_prism_browser = prismBrowserEnabled.value
+    extra.openai_prism_browser_models = prismBrowserEnabled.value ? normalizePrismBrowserOptions(prismBrowserOptions.value).models : []
+  }
+
   if (enableOpenAIPassthrough.value) {
     const extra = ensureExtra()
     extra.openai_passthrough = openaiPassthroughEnabled.value
@@ -2518,6 +2544,7 @@ const handleSubmit = async () => {
     enableDailyCooldown.value ||
     enableBaseUrl.value ||
     (enableExcelBPS.value && allOpenAIExcelBPSEligible.value) ||
+    (enablePrismBrowser.value && allPrismEligible.value) ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
@@ -2695,6 +2722,9 @@ watch(
       enableStatus.value = false
       enableGroups.value = false
       enableExcelBPS.value = false
+      enablePrismBrowser.value = false
+      prismBrowserEnabled.value = false
+      prismBrowserOptions.value = defaultPrismBrowserOptions()
       enableOpenAIPassthrough.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAILongContextBilling.value = false

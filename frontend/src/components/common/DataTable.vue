@@ -1,5 +1,29 @@
 <template>
   <div v-if="!isDesktopViewport" class="space-y-3">
+    <div v-if="props.serverSideSort && sortableColumns.length" class="flex min-w-0 items-center gap-2" data-test="mobile-sort-toolbar">
+      <select
+        :value="sortKey"
+        :aria-label="t('common.sortBy')"
+        class="input min-w-0 flex-1"
+        :disabled="loading"
+        data-test="mobile-sort-field"
+        @change="handleSort(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="" disabled>{{ t('common.sortBy') }}</option>
+        <option v-for="column in sortableColumns" :key="column.key" :value="column.key">{{ column.label }}</option>
+      </select>
+      <button
+        type="button"
+        class="btn btn-secondary flex h-10 w-10 shrink-0 items-center justify-center p-0"
+        :disabled="loading || !sortKey"
+        :aria-label="sortOrder === 'asc' ? t('common.sortDescending') : t('common.sortAscending')"
+        :title="sortOrder === 'asc' ? t('common.sortDescending') : t('common.sortAscending')"
+        data-test="mobile-sort-direction"
+        @click="handleSort(sortKey)"
+      >
+        <Icon :name="sortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
+      </button>
+    </div>
     <template v-if="loading">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
@@ -635,6 +659,7 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const sortableColumns = computed(() => props.columns.filter((column) => column.sortable))
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )

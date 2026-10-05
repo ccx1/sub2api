@@ -10,6 +10,7 @@ import (
 )
 
 type bulkOpenAISettings struct {
+	prismBrowser            bool
 	excelBPS                bool
 	longContextBilling      bool
 	endpointCapabilities    bool
@@ -19,7 +20,7 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.excelBPS || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.prismBrowser || s.excelBPS || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -28,6 +29,10 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 		return settings, nil
 	}
 	var err error
+	settings.prismBrowser = hasAccountImportExtra(input.Extra, PrismBrowserExtraKeys())
+	if err := NormalizePrismBrowserExtra(input.Extra); err != nil {
+		return settings, err
+	}
 	settings.excelBPS, err = normalizeBulkExcelBPSExtra(input.Extra)
 	if err != nil {
 		return settings, err
@@ -251,6 +256,9 @@ func validateBulkOpenAISettingsTargets(
 		if settings.excelBPS && (account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth ||
 			account.IsShadow() || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken()) {
 			return 0, invalidBulkOpenAITarget(accountID, "Excel / BPS requires a regular ChatGPT OAuth account")
+		}
+		if settings.prismBrowser && (account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsShadow()) {
+			return 0, invalidBulkOpenAITarget(accountID, "Prism requires a non-shadow OpenAI OAuth account")
 		}
 
 		if settings.longContextBilling {

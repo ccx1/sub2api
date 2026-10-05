@@ -107,6 +107,65 @@ func TestCodexTicketUsageCandidatesFollowUsageMode(t *testing.T) {
 	require.Nil(t, selectOpenAICodexTicket(usageTestPool(fresh, young), account, aged, now))
 }
 
+func TestHistoricalTicketUseStartsAndPersistsValidityWindow(t *testing.T) {
+	now := time.Now()
+	account := ticketTestAccount(41)
+	ticket := usageTestTicket("U", time.Hour, now)
+	cfg := config.OpenAICodexTicketConfig{FailClosed: true, UsageMode: config.CodexTicketUsageAged,
+		MinTicketAgeSeconds: 60, HistoricalTicketValiditySeconds: 300}
+	svc := usageTestService(t, cfg, ticket)
+
+	_, err := svc.applyOpenAICodexTicketSnapshot(context.Background(), account, usageTestModel, http.Header{})
+	require.NoError(t, err)
+	raw, ok := svc.openaiCodexTickets.Load(openAICodexTicketKey(account.ID, usageTestModel))
+	require.True(t, ok)
+	stored := raw.(*openAICodexTicket)
+	require.False(t, stored.HistoricalUsedAt.IsZero())
+	require.WithinDuration(t, stored.HistoricalUsedAt.Add(300*time.Second), stored.historicalExpires(cfg), time.Second)
+	status := OpenAICodexTicketStatuses(account, config.NormalizeOpenAICodexTicketConfig(config.OpenAICodexTicketConfig{
+		Enabled: true, Models: []string{usageTestModel}, UsageMode: config.CodexTicketUsageAged,
+		MinTicketAgeSeconds: 60, HistoricalTicketValiditySeconds: 300}), time.Now())[0]
+	require.NotNil(t, status.HistoricalUsedAt)
+}
+
+func TestCodexTicketLatestOnlySelectsNewestLineageWithoutFallback(t *testing.T) {
+	now := time.Now()
+	account := ticketTestAccount(41)
+	old := usageTestTicket("O", 2*time.Hour, now)
+	newest := usageTestTicket("N", time.Hour, now)
+	refreshedOld := usageTestTicket("R", time.Minute, now)
+	refreshedOld.OriginCapturedAt = old.CapturedAt
+	pool := usageTestPool(old, newest, refreshedOld)
+	cfg := config.NormalizeOpenAICodexTicketConfig(config.OpenAICodexTicketConfig{UsageMode: config.CodexTicketUsageLatestOnly})
+	require.Equal(t, usageTestStates(newest), usageTestStates(codexTicketUsageCandidates(pool, account, cfg, now)...))
+	newest.Revoked = true
+	pool = usageTestPool(old, newest, refreshedOld)
+	require.Empty(t, codexTicketUsageCandidates(pool, account, cfg, now), "最新谱系不可用时不使用旧票")
+	require.Nil(t, selectOpenAICodexTicket(pool, account, cfg, now))
+	status := codexTicketPoolStatus(usageTestModel, pool, account, cfg, now)
+	require.Zero(t, status.AvailableCount)
+	require.Zero(t, status.ReserveCount)
+	require.Equal(t, "revoked", status.PrimaryReason)
+}
+
+func TestCodexTicketImmediateUsesPoolOrderAndFallsBack(t *testing.T) {
+	now := time.Now()
+	account := ticketTestAccount(41)
+	old, newest, middle := usageTestTicket("O", 3*time.Hour, now), usageTestTicket("N", time.Hour, now), usageTestTicket("M", 2*time.Hour, now)
+	pool := usageTestPool(old, middle, newest)
+	cfg := config.NormalizeOpenAICodexTicketConfig(config.OpenAICodexTicketConfig{UsageMode: config.CodexTicketUsageImmediate})
+	require.Equal(t, usageTestStates(old, middle, newest), usageTestStates(codexTicketUsageCandidates(pool, account, cfg, now)...))
+	status := codexTicketPoolStatus(usageTestModel, pool, account, cfg, now)
+	require.False(t, status.UsingStandby)
+	require.True(t, status.StandbyReady)
+	old.Revoked = true
+	pool = usageTestPool(old, middle, newest)
+	require.Equal(t, middle.State, selectOpenAICodexTicket(pool, account, cfg, now).State)
+	status = codexTicketPoolStatus(usageTestModel, pool, account, cfg, now)
+	require.True(t, status.UsingStandby)
+	require.Equal(t, "revoked", status.PrimaryReason)
+}
+
 func TestCodexTicketUsageAgedInjectsMaturedTicket(t *testing.T) {
 	now := time.Now()
 	account := ticketTestAccount(41)

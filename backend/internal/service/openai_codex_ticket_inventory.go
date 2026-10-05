@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -25,18 +26,105 @@ func codexTicketLeaf(ticket *openAICodexTicket) *openAICodexTicket {
 	}
 	copy.Standby = nil
 	copy.Reserve = nil
+	copy.RouteRotation = nil
 	return &copy
 }
 
 func cloneCodexTicketInventory(ticket *openAICodexTicket) *openAICodexTicket {
 	copy := codexTicketLeaf(ticket)
 	if copy != nil {
+		copy.RouteRotation = cloneCodexTicketRouteRotation(ticket.RouteRotation)
 		copy.Standby = codexTicketLeaf(ticket.Standby)
 		for _, reserve := range ticket.Reserve {
 			copy.Reserve = append(copy.Reserve, codexTicketLeaf(reserve))
 		}
 	}
 	return copy
+}
+
+func cloneCodexTicketRouteRotation(state *codexTicketRouteRotation) *codexTicketRouteRotation {
+	if state == nil {
+		return nil
+	}
+	copy := *state
+	if state.Cooldowns != nil {
+		copy.Cooldowns = make(map[string]time.Time, len(state.Cooldowns))
+		for id, until := range state.Cooldowns {
+			copy.Cooldowns[id] = until
+		}
+	}
+	return &copy
+}
+
+func codexTicketRouteRotationActive(inventory *openAICodexTicket) (string, string) {
+	if inventory == nil || inventory.RouteRotation == nil {
+		return "", ""
+	}
+	return inventory.RouteRotation.ActiveLineageID, inventory.RouteRotation.ActiveHost
+}
+
+func codexTicketRouteRotationCooldownUntil(inventory, ticket *openAICodexTicket, now time.Time) time.Time {
+	if inventory == nil || inventory.RouteRotation == nil || ticket == nil {
+		return time.Time{}
+	}
+	until := inventory.RouteRotation.Cooldowns[codexTicketConsumptionID(ticket)]
+	if until.After(now) {
+		return until
+	}
+	return time.Time{}
+}
+
+func codexTicketRouteRotationCool(inventory, ticket *openAICodexTicket, until time.Time) bool {
+	if inventory == nil || ticket == nil || !until.After(time.Now()) {
+		return false
+	}
+	id := codexTicketConsumptionID(ticket)
+	if id == "" {
+		return false
+	}
+	if inventory.RouteRotation == nil {
+		inventory.RouteRotation = &codexTicketRouteRotation{}
+	}
+	state := inventory.RouteRotation
+	if !until.After(state.Cooldowns[id]) {
+		return false
+	}
+	if state.Cooldowns == nil {
+		state.Cooldowns = make(map[string]time.Time)
+	}
+	state.Cooldowns[id] = until
+	advanceCodexTicketRouteRotationTime(state)
+	return true
+}
+
+func codexTicketRouteRotationSetActive(inventory, ticket *openAICodexTicket, host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if inventory == nil || ticket == nil || host == "" {
+		return false
+	}
+	id := codexTicketConsumptionID(ticket)
+	if id == "" {
+		return false
+	}
+	if inventory.RouteRotation == nil {
+		inventory.RouteRotation = &codexTicketRouteRotation{}
+	}
+	state := inventory.RouteRotation
+	if state.ActiveLineageID == id && state.ActiveHost == host {
+		return false
+	}
+	state.ActiveLineageID, state.ActiveHost = id, host
+	delete(state.Cooldowns, id)
+	advanceCodexTicketRouteRotationTime(state)
+	return true
+}
+
+func advanceCodexTicketRouteRotationTime(state *codexTicketRouteRotation) {
+	now := time.Now().UTC()
+	if !now.After(state.UpdatedAt) {
+		now = state.UpdatedAt.Add(time.Nanosecond)
+	}
+	state.UpdatedAt = now
 }
 
 // lineageCapturedAt 返回凭据谱系的稳定采集时间：软复验刷新 CapturedAt 时，
@@ -162,6 +250,10 @@ func (s *OpenAIGatewayService) codexTicketInventoryLocked(account *Account, mode
 		current = extra
 	}
 	current = cloneCodexTicketInventory(current)
+	if current != nil && extra != nil && extra.RouteRotation != nil &&
+		(current.RouteRotation == nil || extra.RouteRotation.UpdatedAt.After(current.RouteRotation.UpdatedAt)) {
+		current.RouteRotation = cloneCodexTicketRouteRotation(extra.RouteRotation)
+	}
 	s.mergeCodexTicketConsumptionLedger(account)
 	if current != nil {
 		markCodexTicketSlotsConsumed(current, codexTicketConsumptionLedgerFromAccount(account, time.Now()))
@@ -261,6 +353,14 @@ func (s *OpenAIGatewayService) codexTicketInventoryNeedsRefresh(account *Account
 			return true
 		}
 	}
+	if config.CodexTicketUsageAgedEnabled(cfg) && cfg.SkipSameRouteHost &&
+		selectOpenAICodexTicket(inventory, account, cfg, now) == nil {
+		return true
+	}
+	if cfg.UsageMode == config.CodexTicketUsageLatestOnly &&
+		selectOpenAICodexTicket(inventory, account, cfg, now) == nil {
+		return true
+	}
 	return codexTicketPoolNeedsRefresh(inventory, account, cfg, now)
 }
 
@@ -277,6 +377,10 @@ func revokeCodexTicketSlot(inventory, used *openAICodexTicket) *openAICodexTicke
 func mergeCodexTicketPublication(inventory, incoming *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig) *openAICodexTicket {
 	cfg = resolveCodexTicketCredentialConfig(account, config.NormalizeOpenAICodexTicketConfig(cfg))
 	now := time.Now()
+	var rotation *codexTicketRouteRotation
+	if inventory != nil {
+		rotation = inventory.RouteRotation
+	}
 	tickets := usableCodexTicketPool(inventory, account, cfg, now)
 	for index, ticket := range tickets {
 		if ticket.credentialIdentity() != incoming.credentialIdentity() {
@@ -286,7 +390,7 @@ func mergeCodexTicketPublication(inventory, incoming *openAICodexTicket, account
 		if sameCodexTicket(ticket, incoming) {
 			tickets[index] = incoming
 		}
-		return composeCodexTicketPool(tickets, cfg)
+		return composeCodexTicketPoolWithRouteRotation(tickets, cfg, rotation)
 	}
 	if cfg.RefreshStrategy == config.CodexTicketRefreshReplace && !(config.CodexTicketUsageAgedEnabled(cfg) && cfg.CookieRefreshMode == config.CodexTicketCookieFreshPerTicket) {
 		for index, ticket := range tickets {
@@ -294,7 +398,7 @@ func mergeCodexTicketPublication(inventory, incoming *openAICodexTicket, account
 			if ticket.needsRefresh(now, time.Duration(cfg.RefreshBeforeSeconds)*time.Second) {
 				// 按软期限原位更新；仅按硬期限淘汰会丢掉新票并持续触发新采。
 				tickets[index] = incoming
-				return composeCodexTicketPool(tickets, cfg)
+				return composeCodexTicketPoolWithRouteRotation(tickets, cfg, rotation)
 			}
 		}
 	}
@@ -310,9 +414,9 @@ func mergeCodexTicketPublication(inventory, incoming *openAICodexTicket, account
 			}
 		}
 		if oldest < 0 {
-			return composeCodexTicketPool(tickets, cfg)
+			return composeCodexTicketPoolWithRouteRotation(tickets, cfg, rotation)
 		}
 		tickets = slices.Delete(tickets, oldest, oldest+1)
 	}
-	return composeCodexTicketPool(append(tickets, incoming), cfg)
+	return composeCodexTicketPoolWithRouteRotation(append(tickets, incoming), cfg, rotation)
 }

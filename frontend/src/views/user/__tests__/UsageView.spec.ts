@@ -233,6 +233,26 @@ describe('user UsageView', () => {
     expect(getAvailable).toHaveBeenCalled()
   })
 
+  it('renders the column settings menu outside the card stacking context', async () => {
+    localStorage.removeItem('user-usage-hidden-columns')
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="usage-column-settings"]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const menu = document.body.querySelector('[data-test="usage-column-settings-menu"]') as HTMLElement | null
+    expect(menu).not.toBeNull()
+    expect(menu?.style.position).toBe('fixed')
+    expect(menu?.style.zIndex).toBe('100000020')
+    expect(menu?.querySelector('[data-testid="usage-column-toggle-model"]')).not.toBeNull()
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelector('[data-test="usage-column-settings-menu"]')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('includes API keys after the first page in both record filters and queries by the selected key', async () => {
     const firstPageKeys = Array.from({ length: 100 }, (_, index) => ({
       id: index + 1,

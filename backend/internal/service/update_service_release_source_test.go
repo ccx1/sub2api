@@ -36,7 +36,7 @@ func TestUpdateServiceUsesOwnRepositoryForLatestAndRollback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "0.2.8.18", info.LatestVersion)
 	require.True(t, info.HasUpdate)
-	require.Equal(t, []string{"ccx1/sub2api", "ranxi2001/sub2api"}, client.calls)
+	require.Equal(t, []string{githubRepo, officialRepo, ranxiRepo}, client.calls)
 
 	versions, err := svc.ListRollbackVersions(context.Background())
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestUpdateServiceUsesOwnRepositoryForLatestAndRollback(t *testing.T) {
 	require.ErrorContains(t, err, "no compatible release found")
 	err = svc.RollbackToVersion(context.Background(), "0.2.8.16")
 	require.ErrorContains(t, err, "no compatible release found")
-	require.Equal(t, []string{"ccx1/sub2api", "ranxi2001/sub2api", "ccx1/sub2api", "ranxi2001/sub2api"}, client.calls)
+	require.Equal(t, []string{githubRepo, officialRepo, ranxiRepo, githubRepo, officialRepo, ranxiRepo}, client.calls)
 	require.Equal(t, []string{"ccx1/sub2api", "ccx1/sub2api"}, client.recentRepositories)
 }
 
@@ -75,8 +75,11 @@ func TestUpdateServiceMissingOwnReleaseDoesNotUseOfficialCache(t *testing.T) {
 			require.False(t, info.HasUpdate)
 			require.False(t, info.Cached)
 			require.Contains(t, info.Warning, "404")
+			require.Equal(t, officialRepo, info.Official.Repository)
+			require.Equal(t, "0.2.8", info.Official.CurrentVersion)
+			require.True(t, info.Official.HasUpdate)
 			require.True(t, info.Ranxi.HasUpdate)
-			require.Equal(t, []string{"ccx1/sub2api", "ranxi2001/sub2api"}, client.calls)
+			require.Equal(t, []string{githubRepo, officialRepo, ranxiRepo}, client.calls)
 			require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrNoUpdateAvailable)
 		})
 	}
@@ -95,11 +98,12 @@ func TestUpdateServiceFirstReleaseRecoversAfterMissingRelease(t *testing.T) {
 	require.Equal(t, "0.2.8.18", info.LatestVersion)
 	require.True(t, info.HasUpdate)
 	require.Empty(t, info.Warning)
-	require.Equal(t, []string{"ccx1/sub2api", "ranxi2001/sub2api", "ccx1/sub2api"}, client.calls)
+	require.Equal(t, []string{githubRepo, officialRepo, ranxiRepo, githubRepo}, client.calls)
 
 	var cached sourceUpdateCache
 	require.NoError(t, json.Unmarshal([]byte(cache.data), &cached))
 	require.Equal(t, "ccx1/sub2api", cached.Local.Repository)
+	require.Equal(t, officialRepo, cached.Official.Repository)
 	require.Equal(t, "ranxi2001/sub2api", cached.Ranxi.Repository)
 }
 

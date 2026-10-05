@@ -54,6 +54,11 @@
             </div>
             <ExcelBPSOptionsFields v-if="defaults.excel_bps_enabled" v-model="excelBPSOptions" :disabled="importing" test-id-prefix="shared-import-excel-bps"
               class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" @update:model-value="result = null" />
+            <div class="flex items-start justify-between gap-4">
+              <label for="shared-import-prism" class="input-label">{{ t('admin.accounts.openai.prismBrowser') }}</label>
+              <Toggle id="shared-import-prism" v-model="prismEnabled" :aria-label="t('admin.accounts.openai.prismBrowser')" :disabled="importing" @update:model-value="result = null" />
+            </div>
+            <PrismBrowserOptionsFields v-if="prismEnabled" v-model="prismOptions" :disabled="importing" test-id-prefix="shared-import-prism" @update:model-value="result = null" />
           </div>
         </div>
       </fieldset>
@@ -85,6 +90,8 @@ import { hasSettlementPolicy } from './settlementPolicy'
 import { resolveSharedAccountImportDefaults } from './sharedAccountImportDefaults'
 import DailyCooldownSettings from '@/components/account/DailyCooldownSettings.vue'
 import ExcelBPSOptionsFields from '@/components/account/ExcelBPSOptionsFields.vue'
+import PrismBrowserOptionsFields from '@/components/account/PrismBrowserOptionsFields.vue'
+import { normalizePrismBrowserOptions } from '@/utils/prismBrowserOptions'
 import { sharedExcelBPSOptions } from '@/utils/excelBPSOptions'
 import { dailyCooldownValidationError, normalizeDailyCooldown, withDailyCooldownExtra } from '@/utils/dailyCooldown'
 import { sharedPoolAPI, type SharedConfig, type SharedImportDefaults, type SharedImportInput, type SharedImportResult } from '@/api/sharedPool'
@@ -102,6 +109,8 @@ const { excel_bps_options: initialExcelBPSOptions, ...initialDefaults } = {
 }
 const defaults = reactive<SharedImportDefaults & { excel_bps_enabled: boolean }>({ name: '', concurrency: 1, proxy_url: '', ...initialDefaults, enabled: true })
 const excelBPSOptions = ref(sharedExcelBPSOptions(initialExcelBPSOptions))
+const prismEnabled = ref(initialDefaults.prism_browser_enabled === true)
+const prismOptions = ref(normalizePrismBrowserOptions({ models: initialDefaults.prism_browser_models }))
 const canConsent = computed(() => hasSettlementPolicy(props.config))
 const dailyCooldown = ref(normalizeDailyCooldown(props.initialDefaults?.daily_cooldown))
 const dailyCooldownChanged = ref(false)
@@ -162,6 +171,7 @@ async function submit() {
     const cooldown = dailyCooldownChanged.value || props.initialDefaults?.daily_cooldown !== undefined
       ? { daily_cooldown: withDailyCooldownExtra(undefined, dailyCooldown.value).daily_cooldown } : {}
     const input: SharedImportInput = { sources: await getSources(), defaults: { ...defaults, enabled: true, dispatch_consent: true, ...cooldown, name: defaults.name?.trim(),
+      prism_browser_enabled: prismEnabled.value, prism_browser_models: prismEnabled.value ? [...prismOptions.value.models] : [],
       ...(defaults.excel_bps_enabled ? { excel_bps_options: sharedExcelBPSOptions(excelBPSOptions.value) } : {}) } }
     const payload = JSON.stringify(input)
     // 网络失败重试沿用同一请求号；凭证只在弹窗内存中保留。

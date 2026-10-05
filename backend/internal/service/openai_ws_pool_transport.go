@@ -12,6 +12,8 @@ func normalizeOpenAIWSTransportCompatibility(req openAIWSAcquireRequest) openAIW
 	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
 	if proxy := strings.TrimSpace(req.ProxyURL); proxy != "" {
 		key.proxyIdentity = sha256.Sum256([]byte(proxy))
+	} else if req.CodexTicketReceipt != nil || RegionalEgressBypassFromContext(WithRegionalEgressBypassForAccount(context.Background(), req.Account)) {
+		key.proxyIdentity = sha256.Sum256([]byte("explicit-account-direct-egress"))
 	}
 	if profile, err := resolveMode1TLSProfile(req.Account); err == nil && profile != nil {
 		key.tlsProfile = profile.CacheKey()
@@ -20,6 +22,10 @@ func normalizeOpenAIWSTransportCompatibility(req openAIWSAcquireRequest) openAIW
 }
 
 func (p *openAIWSConnPool) dialWithAccountTransport(ctx context.Context, req openAIWSAcquireRequest, headers http.Header) (openAIWSClientConn, int, http.Header, error) {
+	ctx = WithRegionalEgressBypassForAccount(ctx, req.Account)
+	if req.CodexTicketReceipt != nil && strings.TrimSpace(req.ProxyURL) == "" {
+		ctx = WithRegionalEgressBypass(ctx)
+	}
 	if p.cfg == nil || !p.cfg.Gateway.TLSFingerprint.Enabled {
 		return p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
 	}

@@ -30,7 +30,7 @@ let wrapper: Page | undefined
 const render = () => {
   wrapper = mount(CodexTicketSettingsView, {
     attachTo: document.body,
-    global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, transition: true } }
+    global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, HarvestGatewayBorrowPanel: true, transition: true } }
   })
   return wrapper
 }
@@ -58,7 +58,7 @@ function expectSaved(expected: CodexTicketSettings) {
   const entries = (value: CodexTicketSettings) => value.tier_rules.flatMap(rule =>
     [rule.tier, ...rule.aliases].map(name => ({ name, length: rule.target_length }))
   ).sort((a, b) => a.name.localeCompare(b.name))
-  expect({ ...actual, tier_rules: [] }).toEqual({ ...expected, credential_mode: expected.credential_mode ?? 'state', cookie_ttl_seconds: expected.cookie_ttl_seconds ?? 20, cookie_refresh_before_seconds: expected.cookie_refresh_before_seconds ?? 5, cookie_refresh_mode: expected.cookie_refresh_mode ?? 'fresh_per_ticket', pool_capacity: expected.pool_capacity ?? 5, account_pool_capacity: expected.account_pool_capacity || undefined, verify_business: expected.verify_business ?? true, business_verification_rounds: expected.business_verification_rounds ?? 1, proxy_failure_threshold: expected.proxy_failure_threshold ?? 3, session_mode: expected.session_mode ?? 'random', refresh_strategy: expected.refresh_strategy ?? 'revalidate', usage_mode: expected.usage_mode ?? 'immediate', min_ticket_age_seconds: expected.min_ticket_age_seconds ?? 0, historical_ticket_validity_seconds: expected.historical_ticket_validity_seconds ?? 691200, consume_after_use: expected.consume_after_use ?? false, protection: expected.protection ?? defaultTicketProtection(), length_mode: expected.length_mode ?? 'strict', tier_rules: [] })
+  expect({ ...actual, tier_rules: [] }).toEqual({ ...expected, credential_mode: expected.credential_mode ?? 'state', cookie_ttl_seconds: expected.cookie_ttl_seconds ?? 20, cookie_refresh_before_seconds: expected.cookie_refresh_before_seconds ?? 5, cookie_refresh_mode: expected.cookie_refresh_mode ?? 'fresh_per_ticket', pool_capacity: expected.pool_capacity ?? 5, account_pool_capacity: expected.account_pool_capacity || undefined, verify_business: expected.verify_business ?? true, business_verification_rounds: expected.business_verification_rounds ?? 1, proxy_failure_threshold: expected.proxy_failure_threshold ?? 3, session_mode: expected.session_mode ?? 'random', refresh_strategy: expected.refresh_strategy ?? 'revalidate', usage_mode: expected.usage_mode ?? 'immediate', min_ticket_age_seconds: expected.min_ticket_age_seconds ?? 0, historical_ticket_validity_seconds: expected.historical_ticket_validity_seconds ?? 691200, historical_quality_enabled: expected.historical_quality_enabled ?? false, historical_quality_check_before_seconds: expected.historical_quality_check_before_seconds ?? 120, historical_quality_check_interval_seconds: expected.historical_quality_check_interval_seconds ?? 30, historical_quality_extend_seconds: expected.historical_quality_extend_seconds ?? 30, skip_same_route_host: expected.skip_same_route_host ?? false, same_route_cooldown_hours: expected.same_route_cooldown_hours ?? 1, consume_after_use: expected.consume_after_use ?? false, protection: expected.protection ?? defaultTicketProtection(), length_mode: expected.length_mode ?? 'strict', tier_rules: [] })
   expect(entries(actual)).toEqual(entries(expected))
 }
 
@@ -74,6 +74,92 @@ afterEach(() => {
 })
 
 describe('CodexTicketSettingsView', () => {
+  it('offers latest-only separately from the existing backup rule', async () => {
+    const page = render()
+    await flushPromises()
+    const modes = page.get<HTMLSelectElement>('[data-testid="usage-mode"]')
+    expect([...modes.element.options].map(option => option.value)).toEqual(['latest_only', 'immediate', 'aged'])
+    await modes.setValue('latest_only')
+    expect(page.get<HTMLInputElement>('[data-testid="min-ticket-age-seconds"]').element.disabled).toBe(true)
+    expect(page.find('[data-testid="historical-quality-enabled"]').exists()).toBe(false)
+    await page.get('form').trigger('submit')
+    await flushPromises()
+    expectSaved({ ...settings(), usage_mode: 'latest_only' })
+  })
+
+  it('saves and restores optional historical quality renewal settings', async () => {
+    const page = render()
+    await flushPromises()
+    await page.get('[data-testid="usage-mode"]').setValue('aged')
+    expect(page.get<HTMLInputElement>('[data-testid="historical-quality-enabled"]').element.checked).toBe(false)
+    expect(page.get<HTMLInputElement>('[data-testid="historical-quality-check-before-seconds"]').element.value).toBe('120')
+    expect(page.get<HTMLInputElement>('[data-testid="historical-quality-check-interval-seconds"]').element.disabled).toBe(true)
+    await page.get('[data-testid="historical-quality-enabled"]').setValue(true)
+    await page.get('[data-testid="historical-quality-check-before-seconds"]').setValue('180')
+    await page.get('[data-testid="historical-quality-check-interval-seconds"]').setValue('20')
+    await page.get('[data-testid="historical-quality-extend-seconds"]').setValue('45')
+    await page.get('form').trigger('submit')
+    await flushPromises()
+    const expected = {
+      ...settings(), usage_mode: 'aged' as const, min_ticket_age_seconds: 300, historical_quality_enabled: true,
+      historical_quality_check_before_seconds: 180, historical_quality_check_interval_seconds: 20, historical_quality_extend_seconds: 45
+    }
+    expectSaved(expected)
+    page.unmount()
+    mocks.load.mockResolvedValueOnce(mocks.save.mock.calls.at(-1)![0])
+    const reloaded = render()
+    await flushPromises()
+    expect(reloaded.get<HTMLInputElement>('[data-testid="historical-quality-enabled"]').element.checked).toBe(true)
+    expect(reloaded.get<HTMLInputElement>('[data-testid="historical-quality-check-before-seconds"]').element.value).toBe('180')
+    expect(reloaded.get<HTMLInputElement>('[data-testid="historical-quality-check-interval-seconds"]').element.value).toBe('20')
+    expect(reloaded.get<HTMLInputElement>('[data-testid="historical-quality-extend-seconds"]').element.value).toBe('45')
+  })
+
+  it('blocks an invalid historical quality renewal interval before saving', async () => {
+    const page = render()
+    await flushPromises()
+    await page.get('[data-testid="usage-mode"]').setValue('aged')
+    await page.get('[data-testid="historical-quality-enabled"]').setValue(true)
+    await page.get('[data-testid="historical-quality-check-interval-seconds"]').setValue('4')
+    expect(page.get<HTMLButtonElement>('[data-testid="save-settings"]').element.disabled).toBe(true)
+    await page.get('form').trigger('submit')
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+
+  it('shows same-route controls only in history mode and preserves the cooldown on reload', async () => {
+    const page = render()
+    await flushPromises()
+    expect(page.find('[data-testid="skip-same-route-host"]').exists()).toBe(false)
+    await page.get('[data-testid="usage-mode"]').setValue('aged')
+    expect(page.get<HTMLInputElement>('[data-testid="skip-same-route-host"]').element.checked).toBe(false)
+    expect(page.get<HTMLInputElement>('[data-testid="same-route-cooldown-hours"]').element.value).toBe('1')
+    expect(page.get<HTMLInputElement>('[data-testid="same-route-cooldown-hours"]').element.disabled).toBe(true)
+    await page.get('[data-testid="skip-same-route-host"]').setValue(true)
+    await page.get('[data-testid="same-route-cooldown-hours"]').setValue('12')
+    await page.get('form').trigger('submit')
+    await flushPromises()
+    expectSaved({ ...settings(), usage_mode: 'aged', min_ticket_age_seconds: 300, skip_same_route_host: true, same_route_cooldown_hours: 12 })
+    page.unmount()
+    mocks.load.mockResolvedValueOnce(mocks.save.mock.calls.at(-1)![0])
+    const reloaded = render()
+    await flushPromises()
+    expect(reloaded.get<HTMLInputElement>('[data-testid="skip-same-route-host"]').element.checked).toBe(true)
+    expect(reloaded.get<HTMLInputElement>('[data-testid="same-route-cooldown-hours"]').element.value).toBe('12')
+    await reloaded.get('[data-testid="usage-mode"]').setValue('immediate')
+    expect(reloaded.find('[data-testid="skip-same-route-host"]').exists()).toBe(false)
+  })
+
+  it('blocks out-of-range same-route cooldown before saving', async () => {
+    const page = render()
+    await flushPromises()
+    await page.get('[data-testid="usage-mode"]').setValue('aged')
+    await page.get('[data-testid="skip-same-route-host"]').setValue(true)
+    await page.get('[data-testid="same-route-cooldown-hours"]').setValue('169')
+    expect(page.get<HTMLButtonElement>('[data-testid="save-settings"]').element.disabled).toBe(true)
+    await page.get('form').trigger('submit')
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+
   it('saves seven-day history with an independent validity, account capacity, and fresh Cookie mode', async () => {
     const page = render()
     await flushPromises()
@@ -97,13 +183,16 @@ describe('CodexTicketSettingsView', () => {
     expect(page.find('[data-testid="pool_capacity"]').exists()).toBe(false)
   })
 
-  it('blocks a historical age at or beyond its validity', async () => {
+  it('allows a historical age beyond the post-use validity', async () => {
     const page = render()
     await flushPromises()
     await page.get('[data-testid="usage-mode"]').setValue('aged')
-    await page.get('[data-testid="historical-ticket-validity-seconds"]').setValue('86400')
+    await page.get('[data-testid="historical-ticket-validity-seconds"]').setValue('1')
     await page.get('[data-testid="min-ticket-age-seconds"]').setValue('86400')
-    expect(page.get<HTMLButtonElement>('[data-testid="save-settings"]').element.disabled).toBe(true)
+    expect(page.find('[data-testid="validation-error"]').exists()).toBe(false)
+    await page.get('form').trigger('submit')
+    await flushPromises()
+    expectSaved({ ...settings(), usage_mode: 'aged', min_ticket_age_seconds: 86400, historical_ticket_validity_seconds: 1 })
   })
 
   it('keeps legacy request usage defaults without enabling history or consumption', async () => {
@@ -152,7 +241,7 @@ describe('CodexTicketSettingsView', () => {
     expectSaved({ ...settings(), usage_mode: 'immediate', min_ticket_age_seconds: 0, consume_after_use: false })
   })
 
-  it.each(['0', '-1', '1.5', '691200', '2592001', ''])('blocks invalid historical age %s', async age => {
+  it.each(['0', '-1', '1.5', '2592001', ''])('blocks invalid historical age %s', async age => {
     mocks.load.mockResolvedValueOnce({ ...settings(), usage_mode: 'aged', min_ticket_age_seconds: 300 })
     const page = render()
     await flushPromises()
@@ -612,7 +701,7 @@ describe('CodexTicketSettingsView', () => {
     expect(wrapper.get<HTMLSelectElement>('[data-testid="length-mode"]').element.value).toBe('auto')
     await wrapper.get('[data-testid="length-mode"]').setValue('strict')
     expect(wrapper.get<HTMLFieldSetElement>('[data-testid="length-rules"]').element.disabled).toBe(false)
-    expect(tags(wrapper, 'tier-0')).toEqual(['Business Standard', 'Business'])
+    expect(tags(wrapper, 'tier-0')).toEqual(['Business (team)', 'Enterprise (business)'])
     expect(wrapper.get<HTMLInputElement>('[data-testid="length-0"]').element.value).toBe('332')
     expect(wrapper.get<HTMLInputElement>('[data-testid="rejected-lengths"]').element.value).toBe('312')
     await wrapper.get('form').trigger('submit')
@@ -655,13 +744,13 @@ describe('CodexTicketSettingsView', () => {
     await flushPromises()
     expect(wrapper.get<HTMLInputElement>('[data-testid="length-0"]').element.value).toBe('332')
     expect(wrapper.get<HTMLInputElement>('[data-testid="length-1"]').element.value).toBe('292')
-    expect(tags(wrapper, 'tier-0')).toEqual(['Business Standard', 'Business'])
-    expect(tags(wrapper, 'tier-1')).toEqual(['Pro 20x'])
+    expect(tags(wrapper, 'tier-0')).toEqual(['Business (team)', 'Enterprise (business)'])
+    expect(tags(wrapper, 'tier-1')).toEqual(['Pro 200'])
     await wrapper.get('[data-testid="remove-tier-1"]').trigger('click')
     await wrapper.get('[data-testid="add-tier"]').trigger('click')
-    await selectOption(wrapper, 'tier-1', 'Enterprise')
+    await selectOption(wrapper, 'tier-1', 'Enterprise (enterprise)')
     await selectOption(wrapper, 'tier-1', 'Plus')
-    expect(tags(wrapper, 'tier-1')).toEqual(['Enterprise', 'Plus'])
+    expect(tags(wrapper, 'tier-1')).toEqual(['Enterprise (enterprise)', 'Plus'])
     await wrapper.get('[data-testid="length-1"]').setValue('352')
     await removeTag(wrapper, 'models', 'gpt-5.6-sol')
     await selectOption(wrapper, 'models', 'gpt-5.5')
@@ -720,7 +809,7 @@ describe('CodexTicketSettingsView', () => {
     await wrapper.get('[data-testid="backoff"]').setValue('90, 900')
     await wrapper.get('#ticket-session-mode').setValue('account_model')
     await wrapper.get('[data-testid="proxy_failure_threshold"]').setValue('7')
-    await selectOption(wrapper, 'tier-0', 'Enterprise')
+    await selectOption(wrapper, 'tier-0', 'Enterprise (enterprise)')
     await removeTag(wrapper, 'models', 'gpt-5.6-sol')
     mocks.save.mockRejectedValueOnce(new Error('Save rejected'))
     await wrapper.get('form').trigger('submit')
@@ -730,7 +819,7 @@ describe('CodexTicketSettingsView', () => {
     expect(wrapper.get<HTMLInputElement>('[data-testid="backoff"]').element.value).toBe('90, 900')
     expect(wrapper.get<HTMLSelectElement>('#ticket-session-mode').element.value).toBe('account_model')
     expect(wrapper.get<HTMLInputElement>('[data-testid="proxy_failure_threshold"]').element.value).toBe('7')
-    expect(tags(wrapper, 'tier-0')).toEqual(['Business Standard', 'Business', 'Enterprise'])
+    expect(tags(wrapper, 'tier-0')).toEqual(['Business (team)', 'Enterprise (business)', 'Enterprise (enterprise)'])
     expect(tags(wrapper, 'models')).toEqual(['gpt-6-astra'])
     const draft = mocks.save.mock.calls[0][0]
     await wrapper.get('form').trigger('submit')
@@ -765,15 +854,15 @@ describe('CodexTicketSettingsView', () => {
     const wrapper = render()
     await flushPromises()
     await openOptions(wrapper, 'tier-1')
-    const occupied = option('Business Standard')
+    const occupied = option('Business (team)')
     expect(occupied.getAttribute('aria-disabled')).toBe('true')
     occupied.click()
     await nextTick()
-    expect(tags(wrapper, 'tier-1')).toEqual(['Pro 20x'])
+    expect(tags(wrapper, 'tier-1')).toEqual(['Pro 200'])
     document.body.click()
     await nextTick()
     await removeTag(wrapper, 'tier-0', 'team')
-    await selectOption(wrapper, 'tier-1', 'Business Standard')
+    await selectOption(wrapper, 'tier-1', 'Business (team)')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expectSaved({ ...settings(), tier_rules: [

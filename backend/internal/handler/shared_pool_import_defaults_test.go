@@ -153,7 +153,7 @@ func TestSharedImportDefaultsConfigIsAllowlistedAndHonorsMasterSwitch(t *testing
 		}
 		var defaults map[string]any
 		require.NoError(t, json.Unmarshal(response.Data["import_defaults"], &defaults))
-		require.Len(t, defaults, 4)
+		require.Len(t, defaults, 6)
 		require.Equal(t, false, defaults["protection_enabled"])
 		require.Equal(t, false, defaults["codex_ticket_enabled"])
 		require.Equal(t, true, defaults["excel_bps_enabled"])

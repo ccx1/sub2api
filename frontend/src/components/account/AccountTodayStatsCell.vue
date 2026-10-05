@@ -13,7 +13,7 @@
     </div>
 
     <!-- Stats data -->
-    <div v-else-if="props.stats" class="space-y-0.5 text-xs">
+    <div v-else-if="props.stats" class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs md:grid-cols-1 md:gap-y-0.5 [&>div]:whitespace-nowrap">
       <div class="flex items-center gap-1">
         <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stats.requests') }}:</span>
         <span class="font-medium text-gray-700 dark:text-gray-300">{{ formatNumber(props.stats.requests) }}</span>

@@ -25,11 +25,7 @@ func (d *coderOpenAIWSClientDialer) DialWithTLS(ctx context.Context, target stri
 	if err != nil || parsed.Scheme != "wss" || parsed.Host == "" {
 		return nil, 0, nil, errors.New("TLS fingerprint requires a valid wss target")
 	}
-	client, err := d.fingerprintHTTPClient(target, proxyURL, profile)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	return d.dialWithClient(ctx, target, headers, proxyURL, client)
+	return d.dialWithClient(ctx, target, headers, proxyURL, profile)
 }
 
 func (d *coderOpenAIWSClientDialer) fingerprintHTTPClient(target, rawProxy string, profile *tlsfingerprint.Profile) (*http.Client, error) {

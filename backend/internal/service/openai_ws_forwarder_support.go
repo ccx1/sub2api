@@ -346,6 +346,11 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	if eventType != "error" {
 		return
 	}
+	if s.rateLimitService != nil {
+		if status := QualitySemanticFailureStatus(payload); status != 0 {
+			s.rateLimitService.ObserveQualityUpstreamFailure(ctx, account, status, payload, nil)
+		}
+	}
 	observeRandomProxyWSTerminal(ctx, account, s.accountRepo, canonicalModel, payload)
 	status := openAIWSPayloadTransientStatus(payload)
 	if status != 0 {
@@ -360,6 +365,11 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 // failures and transient failures. Its return value lets stream callers avoid
 // applying the same transition twice for an error/response.failed pair.
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
+	if s.rateLimitService != nil {
+		if status := QualitySemanticFailureStatus(payload); status != 0 {
+			s.rateLimitService.ObserveQualityUpstreamFailure(ctx, account, status, payload, nil)
+		}
+	}
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
 	switch status {

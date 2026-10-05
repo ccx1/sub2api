@@ -36,7 +36,7 @@ describe('shared account creation and edit boundaries', () => {
     wrapper.findComponent(SharedCredentialsForm).vm.$emit('change', { access_token: 'fixture-token' })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, excel_bps_enabled: false })
+    expect(create).toHaveBeenCalledWith({ name: 'My account', platform: 'openai', type: 'oauth', concurrency: 1, proxy_url: '', protection_enabled: true, enabled: true, dispatch_consent: true, credentials: { access_token: 'fixture-token' }, confirm_disable: false, excel_bps_enabled: false, prism_browser_enabled: false, prism_browser_models: [] })
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('group_ids')
     expect(Object.keys(create.mock.calls[0][0])).not.toContain('rate_multiplier')
   })
@@ -155,7 +155,7 @@ describe('shared account creation and edit boundaries', () => {
     await wrapper.get('#shared-concurrency').setValue(3)
     await wrapper.get('#shared-proxy').setValue('http://fixture.example:8080')
     await wrapper.findAll('button').find(button => button.text() === 'sharedPool.importAccounts')!.trigger('click')
-    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, excel_bps_enabled: false }])
+    expect(wrapper.emitted('import')?.[0]).toEqual([{ name: 'Imported account', platform: 'openai', type: 'oauth', concurrency: 3, proxy_url: 'http://fixture.example:8080', enabled: true, dispatch_consent: true, protection_enabled: true, excel_bps_enabled: false, prism_browser_enabled: false, prism_browser_models: [] }])
     expect(wrapper.find('select').exists()).toBe(false)
   })
 

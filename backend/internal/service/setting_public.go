@@ -396,13 +396,15 @@ const (
 	defaultChannelMonitorMode      = ChannelMonitorModeV1
 )
 
-// normalizeChannelMonitorMode accepts only v1/v2; empty/invalid → v1 (safe default).
+// normalizeChannelMonitorMode keeps missing or invalid modes on the V1 default.
 func normalizeChannelMonitorMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case ChannelMonitorModeV1, "":
 		return ChannelMonitorModeV1
 	case ChannelMonitorModeV2:
 		return ChannelMonitorModeV2
+	case ChannelMonitorModeV3:
+		return ChannelMonitorModeV3
 	default:
 		return defaultChannelMonitorMode
 	}
@@ -436,7 +438,7 @@ func clampChannelMonitorInterval(v int) int {
 // consumed by the runner, V2 aggregator, and user-facing handlers.
 type ChannelMonitorRuntime struct {
 	Enabled                bool
-	Mode                   string // ChannelMonitorModeV1 or ChannelMonitorModeV2
+	Mode                   string
 	DefaultIntervalSeconds int
 	// HideThroughput: when true, user-facing V2 APIs omit RPM/TPM scale signals.
 	HideThroughput bool
@@ -456,7 +458,30 @@ func (r ChannelMonitorRuntime) ActiveProbesAllowed() bool {
 
 // PassiveAggregationAllowed reports whether V2 passive aggregation may run.
 func (r ChannelMonitorRuntime) PassiveAggregationAllowed() bool {
+	return r.Enabled && (r.Mode == ChannelMonitorModeV2 || r.Mode == ChannelMonitorModeV3)
+}
+
+func (r ChannelMonitorRuntime) V2Active() bool {
 	return r.Enabled && r.Mode == ChannelMonitorModeV2
+}
+
+func (r ChannelMonitorRuntime) V3Active() bool {
+	return r.Enabled && r.Mode == ChannelMonitorModeV3
+}
+
+func (s *SettingService) SetChannelMonitorMode(ctx context.Context, mode string) (string, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != ChannelMonitorModeV1 && mode != ChannelMonitorModeV2 && mode != ChannelMonitorModeV3 {
+		return "", ErrChannelMonitorInvalidMode
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyChannelMonitorMode, mode); err != nil {
+		return "", fmt.Errorf("set channel monitor mode: %w", err)
+	}
+	if s.onUpdate != nil {
+		s.onUpdate()
+	}
+	s.notifyChannelMonitorRuntimeListeners()
+	return mode, nil
 }
 
 // GetChannelMonitorRuntime reads the channel monitor feature flags directly from

@@ -182,6 +182,7 @@ func validOpenAICodexTicketWSReceiptAccount(req openAIWSAcquireRequest) bool {
 
 func normalizeOpenAIWSTicketCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
 	key := normalizeOpenAIWSTransportCompatibility(req)
+	key.anchorScope = req.AnchorScope
 	key.cookieMode = openAIWSCookieMode(req)
 	if normalizeOpenAIWSRouteAffinityMode(req.RouteAffinityMode) == CodexRouteAffinityStrict {
 		key.strictRoute = openAIWSRequestRouteFingerprint(req.Headers)

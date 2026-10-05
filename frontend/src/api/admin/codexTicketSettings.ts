@@ -40,9 +40,15 @@ export interface CodexTicketSettings {
   harvest_probe_interval_seconds: number
   harvest_attempt_timeout_seconds: number
   fail_closed: boolean
-  usage_mode?: 'immediate' | 'aged'
+  usage_mode?: 'latest_only' | 'immediate' | 'aged'
   min_ticket_age_seconds?: number
   historical_ticket_validity_seconds?: number
+  historical_quality_enabled?: boolean
+  historical_quality_check_before_seconds?: number
+  historical_quality_check_interval_seconds?: number
+  historical_quality_extend_seconds?: number
+  skip_same_route_host?: boolean
+  same_route_cooldown_hours?: number
   consume_after_use?: boolean
   session_mode?: 'random' | 'account' | 'account_model'
   refresh_strategy?: 'revalidate' | 'replace'

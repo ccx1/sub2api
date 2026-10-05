@@ -19,8 +19,9 @@ func TestCodexTicketUsageNormalizeDefaultsToImmediate(t *testing.T) {
 		{name: "aged_without_age", in: OpenAICodexTicketConfig{UsageMode: CodexTicketUsageAged}, mode: CodexTicketUsageImmediate},
 		{name: "immediate_drops_age", in: OpenAICodexTicketConfig{UsageMode: CodexTicketUsageImmediate, MinTicketAgeSeconds: 30}, mode: CodexTicketUsageImmediate},
 		{name: "aged", in: OpenAICodexTicketConfig{UsageMode: CodexTicketUsageAged, MinTicketAgeSeconds: 300, ConsumeAfterUse: true}, mode: CodexTicketUsageAged, minAge: 300, consume: true},
-		{name: "aged_capped", in: OpenAICodexTicketConfig{UsageMode: CodexTicketUsageAged, MinTicketAgeSeconds: MaxCodexTicketMinAgeSeconds + 1}, mode: CodexTicketUsageAged, minAge: DefaultCodexTicketHistoricalValiditySeconds - 1},
+		{name: "aged_capped", in: OpenAICodexTicketConfig{UsageMode: CodexTicketUsageAged, MinTicketAgeSeconds: MaxCodexTicketMinAgeSeconds + 1}, mode: CodexTicketUsageAged, minAge: MaxCodexTicketMinAgeSeconds},
 		{name: "consume_only", in: OpenAICodexTicketConfig{ConsumeAfterUse: true}, mode: CodexTicketUsageImmediate, consume: true},
+		{name: "latest_only", in: OpenAICodexTicketConfig{UsageMode: CodexTicketUsageLatestOnly}, mode: CodexTicketUsageLatestOnly},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +48,7 @@ func TestValidateCodexTicketUsageBoundsAgeByHistoricalValidity(t *testing.T) {
 		require.NoError(t, ValidateCodexTicketUsage(&cfg), age)
 		require.Equal(t, age, cfg.MinTicketAgeSeconds)
 	}
-	for _, age := range []int{0, -1, DefaultCodexTicketHistoricalValiditySeconds} {
+	for _, age := range []int{0, -1, MaxCodexTicketMinAgeSeconds + 1} {
 		cfg = OpenAICodexTicketConfig{TTLSeconds: 3600, UsageMode: CodexTicketUsageAged, MinTicketAgeSeconds: age}
 		require.ErrorContains(t, ValidateCodexTicketUsage(&cfg), "min_ticket_age_seconds", age)
 	}
@@ -58,6 +59,25 @@ func TestValidateCodexTicketUsageBoundsAgeByHistoricalValidity(t *testing.T) {
 
 	cfg = OpenAICodexTicketConfig{TTLSeconds: 3600, UsageMode: "oldest"}
 	require.ErrorContains(t, ValidateCodexTicketUsage(&cfg), "取票机制")
+}
+
+func TestValidateCodexTicketSameRouteCooldown(t *testing.T) {
+	for _, hours := range []int{-1, MaxCodexTicketSameRouteCooldownHours + 1} {
+		cfg := OpenAICodexTicketConfig{SameRouteCooldownHours: hours}
+		require.ErrorContains(t, ValidateCodexTicketUsage(&cfg), "same_route_cooldown_hours")
+	}
+	for _, hours := range []int{0, 1, MaxCodexTicketSameRouteCooldownHours} {
+		cfg := OpenAICodexTicketConfig{SameRouteCooldownHours: hours, SkipSameRouteHost: true}
+		require.NoError(t, ValidateCodexTicketUsage(&cfg))
+		require.GreaterOrEqual(t, cfg.SameRouteCooldownHours, 1)
+	}
+}
+
+func TestCodexTicketLatestOnlyAcceptsNoAge(t *testing.T) {
+	cfg := OpenAICodexTicketConfig{UsageMode: CodexTicketUsageLatestOnly, MinTicketAgeSeconds: 300}
+	require.NoError(t, ValidateCodexTicketUsage(&cfg))
+	require.Equal(t, CodexTicketUsageLatestOnly, cfg.UsageMode)
+	require.Zero(t, cfg.MinTicketAgeSeconds)
 }
 
 func TestWithoutCodexTicketUsagePolicyOnlyStripsUsageFields(t *testing.T) {
@@ -77,24 +97,31 @@ func TestCodexTicketUsageEnvironmentDefaultsAndValidation(t *testing.T) {
 	require.Equal(t, 8*86400, ticket.HistoricalTicketValiditySeconds)
 	require.Zero(t, ticket.MinTicketAgeSeconds)
 	require.False(t, ticket.ConsumeAfterUse)
+	require.False(t, ticket.SkipSameRouteHost)
+	require.Equal(t, 1, ticket.SameRouteCooldownHours)
 
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_USAGE_MODE", CodexTicketUsageAged)
 	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_MIN_TICKET_AGE_SECONDS", "300")
 	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_CONSUME_AFTER_USE", "true")
+	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_SKIP_SAME_ROUTE_HOST", "true")
+	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_SAME_ROUTE_COOLDOWN_HOURS", "6")
 	cfg, err = Load()
 	require.NoError(t, err)
 	ticket = cfg.Gateway.OpenAICodexTicket
 	require.Equal(t, CodexTicketUsageAged, ticket.UsageMode)
 	require.Equal(t, 300, ticket.MinTicketAgeSeconds)
 	require.True(t, ticket.ConsumeAfterUse)
+	require.True(t, ticket.SkipSameRouteHost)
+	require.Equal(t, 6, ticket.SameRouteCooldownHours)
 
-	// 历史票的独立有效期必须严格大于沉淀时长。
+	// 历史票有效期从首次使用起算，与沉淀时长独立。
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_USAGE_MODE", CodexTicketUsageAged)
 	t.Setenv("GATEWAY_OPENAI_CODEX_TICKET_MIN_TICKET_AGE_SECONDS", "691200")
-	_, err = Load()
-	require.ErrorContains(t, err, "min_ticket_age_seconds")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.Equal(t, 691200, cfg.Gateway.OpenAICodexTicket.MinTicketAgeSeconds)
 
 	// 即取即用会忽略遗留的沉淀时长，而不是拒绝启动。
 	resetViperWithJWTSecret(t)

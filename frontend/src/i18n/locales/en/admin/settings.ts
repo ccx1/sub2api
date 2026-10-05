@@ -1,5 +1,14 @@
 export default {
     settings: {
+      prismBrowser: {
+        title: 'Prism Browser Bridge',
+        enabled: 'Enabled',
+        baseURL: 'Adapter URL',
+        apiKey: 'Bridge API Key',
+        keepKey: 'Leave blank to keep the current key',
+        keyConfigured: 'Adapter key configured',
+        keyMissing: 'Adapter key missing; use the same key as the adapter',
+      },
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {

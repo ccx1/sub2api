@@ -28,6 +28,9 @@ type CustomEndpoint struct {
 
 // SystemSettings represents the admin settings API response payload.
 type SystemSettings struct {
+	PrismBrowserEnabled                 bool                     `json:"prism_browser_enabled"`
+	PrismBrowserBaseURL                 string                   `json:"prism_browser_base_url"`
+	PrismBrowserAPIKeyConfigured        bool                     `json:"prism_browser_api_key_configured"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`
@@ -202,6 +205,7 @@ type SystemSettings struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
+	UpstreamErrorRetry                   *service.UpstreamErrorRetrySettings `json:"upstream_error_retry"`
 	OpenAITTFTMode                          string `json:"openai_ttft_mode"`
 	EnableFingerprintUnification            bool   `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough               bool   `json:"enable_metadata_passthrough"`

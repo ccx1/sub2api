@@ -253,6 +253,16 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
 	if err != nil {
 		return false, err
 	}
+	if n == 1 && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.Action == service.QualityActionRemoveModel {
+		state, err := qualityReadState(ctx, tx, plan.ID)
+		if err != nil {
+			return false, err
+		}
+		plan.Quality5xxEpisode = state.Quality5xxEpisode
+		if state.Pending {
+			plan.TriggerSource = "upstream_5xx"
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}

@@ -114,7 +114,7 @@ const appStore = useAppStore()
 const prefix = 'admin.accounts.codexTicketVault'
 const lifecycle = 'admin.accounts.codexTicketHistory.lifecycle'
 const columns = ['slot', 'status', 'fingerprint', 'credential', 'node', 'age', 'matureAt', 'expiresAt', 'capturedAt', 'harvest', 'invalidation', 'actions']
-const statuses = ['available', 'maturing', 'revoked', 'consumed', 'binding', 'credential', 'cookie_missing', 'expired', 'unverified', 'unavailable']
+const statuses = ['available', 'not_selected', 'maturing', 'revoked', 'consumed', 'binding', 'credential', 'cookie_missing', 'expired', 'unverified', 'unavailable']
 const lifecycleReasons = ['response_model_mismatch', 'response_ticket_rejected', 'cookie_changed', 'ttl_expired', 'admin_revoked']
 const lifecycleSources = ['http', 'websocket', 'websocket_handshake', 'websocket_prewarm', 'ticket_vault']
 
@@ -142,7 +142,7 @@ const overviewRows = computed(() => {
     { key: 'poolCapacity', value: String(v.pool_capacity) },
     { key: 'ttl', value: seconds(v.ttl_seconds) },
     { key: 'cookieTtl', value: seconds(v.cookie_ttl_seconds) },
-    { key: 'usageMode', value: v.policy.usage_mode === 'aged' ? t(`${prefix}.usageModes.aged`) : t(`${prefix}.usageModes.immediate`) }
+    { key: 'usageMode', value: t(`${prefix}.usageModes.${['aged', 'latest_only'].includes(v.policy.usage_mode) ? v.policy.usage_mode : 'immediate'}`) }
   ]
   if (v.account_pool_capacity) rows.push({ key: 'accountPoolCapacity', value: String(v.account_pool_capacity) })
   if (v.policy.usage_mode === 'aged') rows.push({ key: 'minAge', value: seconds(v.policy.min_ticket_age_seconds) })

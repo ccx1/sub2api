@@ -30,6 +30,9 @@ export default {
       hint: '↑ ↓ 选择 · Enter 打开 · Esc 关闭'
     },
     filter: '筛选',
+    sortBy: '排序字段',
+    sortAscending: '升序排列',
+    sortDescending: '降序排列',
     export: '导出',
     import: '导入',
     actions: '操作',

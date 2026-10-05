@@ -86,10 +86,10 @@ describe('shared account card controls', () => {
     expect(wrapper.findComponent(SharedAccountUsage).exists()).toBe(false)
   })
 
-  it('shows the account subscription tier next to its effective multiplier', async () => {
+  it.each([['prolite', 'Pro 100'], ['pro', 'Pro 200'], ['promax', 'Pro 500']])('shows subscription tier %s next to its effective multiplier', async (tier, label) => {
     const wrapper = render()
-    await wrapper.setProps({ account: { ...account, subscription_tier: 'pro', settlement_multiplier: 1.5 } })
-    expect(wrapper.text()).toContain('Pro 20x')
+    await wrapper.setProps({ account: { ...account, subscription_tier: tier, settlement_multiplier: 1.5 } })
+    expect(wrapper.text()).toContain(label)
     expect(wrapper.get('[data-test="account-settlement"]').text()).toContain('1.5x')
   })
   it('retains the protection switch while showing tickets as read-only state', async () => {

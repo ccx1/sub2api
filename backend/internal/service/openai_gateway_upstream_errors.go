@@ -509,6 +509,7 @@ func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte
 }
 
 func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account, responseBody []byte, canonicalModel ...string) bool {
+	s.rateLimitService.ObserveQualityUpstreamFailure(ctx, account, resp.StatusCode, responseBody, nil)
 	if len(canonicalModel) > 0 {
 		return s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody, canonicalModel[0])
 	}
@@ -524,6 +525,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	s.rateLimitService.ObserveQualityUpstreamFailure(ctx, account, resp.StatusCode, body, nil)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
@@ -543,6 +545,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			contentType = "application/json"
 		}
 		c.Data(resp.StatusCode, contentType, body)
+		if account != nil && account.IsGrok() {
+			return nil, &grokContentPolicyError{message: cyberMsg}
+		}
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
 		}
@@ -559,7 +564,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 				"message": clientMsg,
 			},
 		})
-		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
+		return nil, &grokContentPolicyError{message: clientMsg}
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
@@ -775,6 +780,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	if c != nil && c.Request != nil {
+		s.rateLimitService.ObserveQualityUpstreamFailure(c.Request.Context(), account, resp.StatusCode, body, nil)
+	}
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
 
 	// cyber_policy：兼容路径（Chat Completions / Anthropic）以各自格式回写错误，
@@ -794,6 +802,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			clientMsg = "Request blocked by upstream cyber-security policy"
 		}
 		writeError(c, resp.StatusCode, "invalid_request_error", clientMsg)
+		if account != nil && account.IsGrok() {
+			return nil, &grokContentPolicyError{message: clientMsg}
+		}
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
 		}
@@ -804,7 +815,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
 		MarkResponseCommitted(c)
 		writeError(c, http.StatusForbidden, "invalid_request_error", clientMsg)
-		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
+		return nil, &grokContentPolicyError{message: clientMsg}
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))

@@ -12,7 +12,7 @@ const settings = (): CodexTicketSettings => ({
 })
 
 describe('ticket settings length mode validation', () => {
-  it.each([undefined, 'immediate', 'aged'] as const)('accepts supported request usage mode %s', usage_mode => {
+  it.each([undefined, 'latest_only', 'immediate', 'aged'] as const)('accepts supported request usage mode %s', usage_mode => {
     expect(validateTicketSettings({ ...settings(), usage_mode, min_ticket_age_seconds: usage_mode === 'aged' ? 300 : 0 })).toBeNull()
   })
 
@@ -20,30 +20,69 @@ describe('ticket settings length mode validation', () => {
     expect(validateTicketSettings({ ...settings(), usage_mode } as unknown as CodexTicketSettings)).toEqual({ key: 'usageMode' })
   })
 
-  it.each([undefined, 0, -1, 1.5, 691200, 2592001, NaN, Infinity, null, '300'])('rejects invalid historical age %s', min_ticket_age_seconds => {
+  it.each([undefined, 0, -1, 1.5, 2592001, NaN, Infinity, null, '300'])('rejects invalid historical age %s', min_ticket_age_seconds => {
     const candidate = { ...settings(), usage_mode: 'aged', min_ticket_age_seconds } as unknown as CodexTicketSettings
-    expect(validateTicketSettings(candidate)).toEqual({ key: 'range', field: 'min_ticket_age_seconds', min: 1, max: 691199 })
+    expect(validateTicketSettings(candidate)).toEqual({ key: 'range', field: 'min_ticket_age_seconds', min: 1, max: 2592000 })
   })
 
-  it.each([1, 300, 86400, 604800])('accepts historical age %s below the configured lifetime', min_ticket_age_seconds => {
+  it.each([1, 300, 86400, 604800, 691200])('accepts historical age %s independently from ticket validity', min_ticket_age_seconds => {
     expect(validateTicketSettings({ ...settings(), usage_mode: 'aged', min_ticket_age_seconds })).toBeNull()
   })
 
-  it('validates historical age against its own lifetime without using STATE or Cookie intervals', () => {
+  it('validates historical age independently from validity, STATE and Cookie intervals', () => {
     const candidate: CodexTicketSettings = {
       ...settings(), credential_mode: 'cookie', usage_mode: 'aged', min_ticket_age_seconds: 86400,
       cookie_ttl_seconds: 20, cookie_refresh_before_seconds: 5
     }
     expect(validateTicketSettings(candidate)).toBeNull()
     expect(validateTicketSettings({ ...candidate, ttl_seconds: 300, refresh_before_seconds: 10 })).toBeNull()
-    expect(validateTicketSettings({ ...candidate, historical_ticket_validity_seconds: 86400 }))
-      .toEqual({ key: 'range', field: 'min_ticket_age_seconds', min: 1, max: 86399 })
+    expect(validateTicketSettings({ ...candidate, historical_ticket_validity_seconds: 1 })).toBeNull()
     expect(validateTicketSettings({ ...candidate, historical_ticket_validity_seconds: 2592001 }))
       .toEqual({ key: 'range', field: 'historical_ticket_validity_seconds', min: 1, max: 2592000 })
   })
 
   it.each([undefined, 'fresh_per_ticket', 'reuse_on_refresh'] as const)('accepts Cookie refresh mode %s', cookie_refresh_mode => {
     expect(validateTicketSettings({ ...settings(), cookie_refresh_mode })).toBeNull()
+  })
+
+  it.each([undefined, false, true])('accepts same-route host skip switch %s', skip_same_route_host => {
+    expect(validateTicketSettings({ ...settings(), skip_same_route_host })).toBeNull()
+  })
+
+  it.each(['false', 0, null, []])('rejects malformed same-route host skip switch %s', skip_same_route_host => {
+    expect(validateTicketSettings({ ...settings(), skip_same_route_host } as unknown as CodexTicketSettings)).toEqual({ key: 'skipSameRouteHost' })
+  })
+
+  it.each([undefined, 1, 24, 168])('accepts same-route cooldown %s hours', same_route_cooldown_hours => {
+    expect(validateTicketSettings({ ...settings(), same_route_cooldown_hours })).toBeNull()
+  })
+
+  it.each([0, -1, 1.5, 169, NaN, Infinity, null, '24'])('rejects invalid same-route cooldown %s', same_route_cooldown_hours => {
+    expect(validateTicketSettings({ ...settings(), same_route_cooldown_hours } as unknown as CodexTicketSettings))
+      .toEqual({ key: 'range', field: 'same_route_cooldown_hours', min: 1, max: 168 })
+  })
+
+  it.each([undefined, false, true])('accepts historical quality renewal switch %s', historical_quality_enabled => {
+    expect(validateTicketSettings({ ...settings(), historical_quality_enabled })).toBeNull()
+  })
+
+  it.each(['true', 1, null])('rejects malformed historical quality renewal switch %s', historical_quality_enabled => {
+    expect(validateTicketSettings({ ...settings(), historical_quality_enabled } as unknown as CodexTicketSettings))
+      .toEqual({ key: 'historicalQualityEnabled' })
+  })
+
+  it.each([
+    ['historical_quality_check_before_seconds', 5, 86400, 120],
+    ['historical_quality_check_interval_seconds', 5, 86400, 30],
+    ['historical_quality_extend_seconds', 1, 86400, 30]
+  ] as const)('validates historical quality timing %s', (field, min, max, fallback) => {
+    const candidate = { ...settings(), usage_mode: 'aged' as const, min_ticket_age_seconds: 300, historical_quality_enabled: true }
+    expect(validateTicketSettings({ ...candidate, [field]: undefined })).toBeNull()
+    expect(validateTicketSettings({ ...candidate, [field]: min })).toBeNull()
+    expect(validateTicketSettings({ ...candidate, [field]: max })).toBeNull()
+    expect(validateTicketSettings({ ...candidate, [field]: min - 1 })).toEqual({ key: 'range', field, min, max })
+    expect(validateTicketSettings({ ...candidate, [field]: max + 1 })).toEqual({ key: 'range', field, min, max })
+    expect(validateTicketSettings({ ...candidate, [field]: fallback + 0.5 })).toEqual({ key: 'range', field, min, max })
   })
 
   it('validates account-wide capacity independently of the legacy per-model capacity', () => {

@@ -60,7 +60,7 @@ describe('shared account import', () => {
     await flushPromises()
     expect(importAccounts).toHaveBeenCalledWith({
       sources: [{ name: 'export.json', content: '{"accounts":[]}' }, { name: 'auth.json', content: '{"tokens":{}}' }],
-      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, excel_bps_enabled: false }
+      defaults: { name: '', concurrency: 4, proxy_url: 'socks5://proxy.example:1080', enabled: true, dispatch_consent: true, protection_enabled: true, excel_bps_enabled: false, prism_browser_enabled: false, prism_browser_models: [] }
     }, expect.stringMatching(/^shared-import-/))
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)

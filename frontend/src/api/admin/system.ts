@@ -23,6 +23,7 @@ export interface VersionSourceInfo {
 
 export interface VersionInfo extends VersionSourceInfo {
   build_type: string // "source" for manual builds, "release" for CI builds
+  official?: VersionSourceInfo
   ranxi?: VersionSourceInfo
 }
 

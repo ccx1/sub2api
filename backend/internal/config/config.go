@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
 	"github.com/spf13/viper"
 	"golang.org/x/net/http/httpguts"
 )
@@ -66,6 +67,7 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
 type Config struct {
+	astraRoutingLoader      atomic.Pointer[astraRoutingLoader]
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
@@ -979,6 +981,10 @@ const (
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
+	UpstreamRouting upstreamroute.Config      `mapstructure:"upstream_routing"`
+	PrismBrowser    GatewayPrismBrowserConfig `mapstructure:"prism_browser"`
+	CodexWSAnchor   CodexWSAnchorConfig       `mapstructure:"codex_ws_anchor"`
+	CodexGatewayPin CodexGatewayPinConfig     `mapstructure:"codex_gateway_pin"`
 	// 等待上游响应头的超时时间（秒），0表示无超时
 	// 注意：这不影响流式数据传输，只控制等待响应头的时间
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
@@ -1149,6 +1155,12 @@ type GatewayConfig struct {
 //   - free_quota_window_hours: local usage rolling window length in hours.
 //   - free_quota_stats_cache_seconds: cache TTL for free-tier usage stats
 //     (hot path never blocks on DB; misses fail open and refresh in background).
+type GatewayPrismBrowserConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	BaseURL string `mapstructure:"base_url"`
+	APIKey  string `mapstructure:"api_key"`
+}
+
 type GatewayGrokConfig struct {
 	// PasswordAuthEnabled controls the optional password-to-SSO OAuth flow.
 	// It defaults to false and must be explicitly enabled by the operator.
@@ -1300,15 +1312,22 @@ type OpenAICodexTicketConfig struct {
 	WorkspaceOriginFailureThreshold int `mapstructure:"workspace_origin_failure_threshold" json:"workspace_origin_failure_threshold,omitempty"`
 	// WorkspaceOriginSilenceSeconds origin 静默时长（秒），到期后半开探测。
 	WorkspaceOriginSilenceSeconds int `mapstructure:"workspace_origin_silence_seconds" json:"workspace_origin_silence_seconds,omitempty"`
-	// UsageMode 控制业务请求如何从票池取票：immediate（默认，即取即用，按票池顺序取首张可用票）/
-	// aged（只取发布后已沉淀满 MinTicketAgeSeconds 的票，最老的优先）。只影响业务取票，不影响打票与复验。
+	// UsageMode 控制业务取票：immediate 按原票池顺序回退，latest_only 仅取最新谱系，aged 最老历史票优先。
 	UsageMode string `mapstructure:"usage_mode" json:"usage_mode,omitempty"`
 	// MinTicketAgeSeconds 仅 aged 模式生效：票据自首次采集起至少经过该秒数才允许被业务请求使用。
 	MinTicketAgeSeconds int `mapstructure:"min_ticket_age_seconds" json:"min_ticket_age_seconds,omitempty"`
-	// HistoricalTicketValiditySeconds 从首次采集起计算历史票的使用窗口，独立于协议和软复验期限。
-	HistoricalTicketValiditySeconds int `mapstructure:"historical_ticket_validity_seconds" json:"historical_ticket_validity_seconds,omitempty"`
+	// HistoricalTicketValiditySeconds 从历史票首次实际使用起计算使用窗口，独立于协议和软复验期限。
+	HistoricalTicketValiditySeconds       int  `mapstructure:"historical_ticket_validity_seconds" json:"historical_ticket_validity_seconds,omitempty"`
+	HistoricalQualityEnabled              bool `mapstructure:"historical_quality_enabled" json:"historical_quality_enabled,omitempty"`
+	HistoricalQualityCheckBeforeSeconds   int  `mapstructure:"historical_quality_check_before_seconds" json:"historical_quality_check_before_seconds,omitempty"`
+	HistoricalQualityCheckIntervalSeconds int  `mapstructure:"historical_quality_check_interval_seconds" json:"historical_quality_check_interval_seconds,omitempty"`
+	HistoricalQualityExtendSeconds        int  `mapstructure:"historical_quality_extend_seconds" json:"historical_quality_extend_seconds,omitempty"`
 	// CookieRefreshMode 控制历史模式是否沿用旧票 Cookie 做软复验。
 	CookieRefreshMode string `mapstructure:"cookie_refresh_mode" json:"cookie_refresh_mode,omitempty"`
+	// SkipSameRouteHost 仅在历史票换票时跳过 __oailb host 与上一张相同的候选票。
+	SkipSameRouteHost bool `mapstructure:"skip_same_route_host" json:"skip_same_route_host,omitempty"`
+	// SameRouteCooldownHours 是同路由候选票的冷却时长。
+	SameRouteCooldownHours int `mapstructure:"same_route_cooldown_hours" json:"same_route_cooldown_hours,omitempty"`
 	// ConsumeAfterUse 为 true 时一票一用：业务请求取用后即标记消耗、不再发放，
 	// 并在下一次票池发布时从账号票库中删除。默认 false（票据可被重复使用直到过期）。
 	ConsumeAfterUse bool `mapstructure:"consume_after_use" json:"consume_after_use,omitempty"`
@@ -2106,6 +2125,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	viper.SetDefault("gateway.upstream_routing.enabled", false)
 	viper.SetDefault("run_mode", RunModeStandard)
 	viper.SetDefault("simple_mode.auto_create_default_groups", true)
 	viper.SetDefault("simple_mode_key_rate_limit_enabled", false)
@@ -2507,6 +2527,20 @@ func setDefaults() {
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
+	viper.SetDefault("gateway.prism_browser.enabled", false)
+	viper.SetDefault("gateway.prism_browser.base_url", "http://127.0.0.1:8319/v1")
+	viper.SetDefault("gateway.prism_browser.api_key", "")
+	viper.SetDefault("gateway.codex_ws_anchor.ttl_seconds", 3600)
+	viper.SetDefault("gateway.codex_gateway_pin.ttl_seconds", 230)
+	viper.SetDefault("gateway.codex_gateway_pin.node_cooldown_seconds", 3600)
+	viper.SetDefault("gateway.codex_gateway_pin.rotate_nodes", false)
+	viper.SetDefault("gateway.codex_gateway_pin.max_node_attempts", 0)
+	viper.SetDefault("gateway.codex_gateway_pin.ip_affinity", false)
+	viper.SetDefault("gateway.codex_ws_anchor.enabled", false)
+	viper.SetDefault("gateway.codex_ws_anchor.account_ids", []int64{})
+	viper.SetDefault("gateway.codex_gateway_pin.enabled", false)
+	viper.SetDefault("gateway.codex_gateway_pin.source_account_ids", []int64{})
+	viper.SetDefault("gateway.codex_gateway_pin.target_account_ids", []int64{})
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
 	viper.SetDefault("gateway.openai_codex_ticket.credential_mode", CodexTicketCredentialState)
 	viper.SetDefault("gateway.openai_codex_ticket.cookie_ttl_seconds", DefaultCodexTicketCookieTTLSeconds)
@@ -2526,6 +2560,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_codex_ticket.refresh_strategy", CodexTicketRefreshRevalidate)
 	viper.SetDefault("gateway.openai_codex_ticket.usage_mode", CodexTicketUsageImmediate)
 	viper.SetDefault("gateway.openai_codex_ticket.min_ticket_age_seconds", 0)
+	viper.SetDefault("gateway.openai_codex_ticket.historical_quality_enabled", false)
+	viper.SetDefault("gateway.openai_codex_ticket.historical_quality_check_before_seconds", DefaultHistoricalQualityCheckBeforeSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.historical_quality_check_interval_seconds", DefaultHistoricalQualityCheckIntervalSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.historical_quality_extend_seconds", DefaultHistoricalQualityExtendSeconds)
+	viper.SetDefault("gateway.openai_codex_ticket.skip_same_route_host", false)
+	viper.SetDefault("gateway.openai_codex_ticket.same_route_cooldown_hours", DefaultCodexTicketSameRouteCooldownHours)
 	viper.SetDefault("gateway.openai_codex_ticket.consume_after_use", false)
 	viper.SetDefault("gateway.openai_codex_ticket.proxy_failure_threshold", 3)
 	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
@@ -2827,6 +2867,15 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if _, err := upstreamroute.New(c.Gateway.UpstreamRouting); err != nil {
+		return fmt.Errorf("gateway.upstream_routing: %w", err)
+	}
+	if err := c.Gateway.CodexWSAnchor.Validate(); err != nil {
+		return err
+	}
+	if err := c.Gateway.CodexGatewayPin.Validate(); err != nil {
+		return err
+	}
 	if err := ValidateCodexTicketCredentialConfig(&c.Gateway.OpenAICodexTicket); err != nil {
 		return fmt.Errorf("gateway.openai_codex_ticket: %w", err)
 	}

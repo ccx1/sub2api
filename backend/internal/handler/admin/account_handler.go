@@ -407,10 +407,15 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 		if h.codexTicketRetry != nil && account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			h.codexTicketRetry.EnrichCodexRouteAffinityStatus(ctx, account, out.CodexTurnTickets)
-			qualityGateEnabled := cfg.FailClosed && h.codexTicketRetry.CodexModelQualityAdmissionEnabled(ctx)
-			quality, err := h.codexTicketRetry.GetCodexModelQualityStatusSnapshot(ctx, account)
+			qualityEnabled := h.codexTicketRetry.CodexModelQualityAdmissionEnabled(ctx)
+			qualityGateEnabled := cfg.FailClosed && qualityEnabled
+			var quality []service.CodexModelQualityStatus
+			var err error
+			if qualityEnabled {
+				quality, err = h.codexTicketRetry.GetCodexModelQualityStatusSnapshot(ctx, account)
+			}
 			cancel()
-			if err == nil {
+			if qualityEnabled && err == nil {
 				byModel := make(map[string]service.CodexModelQualityStatus, len(quality))
 				for _, item := range quality {
 					byModel[item.Model] = item

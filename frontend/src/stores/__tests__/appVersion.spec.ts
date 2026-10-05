@@ -9,20 +9,24 @@ vi.mock('@/i18n', () => ({ i18n: { global: { t: (key: string) => key } } }))
 
 function payload(): VersionInfo {
   return { current_version: '0.2.8.17', latest_version: '0.2.8', has_update: false,
-    cached: false, build_type: 'release', ranxi: { current_version: '2.8.14',
+    cached: false, build_type: 'release', official: { repository: 'Wei-Shaw/sub2api',
+      current_version: '0.2.8', latest_version: '0.2.9', has_update: true, cached: false },
+    ranxi: { current_version: '2.8.14',
       latest_version: '2.8.15', has_update: true, cached: false } }
 }
 
 beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks() })
 
 describe('version source state', () => {
-  it('preserves both sources on a frontend cache hit', async () => {
+  it('preserves all sources on a frontend cache hit', async () => {
     vi.mocked(checkUpdates).mockResolvedValue(payload())
     const app = useAppStore()
     await app.fetchVersion()
     const cached = await app.fetchVersion()
     expect(checkUpdates).toHaveBeenCalledTimes(1)
     expect(cached?.current_version).toBe('0.2.8.17')
+    expect(cached?.official?.repository).toBe('Wei-Shaw/sub2api')
+    expect(cached?.official?.has_update).toBe(true)
     expect(cached?.ranxi?.has_update).toBe(true)
     expect(app.hasUpdate).toBe(false)
   })
@@ -32,9 +36,11 @@ describe('version source state', () => {
     const app = useAppStore()
     await app.fetchVersion()
     const legacy = payload()
+    delete legacy.official
     delete legacy.ranxi
     vi.mocked(checkUpdates).mockResolvedValue(legacy)
     await app.fetchVersion(true)
+    expect(app.officialVersionInfo).toBeNull()
     expect(app.ranxiVersionInfo).toBeNull()
     app.clearVersionCache()
     expect(app.versionLoaded).toBe(false)
@@ -42,9 +48,10 @@ describe('version source state', () => {
     expect(app.versionWarning).toBe('')
   })
 
-  it.each(['local', 'ranxi'])('retries partial %s failures without force', async (source) => {
+  it.each(['local', 'official', 'ranxi'])('retries partial %s failures without force', async (source) => {
     const data = payload()
     if (source === 'local') data.warning = 'offline'
+    else if (source === 'official') data.official!.warning = 'offline'
     else data.ranxi!.warning = 'offline'
     vi.mocked(checkUpdates).mockResolvedValueOnce(data).mockResolvedValueOnce(payload())
     const app = useAppStore()
@@ -65,6 +72,7 @@ describe('version source state', () => {
     expect(app.versionLoaded).toBe(false)
     expect(app.versionWarning).not.toBe('')
     expect(app.versionCached).toBe(true)
+    expect(app.officialVersionInfo?.warning).not.toBe('')
     expect(app.ranxiVersionInfo?.warning).not.toBe('')
     log.mockRestore()
   })

@@ -58,3 +58,22 @@ func TestWithHTTPUpstreamPublicHostsOnly(t *testing.T) {
 		t.Fatal("public-hosts-only must not disable redirects")
 	}
 }
+
+func TestRegionalEgressBypassForRandomDirectAccount(t *testing.T) {
+	account := &Account{Extra: map[string]any{
+		ProxyModeExtraKey:                  ProxyModeRandom,
+		RandomProxyEmptyPoolPolicyExtraKey: RandomProxyEmptyPoolPolicyDirect,
+	}}
+	if err := ResolveRandomProxy(context.Background(), account, &randomProxySelectorStub{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRegionalEgressBypassForAccount(context.Background(), account)
+	if !RegionalEgressBypassFromContext(ctx) {
+		t.Fatal("random direct account must bypass regional egress")
+	}
+
+	account.Extra[RandomProxyEmptyPoolPolicyExtraKey] = RandomProxyEmptyPoolPolicyReject
+	if RegionalEgressBypassFromContext(WithRegionalEgressBypassForAccount(context.Background(), account)) {
+		t.Fatal("reject policy must not bypass regional egress")
+	}
+}

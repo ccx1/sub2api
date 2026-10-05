@@ -352,12 +352,34 @@ func codexTicketInventoryConsumed(inventory, ticket *openAICodexTicket) bool {
 	return false
 }
 
+func codexTicketNewestSlot(inventory *openAICodexTicket) *openAICodexTicket {
+	var latest *openAICodexTicket
+	for _, slot := range codexTicketSlots(inventory) {
+		if slot != nil && (latest == nil || slot.lineageCapturedAt().After(latest.lineageCapturedAt()) ||
+			slot.lineageCapturedAt().Equal(latest.lineageCapturedAt()) && slot.CapturedAt.After(latest.CapturedAt)) {
+			latest = slot
+		}
+	}
+	return latest
+}
+
 // codexTicketUsageCandidates 按取票机制给出业务请求可用的候选票。
-// 即取即用保持票池原顺序；沉淀模式只保留首次采集满指定时长的票，并按最老优先。
+// 最新模式按首次采集时间排序；沉淀模式只保留已沉淀票，并按最老优先。
 func codexTicketUsageCandidates(inventory *openAICodexTicket, account *Account, cfg config.OpenAICodexTicketConfig, now time.Time) []*openAICodexTicket {
+	if cfg.UsageMode == config.CodexTicketUsageLatestOnly {
+		latest := codexTicketNewestSlot(inventory)
+		if latest != nil && latest.usable(now, account, cfg) {
+			return []*openAICodexTicket{latest}
+		}
+		return nil
+	}
 	var candidates []*openAICodexTicket
 	for _, slot := range codexTicketSlots(inventory) {
-		if slot.usable(now, account, cfg) {
+		if slot.usable(now, account, cfg) &&
+			(!config.CodexTicketUsageAgedEnabled(cfg) || !cfg.SkipSameRouteHost || !config.CodexTicketUsesCookies(cfg) ||
+				strings.TrimSpace(slot.SessionID) != "") &&
+			(!config.CodexTicketUsageAgedEnabled(cfg) || !cfg.SkipSameRouteHost ||
+				codexTicketRouteRotationCooldownUntil(inventory, slot, now).IsZero()) {
 			candidates = append(candidates, slot)
 		}
 	}
@@ -515,27 +537,41 @@ func (s *OpenAIGatewayService) applyConsumedOpenAICodexTicket(ctx context.Contex
 	target := codexTicketTargetURLFrom(ctx)
 	index := s.codexTicketConsumptionIndex(account.ID, true)
 	for _, leaf := range s.codexTicketCandidatesForClaim(key, account, model, cfg) {
+		if config.CodexTicketUsageAgedEnabled(cfg) && cfg.SkipSameRouteHost && config.CodexTicketUsesCookies(cfg) {
+			selected, err := s.selectHistoricalRouteTicket(ctx, account, model, cfg)
+			if err != nil || selected == nil {
+				return unavailable()
+			}
+			if codexTicketConsumptionID(selected) != codexTicketConsumptionID(leaf) {
+				continue
+			}
+			leaf = selected
+		}
 		if s.codexTicketRevoked(key, leaf) || !leaf.usable(time.Now(), account, cfg) {
 			continue
 		}
 		id, now := codexTicketConsumptionID(leaf), time.Now()
-		until := codexTicketConsumptionUntil(leaf, cfg, now)
-		if !index.mark(id, until, now) {
-			continue
-		}
 		projected, err := s.prepareCodexCookieTicket(ctx, account, leaf, cfg)
 		if err != nil {
-			index.release(id, until)
 			return nil, err
 		}
 		if projected == nil || !projected.usable(time.Now(), account, cfg) {
-			index.release(id, until)
 			return unavailable()
 		}
 		if target != nil && projected.usesCookies() && len(projected.rawCookiesForURL(target)) == 0 {
 			// 本次目标地址用不上该票的 Cookie，撤回本机领取，不消耗这张票。
-			index.release(id, until)
 			return unavailable()
+		}
+		if config.CodexTicketUsageAgedEnabled(cfg) {
+			if !s.markHistoricalCodexTicketUsed(ctx, account, leaf, cfg) {
+				return unavailable()
+			}
+			projected.HistoricalUsedAt = leaf.HistoricalUsedAt
+			projected.historicalExpiresAt = projected.historicalExpires(cfg)
+		}
+		until := codexTicketConsumptionUntil(leaf, cfg, now)
+		if !index.mark(id, until, now) {
+			continue
 		}
 		claimed, err := s.claimCodexTicketConsumption(ctx, account.ID, id, until, time.Now())
 		if err != nil {

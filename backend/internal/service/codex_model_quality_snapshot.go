@@ -48,7 +48,7 @@ func (s *OpenAIGatewayService) prepareCodexModelQuality(ctx context.Context, acc
 	if !s.readCodexModelQualityProxy(ctx, account) {
 		return nil, "proxy_unavailable"
 	}
-	ticket := s.lookupOpenAICodexTicketForConfig(account, model, cfg)
+	ticket := s.lookupOpenAICodexTicketForUse(account, model, cfg)
 	if !ticket.usable(time.Now(), account, cfg) {
 		return nil, "no_ticket"
 	}

@@ -840,6 +840,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// （与 setting_public.go 公开读取路径保持一致）。
 	result.ChannelMonitorShowQuota = settings[SettingKeyChannelMonitorShowQuota] == "true"
 	result.ChannelMonitorHideUserRanking = isTrueSettingValue(settings[SettingKeyChannelMonitorHideUserRanking])
+	prism := resolvePrismBrowserRuntime(settings, configuredPrismBrowserRuntime(s.cfg))
+	result.PrismBrowserEnabled = prism.Enabled
+	result.PrismBrowserBaseURL = prism.BaseURL
+	result.PrismBrowserAPIKey = prism.APIKey
+	result.PrismBrowserAPIKeyConfigured = prism.APIKey != ""
 
 	// Grok default mapping policy
 	result.GrokDefaultTextModel = strings.TrimSpace(settings[SettingKeyGrokDefaultTextModel])
@@ -899,6 +904,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false,
 	// cch_signing=false, claude_oauth_system_prompt_injection=true)
+	retrySettings := parseUpstreamErrorRetrySettings(settings[SettingKeyUpstreamErrorRetry])
+	result.UpstreamErrorRetry = &retrySettings
 	result.OpenAITTFTMode = normalizeOpenAITTFTMode(settings[SettingKeyOpenAITTFTMode])
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"

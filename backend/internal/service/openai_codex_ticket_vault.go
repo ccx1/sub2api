@@ -143,6 +143,8 @@ func (s *OpenAIGatewayService) GetOpenAICodexTicketVault(ctx context.Context, ac
 	if config.CodexTicketUsageAgedEnabled(resolved) {
 		result.Policy.UsageMode, result.Policy.MinTicketAgeSeconds = config.CodexTicketUsageAged, resolved.MinTicketAgeSeconds
 		result.Policy.HistoricalTicketValiditySeconds = resolved.HistoricalTicketValiditySeconds
+	} else if resolved.UsageMode == config.CodexTicketUsageLatestOnly {
+		result.Policy.UsageMode = config.CodexTicketUsageLatestOnly
 	}
 	for _, model := range codexTicketNodeModels(account, cfg) {
 		// 库存已是副本，补齐软复验时间不影响共享缓存。
@@ -209,6 +211,9 @@ func codexTicketVaultSlotView(accountID int64, model, label string, slot, select
 		default:
 			view.Status = CodexTicketVaultStatusAvailable
 		}
+	}
+	if cfg.UsageMode == config.CodexTicketUsageLatestOnly && view.Status == CodexTicketVaultStatusAvailable && !sameCodexTicket(slot, selected) {
+		view.Status = "not_selected"
 	}
 	return view
 }
