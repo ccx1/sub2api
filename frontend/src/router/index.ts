@@ -446,6 +446,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/borrowing-policy',
+    name: 'AdminBorrowingPolicy',
+    component: () => import('@/views/admin/BorrowingPolicyView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Borrowing Policy',
+      titleKey: 'admin.astraGateway.policyTitle',
+      descriptionKey: 'admin.astraGateway.policyDescription'
+    }
+  },
+  {
     path: '/admin/codex-request-strategy',
     name: 'AdminCodexRequestStrategy',
     component: () => import('@/views/admin/CodexRequestStrategyView.vue'),

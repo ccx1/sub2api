@@ -845,6 +845,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/strategy', label: t('nav.strategyManagement'), icon: ShieldIcon, expandOnly: true, children: [
       { path: '/admin/account-protection', label: t('accountProtection.title'), icon: ShieldIcon },
       { path: '/admin/codex-ticket-settings', label: t('codexTicketSettings.title'), icon: TicketIcon },
+      { path: '/admin/borrowing-policy', label: t('admin.astraGateway.policyTitle'), icon: TicketIcon },
       { path: '/admin/codex-request-strategy', label: t('codexRequestStrategy.title'), icon: ShieldIcon },
       { path: '/admin/codex-model-quality', label: t('codexModelQuality.title'), icon: ChartIcon },
     ] },

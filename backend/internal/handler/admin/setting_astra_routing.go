@@ -22,7 +22,12 @@ func (h *SettingHandler) UpdateAstraRouting(c *gin.Context) {
 		return
 	}
 	var resolveErr error
-	value, resolveErr = config.ResolveAstraDependencies(value)
+	value = config.AstraStoredSettings(value)
+	if value.CookiePool.UsesGroups() {
+		resolveErr = value.CookiePool.ValidateSelections()
+	} else {
+		value, resolveErr = config.ResolveAstraDependencies(value)
+	}
 	if resolveErr != nil {
 		response.BadRequest(c, resolveErr.Error())
 		return

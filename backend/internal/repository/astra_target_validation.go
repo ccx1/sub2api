@@ -33,6 +33,7 @@ func (s *astraRoutingUpstream) targetRouteOnce(req *http.Request, proxy string, 
 	release = func() {}
 	defer func() {
 		if resultErr != nil {
+			resultCookie = nil
 			release()
 			release = func() {}
 		}
@@ -93,22 +94,20 @@ func (s *astraRoutingUpstream) targetRouteOnce(req *http.Request, proxy string, 
 	fingerprint, _ := json.Marshal(profile)
 	identity = append(identity, string(fingerprint))
 	key := sha256.Sum256([]byte(strings.Join(identity, "\x00")))
+	force, _ := req.Context().Value(astraForceProbeKey{}).(bool)
+	if cached, err := pool.targetValidationCached(id, key, force); cached {
+		return cookie, key, proxy, release, err
+	}
 	if !pool.targetProbeMu.TryLock() {
+		// 前一个探针可能刚完成；有效结果不应被另一个目标的新探针阻塞。
+		if cached, err := pool.targetValidationCached(id, key, force); cached {
+			return cookie, key, proxy, release, err
+		}
 		return nil, key, proxy, release, errors.New("target_validation_in_progress")
 	}
 	defer pool.targetProbeMu.Unlock()
-	now := time.Now()
-	pool.targetMu.Lock()
-	old, exists := pool.targetChecks[id]
-	pool.targetMu.Unlock()
-	force, _ := req.Context().Value(astraForceProbeKey{}).(bool)
-	if exists && old.key == key && now.Before(old.expires) && !force {
-		if old.passed {
-			return cookie, key, proxy, release, nil
-		}
-		if now.Before(old.retryAfter) {
-			return nil, key, proxy, release, errors.New(old.reason)
-		}
+	if cached, err := pool.targetValidationCached(id, key, force); cached {
+		return cookie, key, proxy, release, err
 	}
 
 	ctx, cancel := context.WithTimeout(req.Context(), 90*time.Second)
@@ -169,11 +168,37 @@ func (s *astraRoutingUpstream) targetRouteOnce(req *http.Request, proxy string, 
 // Manual verification always refreshes the evidence instead of accepting a cached pass.
 type astraForceProbeKey struct{}
 
+func (s *codexGatewayPinUpstream) targetValidationCached(id int64, key [32]byte, force bool) (bool, error) {
+	if force {
+		return false, nil
+	}
+	s.targetMu.Lock()
+	defer s.targetMu.Unlock()
+	old, exists := s.targetChecks[id]
+	now := time.Now()
+	if !exists || old.key != key || !now.Before(old.expires) {
+		return false, nil
+	}
+	s.mu.Lock()
+	route, exists := s.routes[old.sourceID]
+	s.mu.Unlock()
+	if !exists || !now.Before(route.expires) || sha256.Sum256([]byte(route.cookie.Value)) != old.cookieFingerprint || (s.config.RotateNodes && route.node.Identity != old.node.Identity) || (s.config.IPAffinity && !s.config.RotateNodes && sha256.Sum256([]byte(route.proxy)) != old.proxyFingerprint) {
+		return false, nil
+	}
+	if old.passed {
+		return true, nil
+	}
+	if now.Before(old.retryAfter) {
+		return true, errors.New(old.reason)
+	}
+	return false, nil
+}
+
 func (s *astraRoutingUpstream) VerifyAstraGatewayTarget(ctx context.Context, req *http.Request, proxy string, id int64, n int) error {
 	return s.VerifyAstraGatewayTargetWithTLS(ctx, req, proxy, id, n, nil)
 }
 func (s *astraRoutingUpstream) VerifyAstraGatewayTargetWithTLS(ctx context.Context, req *http.Request, proxy string, id int64, n int, profile *tlsfingerprint.Profile) error {
-	req = req.Clone(context.WithValue(ctx, astraForceProbeKey{}, true))
+	req = req.Clone(context.WithValue(ctx, astraForceProbeKey{}, !service.AstraTargetValidationCacheAllowed(ctx)))
 	_, _, _, release, err := s.targetRoute(req, proxy, id, n, profile)
 	release()
 	return err

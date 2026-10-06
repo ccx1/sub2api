@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -22,12 +23,6 @@ func (r *settingRepository) SetAstraRoutingWithAccounts(ctx context.Context, key
 	if _, err = tx.Client().ExecContext(ctx, `SELECT key FROM settings WHERE key=$1 FOR UPDATE`, key); err != nil {
 		return err
 	}
-	if value.SchedulingMode == "groups" {
-		if err = lockLiveGroups(ctx, tx.Client(), value.SchedulingGroupIDs); err != nil {
-			return err
-		}
-	}
-
 	ids := []int64{}
 	if value.CookiePool.Enabled {
 		ids = append(ids, value.CookiePool.SourceAccountIDs...)
@@ -36,28 +31,60 @@ func (r *settingRepository) SetAstraRoutingWithAccounts(ctx context.Context, key
 	if value.WSSession.Enabled {
 		ids = append(ids, value.WSSession.AccountIDs...)
 	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	if value.SchedulingMode == "groups" {
+		if err = lockLiveGroups(ctx, tx.Client(), value.SchedulingGroupIDs); err != nil {
+			return err
+		}
+	}
+	if value.CookiePool.UsesGroups() && (value.CookiePool.Enabled || value.WSSession.Enabled) {
+		if err = lockLiveGroups(ctx, tx.Client(), astraSelectionGroupIDs(value)); err != nil {
+			if errors.Is(err, service.ErrGroupNotFound) {
+				return fmt.Errorf("astra_group_unavailable")
+			}
+			return err
+		}
+		if err = lockAstraSelectionAccounts(ctx, tx.Client(), ids); err != nil {
+			return err
+		}
+		resolved, resolveErr := resolveAstraRoutingAccounts(ctx, tx.Client(), value)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if !slices.Equal(resolved.CookiePool.SourceAccountIDs, value.CookiePool.SourceAccountIDs) || !slices.Equal(resolved.CookiePool.TargetAccountIDs, value.CookiePool.TargetAccountIDs) {
+			return fmt.Errorf("astra_group_membership_changed")
+		}
+	}
+
 	rows, readErr := tx.Client().QueryContext(ctx, `SELECT value FROM settings WHERE key=$1`, key)
 	if readErr != nil {
 		return readErr
 	}
+	var previous config.AstraRoutingSettings
+	previousValid := false
 	if rows.Next() {
 		var raw []byte
 		if readErr = rows.Scan(&raw); readErr != nil {
 			_ = rows.Close()
 			return readErr
 		}
-		var previous config.AstraRoutingSettings
-		if json.Unmarshal(raw, &previous) == nil && config.AstraRouteSettingsEqual(previous, value) {
-			ids = nil
-		}
+		previousValid = json.Unmarshal(raw, &previous) == nil
 	}
 	if readErr = rows.Err(); readErr != nil {
 		_ = rows.Close()
 		return readErr
 	}
 	_ = rows.Close()
-	slices.Sort(ids)
-	ids = slices.Compact(ids)
+	if previousValid {
+		unchanged, compareErr := astraRoutePreparationUnchanged(ctx, tx.Client(), previous, value)
+		if compareErr != nil {
+			return compareErr
+		}
+		if unchanged {
+			ids = nil
+		}
+	}
 	for _, id := range ids {
 		ws := value.WSSession.Enabled && slices.Contains(value.WSSession.AccountIDs, id)
 		// Reject malformed model mappings rather than replacing an administrator's
@@ -85,7 +112,7 @@ func (r *settingRepository) SetAstraRoutingWithAccounts(ctx context.Context, key
 			return err
 		}
 	}
-	raw, err := json.Marshal(value)
+	raw, err := json.Marshal(config.AstraStoredSettings(value))
 	if err != nil {
 		return err
 	}

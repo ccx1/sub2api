@@ -14,6 +14,18 @@ import (
 const astraRoutingSettingKey = "astra_routing_experiment_v1"
 
 func (s *SettingService) GetAstraRouting(ctx context.Context) (config.AstraRoutingSettings, error) {
+	value, err := s.readAstraRoutingSettings(ctx)
+	if err != nil {
+		return value, err
+	}
+	resolved, err := s.resolveAstraRoutingGroups(ctx, value)
+	if err != nil {
+		return unavailableAstraGroupSelection(value, err), nil
+	}
+	return resolved, nil
+}
+
+func (s *SettingService) readAstraRoutingSettings(ctx context.Context) (config.AstraRoutingSettings, error) {
 	value, err := s.settingRepo.GetValue(ctx, astraRoutingSettingKey)
 	if errors.Is(err, ErrSettingNotFound) || (err == nil && value == "") {
 		if s.cfg == nil {
@@ -35,6 +47,11 @@ func (s *SettingService) GetAstraRouting(ctx context.Context) (config.AstraRouti
 // the new configuration. A failed save never starts model requests.
 func (s *SettingService) SetAstraRouting(ctx context.Context, value config.AstraRoutingSettings) (config.AstraRoutingSettings, error) {
 	var err error
+	value = config.AstraStoredSettings(value)
+	value, err = s.resolveAstraRoutingGroups(ctx, value)
+	if err != nil {
+		return value, err
+	}
 	value, err = config.ResolveAstraDependencies(value)
 	if err != nil {
 		return value, err
@@ -62,7 +79,7 @@ func (s *SettingService) SetAstraRouting(ctx context.Context, value config.Astra
 		err = writer.SetAstraRoutingWithAccounts(ctx, astraRoutingSettingKey, value)
 	} else {
 		var raw []byte
-		raw, err = json.Marshal(value)
+		raw, err = json.Marshal(config.AstraStoredSettings(value))
 		if err == nil {
 			err = s.settingRepo.Set(ctx, astraRoutingSettingKey, string(raw))
 		}
@@ -96,6 +113,12 @@ func (s *SettingService) astraRoutingRuntime(ctx context.Context) config.AstraRo
 	value, err := s.GetAstraRouting(ctx)
 	if err != nil {
 		if s.astraRoutingCache != nil {
+			if s.astraRoutingCache.CookiePool.UsesGroups() {
+				unavailable := unavailableAstraGroupSelection(*s.astraRoutingCache, err)
+				s.astraRoutingCache = &unavailable
+				s.astraRoutingExpires = time.Now().Add(5 * time.Second)
+				return unavailable
+			}
 			return *s.astraRoutingCache
 		}
 		return config.AstraRoutingSettings{}

@@ -69,6 +69,9 @@ func (s *OpenAIGatewayService) prepareCodexWSAnchor(ctx context.Context, c *gin.
 	if !settings.WSSession.Enabled || account == nil || !slices.Contains(settings.WSSession.AccountIDs, account.ID) || !account.IsOpenAIOAuthLike() || account.IsOpenAIPassthroughEnabled() || c == nil || c.Request == nil || isOpenAIResponsesCompactPath(c) || gjson.GetBytes(body, "model").String() != "gpt-6-astra" || account.GetMappedModel("gpt-6-astra") != "gpt-6-astra" {
 		return ctx, nil, nil
 	}
+	if err := s.validateCodexWSGroupPolicy(settings, account.ID); err != nil {
+		return ctx, nil, err
+	}
 	if err := settings.WSSession.Validate(); err != nil {
 		return ctx, nil, err
 	}
@@ -82,7 +85,8 @@ func (s *OpenAIGatewayService) prepareCodexWSAnchor(ctx context.Context, c *gin.
 		return ctx, nil, errors.New("codex WS anchor requires account and global WSv2 to be enabled")
 	}
 	key := codexWSAnchorKey{account: account.ID, apiKey: apiKeyID, group: getOpenAIGroupIDFromContext(c), scope: scope, identity: sha256.Sum256([]byte(account.GetCredential("chatgpt_account_id") + "\x00" + account.GetCredential("access_token")))}
-	scope += ":" + settings.Revision
+	routeRevision := astraWSAnchorRevision(settings)
+	scope += ":" + routeRevision
 	key.scope = scope
 	now := time.Now()
 	store := &s.codexWSAnchors
@@ -125,12 +129,13 @@ func (s *OpenAIGatewayService) prepareCodexWSAnchor(ctx context.Context, c *gin.
 	store.busy[key] = true
 	store.mu.Unlock()
 	finish := func(result *OpenAIForwardResult, resultErr error) {
+		currentPolicy := !settings.CookiePool.UsesGroups() || astraWSAnchorRevision(s.cfg.AstraRouting(ctx)) == routeRevision
 		store.mu.Lock()
 		defer store.mu.Unlock()
 		delete(store.busy, key)
 		qualified := turn.qualified
 
-		if resultErr != nil || result == nil || result.ClientDisconnect || (previous != "" && !time.Now().Before(entry.expires)) || !qualified || result.ResponseID == "" || result.UpstreamResponseModel != "gpt-6-astra" || result.UpstreamResponseModelConflict {
+		if !currentPolicy || resultErr != nil || result == nil || result.ClientDisconnect || (previous != "" && !time.Now().Before(entry.expires)) || !qualified || result.ResponseID == "" || result.UpstreamResponseModel != "gpt-6-astra" || result.UpstreamResponseModelConflict {
 			delete(store.entries, key)
 			if turn.connID != "" {
 				s.getOpenAIWSConnPool().evictConn(account.ID, turn.connID)

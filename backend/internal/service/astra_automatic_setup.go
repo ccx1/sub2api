@@ -20,26 +20,34 @@ type AstraSetupStatus struct {
 // A save schedules one bounded serial preparation run. Saving again cancels
 // the previous run, and revision checks prevent stale work publishing readiness.
 func (s *AccountTestService) StartAstraAutomaticSetup(settings config.AstraRoutingSettings) {
-	if s.cfg.AstraRouting(context.Background()).Revision != settings.Revision {
+	if !s.astraSetupSettingsCurrent(context.Background(), settings) {
 		return
 	}
 	s.astraSetupMu.Lock()
-	if s.cfg.AstraRouting(context.Background()).Revision != settings.Revision {
+	if !s.astraSetupSettingsCurrent(context.Background(), settings) {
 		s.astraSetupMu.Unlock()
 		return
 	}
 	if s.astraSetupCancel != nil {
 		s.astraSetupCancel()
 	}
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx = context.WithValue(ctx, astraSetupStartedKey{}, started)
 	s.astraSetupCancel = cancel
 	state := "queued"
 	if !settings.CookiePool.Enabled && !settings.WSSession.Enabled {
 		state = "disabled"
 	}
-	s.astraSetupStatus = AstraSetupStatus{Revision: settings.Revision, State: state, StartedAt: time.Now()}
+	s.astraSetupStatus = AstraSetupStatus{Revision: settings.Revision, State: state, StartedAt: started}
+	if settings.SelectionError != "" {
+		s.astraSetupStatus.State = "failed"
+		s.astraSetupStatus.Reason = settings.SelectionError
+		s.astraSetupStatus.FinishedAt = &started
+		state = "failed"
+	}
 	s.astraSetupMu.Unlock()
-	if state == "disabled" {
+	if state == "disabled" || state == "failed" {
 		cancel()
 		return
 	}
@@ -50,7 +58,8 @@ func (s *AccountTestService) runAstraAutomaticSetup(ctx context.Context, cancel 
 	set := func(state, phase string, id int64, reason string) {
 		s.astraSetupMu.Lock()
 		defer s.astraSetupMu.Unlock()
-		if s.astraSetupStatus.Revision != settings.Revision {
+		started, owned := ctx.Value(astraSetupStartedKey{}).(time.Time)
+		if s.astraSetupStatus.Revision != settings.Revision || (owned && !s.astraSetupStatus.StartedAt.Equal(started)) {
 			return
 		}
 		s.astraSetupStatus.State = state
@@ -73,8 +82,12 @@ func (s *AccountTestService) runAstraAutomaticSetup(ctx context.Context, cancel 
 		}
 	}
 	defer s.astraGatewayActionMu.Unlock()
-	if ctx.Err() != nil || s.cfg.AstraRouting(ctx).Revision != settings.Revision {
+	if ctx.Err() != nil || !s.astraSetupSettingsCurrent(ctx, settings) {
 		set("failed", "", 0, "setup_cancelled")
+		return
+	}
+	if settings.SelectionError != "" {
+		set("failed", "source", 0, settings.SelectionError)
 		return
 	}
 	set("running", "source", 0, "")
@@ -87,18 +100,27 @@ func (s *AccountTestService) runAstraAutomaticSetup(ctx context.Context, cancel 
 		set("failed", "source", 0, astraSetupError(err))
 		return
 	}
+	var failedID int64
+	var failure string
 	for _, id := range settings.CookiePool.TargetAccountIDs {
-		if ctx.Err() != nil || s.cfg.AstraRouting(ctx).Revision != settings.Revision {
+		if ctx.Err() != nil || !s.astraSetupSettingsCurrent(ctx, settings) {
 			set("failed", "target", id, "configuration_changed")
 			return
 		}
+		// 来源预热后仍有效的证据直接复用；重复验证旧 Cookie 不会延长寿命。
+		if astraAccountSchedulingReady(settings, provider.AstraGatewaySnapshot(ctx), id, time.Now()) {
+			continue
+		}
 		set("running", "target", id, "")
 		// The shared state probe verifies target credentials on the borrowed route.
-		err := s.verifyAstraGatewayTarget(ctx, id)
-		if err != nil {
-			set("failed", "target", id, astraSetupError(err))
-			return
+		err := s.verifyAstraGatewayTarget(context.WithValue(ctx, astraTargetValidationCacheKey{}, true), id)
+		if err != nil && failure == "" {
+			failedID, failure = id, astraSetupError(err)
 		}
+	}
+	if failure != "" {
+		set("failed", "target", failedID, failure)
+		return
 	}
 	if settings.CookiePool.Enabled {
 		if id, ready := astraTargetsReady(ctx, provider, settings.CookiePool.TargetAccountIDs); !ready {
@@ -107,6 +129,20 @@ func (s *AccountTestService) runAstraAutomaticSetup(ctx context.Context, cancel 
 		}
 	}
 	set("ready", "complete", 0, "")
+}
+
+func (s *AccountTestService) astraSetupSettingsCurrent(ctx context.Context, settings config.AstraRoutingSettings) bool {
+	current := s.cfg.AstraRouting(ctx)
+	return current.Revision == settings.Revision && config.AstraRouteSettingsEqual(current, settings)
+}
+
+type astraSetupStartedKey struct{}
+type astraTargetValidationCacheKey struct{}
+
+// AstraTargetValidationCacheAllowed 仅让自动准备复用缓存，手工验证仍强制重跑。
+func AstraTargetValidationCacheAllowed(ctx context.Context) bool {
+	allowed, _ := ctx.Value(astraTargetValidationCacheKey{}).(bool)
+	return allowed
 }
 func astraSetupError(err error) string {
 	switch err.Error() {

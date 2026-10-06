@@ -1,6 +1,6 @@
 <template>
-  <section class="card overflow-hidden" aria-labelledby="gateway-borrow-title" data-testid="gateway-borrow-panel">
-    <div class="flex flex-wrap items-start justify-between gap-4 p-5">
+  <section class="min-w-0 space-y-5" aria-labelledby="gateway-borrow-title" data-testid="gateway-borrow-panel">
+    <div class="flex flex-wrap items-start justify-between gap-4">
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">
           <h2 id="gateway-borrow-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t(`${p}.borrowTitle`) }}</h2>
@@ -9,28 +9,28 @@
         </div>
         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t(`${p}.borrowDescription`) }}</p>
         <p v-if="saved" class="mt-2 text-xs text-gray-400">{{ t(`${p}.borrowSummary`, { sources: saved.cookie_pool.source_account_ids.length, targets: saved.cookie_pool.target_account_ids.length }) }}</p>
-        <p v-if="error && !expanded" role="alert" class="mt-2 text-sm text-red-600">{{ error }}</p>
       </div>
-      <button type="button" class="btn btn-secondary btn-sm" data-testid="expand-borrow" :aria-expanded="expanded" aria-controls="gateway-borrow-content" @click="expanded = !expanded">{{ t(expanded ? `${p}.collapse` : `${p}.expand`) }}</button>
     </div>
-    <div v-if="expanded" id="gateway-borrow-content" class="space-y-5 border-t border-gray-100 p-5 dark:border-dark-700">
+    <div id="gateway-borrow-content" class="space-y-5">
       <header class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t(`${p}.configuration`) }}</h3>
           <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t(`${p}.description`) }}</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <span v-if="dirty" class="text-xs text-amber-600">{{ t(`${p}.unsaved`) }}</span>
-          <button class="btn btn-secondary" type="button" :disabled="loading || saving" @click="load">{{ t(dirty ? `${p}.discard` : 'common.refresh') }}</button>
-          <button data-testid="save" class="btn btn-primary" type="submit" form="astra-gateway-form" :disabled="!draft || !dirty || saving || !!validation">{{ t(saving ? `${p}.saving` : `${p}.save`) }}</button>
+          <button class="btn btn-secondary" data-testid="reload" type="button" :disabled="loading || saving" @click="load">{{ t(dirty ? `${p}.discard` : 'common.refresh') }}</button>
+          <button data-testid="save" class="btn btn-primary" type="submit" form="astra-gateway-form" :disabled="!draft || !dirty || saving || loading || !!validation">{{ t(saving ? `${p}.saving` : `${p}.save`) }}</button>
         </div>
       </header>
       <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}</p>
+      <p v-if="accountsError || groupsError" role="alert" class="rounded-lg bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ accountsError || groupsError }}</p>
+      <p v-if="saved?.selection_error" role="alert" data-testid="selection-error" class="rounded-lg bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ t(`${p}.savedSelectionError`) }} {{ t(`${p}.${astraSelectionErrorKey(saved.selection_error)}`) }}</p>
       <p class="rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm dark:border-primary-800 dark:bg-primary-900/20">{{ t(`${p}.automaticHint`) }}</p>
       <p v-if="savedMessage" role="status" class="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">{{ t(`${p}.saved`) }}</p>
       <div v-if="loading && !draft" class="flex justify-center py-16"><LoadingSpinner /></div>
       <form v-if="draft" id="astra-gateway-form" class="space-y-6" @submit.prevent="save">
-        <fieldset :disabled="saving || loading" class="space-y-6">
+        <fieldset :disabled="saving || loading" class="min-w-0 space-y-6">
           <section class="card p-5 sm:p-6" aria-labelledby="astra-cookie-title">
             <div class="flex items-start justify-between gap-4">
               <div>
@@ -41,8 +41,18 @@
             </div>
             <p class="mt-3 text-xs text-gray-500">{{ t(`${p}.savedState`) }}：{{ t(saved?.cookie_pool.enabled ? `${p}.enabled` : `${p}.disabled`) }}</p>
             <div class="mt-5 grid gap-4 md:grid-cols-2">
-              <AstraAccountPicker v-model="draft.cookie_pool.source_account_ids" :label="t(`${p}.sources`)" :accounts="accounts" :disabled="saving" />
-              <AstraAccountPicker v-model="draft.cookie_pool.target_account_ids" :label="t(`${p}.targets`)" :accounts="accounts" :disabled="saving" />
+              <AstraBorrowingScopePicker
+                v-for="side in selectionSides" :key="side" :side="side"
+                :label="t(`${p}.${side === 'source' ? 'sources' : 'targets'}`)"
+                :selection="draft.cookie_pool[`${side}_selection`]"
+                :account-ids="draft.cookie_pool[`${side}_account_ids`]"
+                :group-ids="draft.cookie_pool[`${side}_group_ids`] || []"
+                :accounts="side === 'target' ? targetAccounts : accounts" :groups="groups"
+                :accounts-loaded="accountsLoaded && (side !== 'target' || sourceIDs !== null)" :groups-loaded="groupsLoaded"
+                :disabled="saving || loading" @update:selection="setSelection(side, $event)"
+                @update:account-ids="draft.cookie_pool[`${side}_account_ids`] = $event"
+                @update:group-ids="draft.cookie_pool[`${side}_group_ids`] = $event"
+              />
             </div>
             <div class="mt-4 flex items-start justify-between gap-4 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
               <div>
@@ -56,8 +66,8 @@
                 <div><h3 class="text-sm font-medium">{{ t(`${p}.rotateNodes`) }}</h3><p id="astra-rotation-hint" class="mt-1 text-xs leading-6 text-gray-500 dark:text-gray-400">{{ t(`${p}.rotateNodesHint`) }}</p></div>
                 <Toggle :model-value="draft.cookie_pool.rotate_nodes ?? false" @update:model-value="setRotation" data-testid="rotation-toggle" :aria-label="t(`${p}.rotateNodes`)" aria-describedby="astra-rotation-hint" />
               </div>
-              <label v-if="draft.cookie_pool.rotate_nodes" class="mt-3 flex items-center gap-3 text-sm">{{ t(`${p}.maxNodeAttempts`) }}<input v-model.number="draft.cookie_pool.max_node_attempts" data-testid="node-attempts" class="input w-24" type="number" min="1" max="10" required /></label>
-              <label v-if="draft.cookie_pool.rotate_nodes" class="mt-3 flex items-center gap-3 text-sm">{{ t(`${p}.nodeCooldown`) }}<input v-model.number="draft.cookie_pool.node_cooldown_seconds" data-testid="node-cooldown" class="input w-28" type="number" min="60" max="86400" required /> s</label>
+              <label v-if="draft.cookie_pool.rotate_nodes" class="mt-3 flex flex-wrap items-center gap-3 text-sm">{{ t(`${p}.maxNodeAttempts`) }}<input v-model.number="draft.cookie_pool.max_node_attempts" data-testid="node-attempts" class="input w-24" type="number" min="1" max="10" required /></label>
+              <label v-if="draft.cookie_pool.rotate_nodes" class="mt-3 flex flex-wrap items-center gap-3 text-sm">{{ t(`${p}.nodeCooldown`) }}<input v-model.number="draft.cookie_pool.node_cooldown_seconds" data-testid="node-cooldown" class="input w-28" type="number" min="60" max="86400" required /> s</label>
               <p v-if="draft.cookie_pool.rotate_nodes" class="mt-2 text-xs text-gray-500">{{ t(`${p}.nodeCooldownHint`) }}</p>
             </div>
             <label class="mt-4 flex items-center gap-3 text-sm">{{ t(`${p}.cookieTTL`) }}<input v-model.number="draft.cookie_pool.ttl_seconds" class="input w-28" type="number" min="30" max="240" required /> s</label>
@@ -127,7 +137,7 @@
   </section>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getAllIncludingInactive } from '@/api/admin/groups'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
@@ -136,12 +146,14 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import AstraGatewayRuntime from '@/components/admin/AstraGatewayRuntime.vue'
 import AstraGatewayHistory from '@/components/admin/AstraGatewayHistory.vue'
 import AstraAccountPicker from '@/components/admin/AstraAccountPicker.vue'
+import AstraBorrowingScopePicker from '@/components/admin/AstraBorrowingScopePicker.vue'
 import { list } from '@/api/admin/accounts'
-import { getAstraGateway, saveAstraGateway, normalizeAstraGateway, resolveAstraDependencies, type AstraGatewaySettings } from '@/api/admin/astraGateway'
+import { getAstraGateway, saveAstraGateway, normalizeAstraGateway, resolveAstraDependencies, astraGatewayPayload, type AstraGatewaySettings } from '@/api/admin/astraGateway'
+import { astraSelectedAccounts, astraSelectionValidation, astraSelectionErrorKey, type AstraSelectableAccount, type AstraSelectionSide } from '@/utils/astraBorrowingSelection'
 const schedulingRecords = ref<{ checked_at: string; account_id: number; schedulable: boolean; reason: string; mode?: string }[]>([])
 const p = 'admin.astraGateway'
 const { t, te } = useI18n()
-const expanded = ref(false)
+const selectionSides = ['source', 'target'] as const
 const historyExpanded = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -151,28 +163,46 @@ const saved = ref<AstraGatewaySettings>()
 const draft = ref<AstraGatewaySettings>()
 const groups = ref<{ id: number; name: string }[]>([])
 const groupsError = ref('')
-watch(() => draft.value?.scheduling_mode, async mode => {
- if (mode !== 'groups') return
- try { groups.value = await getAllIncludingInactive(); groupsError.value = '' } catch { groupsError.value = t(`${p}.loadError`) }
+const accountsError = ref('')
+const groupsLoaded = ref(false)
+const accountsLoaded = ref(false)
+const accounts = ref<AstraSelectableAccount[]>([])
+const sourceIDs = computed(() => {
+  if (!draft.value) return null
+  const pool = draft.value.cookie_pool
+  if (pool.source_selection === 'groups' && (!accountsLoaded.value || !groupsLoaded.value || pool.source_group_ids?.some(id => !groups.value.some(group => group.id === id)))) return null
+  return astraSelectedAccounts(draft.value, accounts.value, 'source')
 })
-const accounts = ref<{ id: number; name: string }[]>([])
+const targetAccounts = computed(() => accounts.value.filter(account => !sourceIDs.value?.includes(account.id)))
+watch([sourceIDs, () => draft.value?.cookie_pool.target_account_ids], ([sources, targets]) => {
+  if (!draft.value || sources === null || !targets) return
+  const remaining = targets.filter(id => !sources.includes(id))
+  if (remaining.length !== targets.length) draft.value.cookie_pool.target_account_ids = remaining
+}, { deep: true })
+let alive = true
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(saved.value))
 const validation = computed(() => {
   if (!draft.value) return ''
-  const value = resolveAstraDependencies(draft.value)
+  const value = normalizeAstraGateway(draft.value)
+  // 来源按组选择时，以完整预览识别 WS donor，避免错误扩张目标账号。
+  value.cookie_pool.source_account_ids = astraSelectedAccounts(draft.value, accounts.value, 'source')
+  const resolved = resolveAstraDependencies(value)
+  const selectionError = astraSelectionValidation(resolved, { accounts: accounts.value, groups: groups.value, accountsLoaded: accountsLoaded.value, groupsLoaded: groupsLoaded.value })
+  if (selectionError) return t(`${p}.${selectionError}`)
   if (value.account_scheduling && value.scheduling_mode === 'groups' && !value.scheduling_group_ids?.length) return t(`${p}.chooseSchedulingGroups`)
+  if (value.account_scheduling && value.scheduling_mode === 'groups' && !groupsLoaded.value) return t(`${p}.groupsLoadError`)
   if (value.cookie_pool.rotate_nodes && (!Number.isInteger(draft.value.cookie_pool.node_cooldown_seconds) || draft.value.cookie_pool.node_cooldown_seconds! < 60 || draft.value.cookie_pool.node_cooldown_seconds! > 86400)) return t(`${p}.nodeCooldownInvalid`)
   if (value.cookie_pool.rotate_nodes && (!Number.isInteger(draft.value.cookie_pool.max_node_attempts) || draft.value.cookie_pool.max_node_attempts! < 1 || draft.value.cookie_pool.max_node_attempts! > 10)) return t(`${p}.nodeAttemptsInvalid`)
   if (!Number.isInteger(value.cookie_pool.ttl_seconds) || value.cookie_pool.ttl_seconds! < 30 || value.cookie_pool.ttl_seconds! > 240 || !Number.isInteger(value.ws_session.ttl_seconds) || value.ws_session.ttl_seconds! < 60 || value.ws_session.ttl_seconds! > 3600) return t(`${p}.ttlInvalid`)
-  if (value.cookie_pool.enabled) {
-    if (!value.cookie_pool.source_account_ids.length || !value.cookie_pool.target_account_ids.length) return t(`${p}.chooseBoth`)
-    if (value.cookie_pool.source_account_ids.some(id => value.cookie_pool.target_account_ids.includes(id))) return t(`${p}.overlap`)
-  }
   if (value.ws_session.enabled && !value.ws_session.account_ids.length) return t(`${p}.chooseWS`)
-  const enabledIDs = [...(value.cookie_pool.enabled ? [...value.cookie_pool.source_account_ids, ...value.cookie_pool.target_account_ids] : []), ...(value.ws_session.enabled ? value.ws_session.account_ids : [])]
-  if (enabledIDs.some(id => !accounts.value.some(a => a.id === id))) return t(`${p}.missingAccounts`)
   return ''
 })
+function setSelection(side: AstraSelectionSide, mode: 'accounts' | 'groups') {
+  if (!draft.value) return
+  draft.value.cookie_pool[`${side}_selection`] = mode
+  // 模式切换不把旧分组解析结果偷偷转换为手选账号。
+  draft.value.cookie_pool[`${side}_account_ids`] = []
+}
 function setAffinity(enabled: boolean) {
   if (!draft.value) return
   draft.value.cookie_pool.ip_affinity = enabled
@@ -184,31 +214,51 @@ function setRotation(enabled: boolean) {
   if (enabled) draft.value.cookie_pool.ip_affinity = true
 }
 async function load() {
+  if (loading.value || saving.value) return
   loading.value = true; error.value = ''; savedMessage.value = false
-  try {
-    const value = await getAstraGateway()
-    const items: { id: number; name: string }[] = []
-    for (let page = 1; ; page++) {
-      const result = await list(page, 100, { platform: 'openai', type: 'oauth', lite: 'true' })
-      items.push(...result.items.map(a => ({ id: a.id, name: a.name })))
-      if (page >= result.pages || !result.items.length) break
-    }
-    accounts.value = items
-    saved.value = normalizeAstraGateway(value); draft.value = normalizeAstraGateway(value)
-  } catch { error.value = t(`${p}.loadError`) }
-  finally { loading.value = false }
+  accountsLoaded.value = false; groupsLoaded.value = false
+  const results = await Promise.allSettled([getAstraGateway(), loadAccounts(), getAllIncludingInactive()])
+  if (!alive) return
+  const [settingsResult, accountResult, groupResult] = results
+  if (settingsResult.status === 'fulfilled') {
+    saved.value = normalizeAstraGateway(settingsResult.value); draft.value = normalizeAstraGateway(settingsResult.value)
+  } else error.value = t(`${p}.loadError`)
+  accounts.value = accountResult.status === 'fulfilled' ? accountResult.value : []
+  accountsLoaded.value = accountResult.status === 'fulfilled'
+  accountsError.value = accountsLoaded.value ? '' : t(`${p}.accountsLoadError`)
+  groups.value = groupResult.status === 'fulfilled' ? groupResult.value.filter(group => group.platform === 'openai' && group.status === 'active') : []
+  groupsLoaded.value = groupResult.status === 'fulfilled'
+  groupsError.value = groupsLoaded.value ? '' : t(`${p}.groupsLoadError`)
+  loading.value = false
+}
+async function loadAccounts(): Promise<AstraSelectableAccount[]> {
+  const items: AstraSelectableAccount[] = []
+  for (let page = 1; ; page++) {
+    const result = await list(page, 100, { platform: 'openai', type: 'oauth', status: 'active', lite: 'true' })
+    items.push(...result.items.filter(a => a.platform === 'openai' && a.type === 'oauth' && a.status === 'active' && !a.parent_account_id && hasValidExpiry(a.expires_at)).map(a => ({ id: a.id, name: a.name, group_ids: a.group_ids || [] })))
+    if (page >= result.pages) return [...new Map(items.map(account => [account.id, account])).values()]
+    if (!result.items.length) throw new Error('incomplete_account_list')
+  }
+}
+function hasValidExpiry(expiresAt: unknown): boolean {
+  // 账号接口使用 Unix 秒；空值表示无期限，异常响应不能扩大借票范围。
+  return expiresAt == null || (typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt * 1000 > Date.now())
 }
 async function save() {
   if (!draft.value || validation.value || saving.value || loading.value || !dirty.value) return
   saving.value = true; error.value = ''; savedMessage.value = false
   try {
-    const value = await saveAstraGateway(resolveAstraDependencies(draft.value))
+    const selection = normalizeAstraGateway(draft.value)
+    if (selection.cookie_pool.source_selection === 'groups') selection.cookie_pool.source_account_ids = sourceIDs.value || []
+    const value = await saveAstraGateway(astraGatewayPayload(selection))
+    if (!alive) return
     saved.value = normalizeAstraGateway(value); draft.value = normalizeAstraGateway(value); savedMessage.value = true
    } catch (err: unknown) {
     const message = (err as { response?: { data?: { message?: string } }; message?: string }).response?.data?.message || (err as { message?: string }).message || ''
-    error.value = message.startsWith('astra_source_required') ? t(`${p}.chooseBoth`) : message.startsWith('astra_global_ws_disabled') ? t(`${p}.globalBlocked`) : message.startsWith('astra_account_unavailable') ? t(`${p}.missingAccounts`) : t(`${p}.saveError`)
+    error.value = message.startsWith('astra_') ? t(`${p}.${astraSelectionErrorKey(message)}`) : t(`${p}.saveError`)
   }
   finally { saving.value = false }
 }
 onMounted(load)
+onUnmounted(() => { alive = false })
 </script>

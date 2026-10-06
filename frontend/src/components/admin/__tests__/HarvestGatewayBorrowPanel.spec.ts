@@ -3,31 +3,32 @@ import { mount, flushPromises } from '@vue/test-utils'
 import HarvestGatewayBorrowPanel from '../HarvestGatewayBorrowPanel.vue'
 import AstraGatewayRuntime from '@/components/admin/AstraGatewayRuntime.vue'
 import { normalizeAstraGateway } from '@/api/admin/astraGateway'
-const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), list: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), list: vi.fn(), groups: vi.fn() }))
 vi.mock('@/api/admin/astraGateway', async importOriginal => ({ ...await importOriginal<typeof import('@/api/admin/astraGateway')>(), getAstraGateway: mocks.get, saveAstraGateway: mocks.save }))
 vi.mock('@/components/admin/AstraGatewayRuntime.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/admin/AstraGatewayHistory.vue', () => ({ default: { template: '<section />' } }))
-vi.mock('@/api/admin/groups', () => ({ getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 7, name: 'Astra group' }]) }))
+vi.mock('@/api/admin/groups', () => ({ getAllIncludingInactive: mocks.groups }))
 vi.mock('@/api/admin/accounts', () => ({ list: mocks.list }))
 vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 function value() { return { cookie_pool: { enabled: false, source_account_ids: [299], target_account_ids: [300] }, ws_session: { enabled: false, account_ids: [300] }, revision: 'one' } }
-function render() { const wrapper = mount(HarvestGatewayBorrowPanel, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } }); void wrapper.get('[data-testid="expand-borrow"]').trigger('click'); return wrapper }
-beforeEach(() => { vi.clearAllMocks(); mocks.get.mockResolvedValue(value()); mocks.list.mockResolvedValue({ items: [{ id: 299, name: 'source' }, { id: 300, name: 'target' }], pages: 1 }); mocks.save.mockImplementation(v => Promise.resolve({ ...v, revision: 'two' })) })
+function account(id: number, groupIds: number[] = []) { return { id, name: `account-${id}`, platform: 'openai', type: 'oauth', status: 'active', group_ids: groupIds } }
+function render() { return mount(HarvestGatewayBorrowPanel, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } }) }
+beforeEach(() => {
+  vi.clearAllMocks(); mocks.get.mockResolvedValue(value())
+  mocks.list.mockResolvedValue({ items: [account(299, [7]), account(300, [8])], pages: 1 })
+  mocks.groups.mockResolvedValue([7, 8].map(id => ({ id, name: `group-${id}`, platform: 'openai', status: 'active' })))
+  mocks.save.mockImplementation(v => Promise.resolve({ ...v, revision: 'two' }))
+})
 describe('Astra gateway configuration', () => {
-  it('keeps gateway borrowing in its own collapsed card and preserves edits when collapsed', async () => {
-    const w = mount(HarvestGatewayBorrowPanel, { global: { stubs: { RouterLink: true } } })
+  it('shows the complete policy immediately without a collapsing control', async () => {
+    const w = render()
     await flushPromises()
     expect(w.text()).toContain('admin.astraGateway.borrowTitle')
-    expect(w.find('form').exists()).toBe(false)
-    const expand = w.get('[data-testid="expand-borrow"]')
-    expect(expand.attributes('aria-expanded')).toBe('false')
-    await expand.trigger('click')
+    expect(w.find('form').exists()).toBe(true)
+    expect(w.find('[data-testid="expand-borrow"]').exists()).toBe(false)
     await w.get('[data-testid="cookie-toggle"]').trigger('click')
-    await expand.trigger('click')
-    expect(w.find('form').exists()).toBe(false)
     expect(w.text()).toContain('admin.astraGateway.unsaved')
-    await expand.trigger('click')
     expect(w.get('[data-testid="cookie-toggle"]').attributes('aria-checked')).toBe('true')
     expect(mocks.save).not.toHaveBeenCalled()
     w.unmount()
@@ -119,10 +120,11 @@ describe('Astra gateway configuration', () => {
     expect(w.get('[data-testid="rotation-toggle"]').attributes('aria-checked')).toBe('false')
     w.unmount()
   })
-  it('blocks overlapping source and target selections', async () => {
+  it('removes overlapping saved targets and asks for a remaining target', async () => {
     const data = value(); data.cookie_pool.enabled = true; data.cookie_pool.target_account_ids = [299]; mocks.get.mockResolvedValue(data)
     const w = render(); await flushPromises()
-    expect(w.text()).toContain('admin.astraGateway.overlap')
+    expect(w.text()).toContain('admin.astraGateway.targetAccountsEmpty')
+    expect(w.get('[data-testid="target-scope"]').text()).not.toContain('#299')
     await w.get('form').trigger('submit'); expect(mocks.save).not.toHaveBeenCalled(); w.unmount()
   })
   it('keeps edits on failed save and supports discard', async () => {
@@ -143,5 +145,122 @@ describe('Astra gateway configuration', () => {
   it('normalizes null account arrays without sharing draft arrays', () => {
     const v = value(); const cloned = normalizeAstraGateway(v); cloned.cookie_pool.source_account_ids.push(1)
     expect(v.cookie_pool.source_account_ids).toEqual([299])
+  })
+
+  it('saves independent group selections without persisting resolved preview accounts', async () => {
+    const w = render(); await flushPromises()
+    await w.get('[data-testid="cookie-toggle"]').trigger('click')
+    await w.get('[data-testid="source-selection"]').setValue('groups')
+    await w.get('[data-testid="source-groups"] input[value="7"]').setValue(true)
+    await w.get('[data-testid="target-selection"]').setValue('groups')
+    await w.get('[data-testid="target-groups"] input[value="8"]').setValue(true)
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ cookie_pool: expect.objectContaining({ source_selection: 'groups', source_group_ids: [7], source_account_ids: [], target_selection: 'groups', target_group_ids: [8], target_account_ids: [] }) }))
+    expect(w.get('[data-testid="target-groups"] input[value="8"]').element).toHaveProperty('checked', true)
+    await w.get('[data-testid="source-selection"]').setValue('accounts')
+    expect(w.get('[data-testid="source-scope"] input[type="checkbox"]').element).toHaveProperty('checked', false)
+    expect(w.get('[data-testid="save"]').attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
+
+  it('loads all account pages and excludes source members found beyond the first page', async () => {
+    mocks.list.mockResolvedValueOnce({ items: [account(299, [7])], pages: 2 }).mockResolvedValueOnce({ items: [account(300, [7])], pages: 2 })
+    const w = render(); await flushPromises()
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    expect(mocks.list.mock.calls[1][0]).toBe(2)
+    await w.get('[data-testid="cookie-toggle"]').trigger('click')
+    await w.get('[data-testid="source-selection"]').setValue('groups')
+    await w.get('[data-testid="source-groups"] input[value="7"]').setValue(true)
+    expect(w.text()).toContain('admin.astraGateway.targetAccountsEmpty')
+    expect(w.get('[data-testid="target-scope"]').text()).not.toContain('#300')
+    await w.get('form').trigger('submit'); expect(mocks.save).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('keeps a WS participant that belongs to a source group out of account targets', async () => {
+    const saved = normalizeAstraGateway(value())
+    Object.assign(saved.cookie_pool, { enabled: true, source_selection: 'groups', source_group_ids: [7], source_account_ids: [] })
+    saved.ws_session.enabled = true; saved.ws_session.account_ids = [299]
+    mocks.get.mockResolvedValue(saved)
+    const w = render(); await flushPromises()
+    await w.get('[data-testid="ip-affinity-toggle"]').trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ cookie_pool: expect.objectContaining({ source_selection: 'groups', source_account_ids: [], target_selection: 'accounts', target_account_ids: [300] }), ws_session: expect.objectContaining({ account_ids: [299] }) }))
+    w.unmount()
+  })
+
+  it('keeps settings editable after member loading fails and permits disabling safely', async () => {
+    mocks.get.mockResolvedValue({ ...value(), cookie_pool: { ...value().cookie_pool, enabled: true }, selection_error: 'astra_group_resolution_unavailable' })
+    mocks.list.mockResolvedValueOnce({ items: [account(299)], pages: 2 }).mockRejectedValueOnce(new Error('offline'))
+    const w = render(); await flushPromises()
+    expect(w.find('form').exists()).toBe(true)
+    expect(w.get('[data-testid="selection-error"]').text()).toContain('admin.astraGateway.groupsLoadError')
+    expect(w.text()).toContain('admin.astraGateway.accountsLoadError')
+    await w.get('[data-testid="cookie-toggle"]').trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({ cookie_pool: expect.objectContaining({ enabled: false }) }))
+    expect(mocks.save.mock.calls[0][0]).not.toHaveProperty('selection_error')
+    w.unmount()
+  })
+
+  it('blocks group saves on group loading failure and recovers on refresh', async () => {
+    const saved = normalizeAstraGateway(value()); saved.cookie_pool.enabled = true; saved.cookie_pool.source_selection = 'groups'; saved.cookie_pool.source_group_ids = [7]
+    mocks.get.mockResolvedValue(saved); mocks.groups.mockRejectedValueOnce(new Error('offline'))
+    const w = render(); await flushPromises()
+    await w.get('[data-testid="ip-affinity-toggle"]').trigger('click')
+    await w.get('form').trigger('submit'); expect(mocks.save).not.toHaveBeenCalled()
+    expect(w.text()).toContain('admin.astraGateway.groupsLoadError')
+    await w.get('[data-testid="reload"]').trigger('click'); await flushPromises()
+    expect(w.get('[data-testid="source-groups"] input[value="7"]').element).toHaveProperty('checked', true)
+    expect(w.findAll('[role="alert"]').some(row => row.text().includes('groupsLoadError'))).toBe(false)
+    w.unmount()
+  })
+
+  it('excludes inactive groups and ineligible group members', async () => {
+    mocks.groups.mockResolvedValue([{ id: 7, name: 'eligible', platform: 'openai', status: 'active' }, { id: 8, name: 'inactive', platform: 'openai', status: 'inactive' }, { id: 9, name: 'claude', platform: 'anthropic', status: 'active' }])
+    mocks.list.mockResolvedValue({ items: [account(299, [7]), { ...account(301, [7]), status: 'inactive' }, { ...account(302, [7]), parent_account_id: 299 }, { ...account(303, [7]), type: 'apikey' }, account(300)], pages: 1 })
+    const w = render(); await flushPromises()
+    await w.get('[data-testid="source-selection"]').setValue('groups')
+    const groups = w.get('[data-testid="source-groups"]')
+    expect(groups.findAll('input')).toHaveLength(1)
+    await groups.get('input[value="7"]').setValue(true)
+    await w.get('[data-testid="cookie-toggle"]').trigger('click')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    w.unmount()
+  })
+
+  it('excludes expired and malformed expiry values while keeping unbounded and future accounts', async () => {
+    const now = Date.parse('2026-10-06T15:00:00Z')
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    mocks.list.mockResolvedValue({ items: [
+      { ...account(299, [7]), expires_at: null }, account(300, [8]),
+      { ...account(301, [7]), expires_at: now / 1000 + 60 },
+      ...[now / 1000 - 1, now / 1000, 0, 'invalid-date', '2026-10-07T15:00:00Z', NaN, Infinity].map((expires_at, i) => ({ ...account(310 + i, [7, 8]), expires_at })),
+      ...Array.from({ length: 65 }, (_, i) => ({ ...account(400 + i, [7]), expires_at: now / 1000 - 1 }))
+    ], pages: 1 })
+    const w = render()
+    try {
+      await flushPromises()
+      expect(w.get('[data-testid="source-scope"]').findAll('input[type="checkbox"]')).toHaveLength(3)
+      await w.get('[data-testid="source-selection"]').setValue('groups')
+      await w.get('[data-testid="source-groups"] input[value="7"]').setValue(true)
+      await w.get('[data-testid="target-selection"]').setValue('groups')
+      await w.get('[data-testid="target-groups"] input[value="8"]').setValue(true)
+      await w.get('[data-testid="cookie-toggle"]').trigger('click')
+      expect(w.text()).not.toContain('admin.astraGateway.overlap')
+      expect(w.text()).not.toContain('admin.astraGateway.accountLimit')
+      await w.get('form').trigger('submit'); await flushPromises()
+      expect(mocks.save).toHaveBeenCalledTimes(1)
+    } finally { w.unmount(); clock.mockRestore() }
+  })
+
+  it.each(['astra_selection_invalid', 'astra_group_selection_invalid'])('shows a readable selection error for %s', async code => {
+    mocks.get.mockResolvedValue({ ...value(), selection_error: code })
+    const w = render(); await flushPromises()
+    expect(w.get('[data-testid="selection-error"]').text()).toContain('admin.astraGateway.selectionInvalid')
+    expect(w.get('[data-testid="selection-error"]').text()).not.toContain(code)
+    expect(w.find('form').exists()).toBe(true)
+    w.unmount()
   })
 })

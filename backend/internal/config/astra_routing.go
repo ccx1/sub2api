@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 )
 
 type AstraRoutingSettings struct {
+	SelectionError     string                `json:"selection_error,omitempty"`
 	SchedulingMode     string                `json:"scheduling_mode"`
 	SchedulingGroupIDs []int64               `json:"scheduling_group_ids"`
 	AccountScheduling  bool                  `json:"account_scheduling"`
@@ -21,6 +23,10 @@ type astraRoutingLoader struct {
 // CodexGatewayPinConfig shares only a qualified gateway route between
 // explicitly selected source and target accounts.
 type CodexGatewayPinConfig struct {
+	SourceSelection     string  `mapstructure:"source_selection" json:"source_selection,omitempty"`
+	TargetSelection     string  `mapstructure:"target_selection" json:"target_selection,omitempty"`
+	SourceGroupIDs      []int64 `mapstructure:"source_group_ids" json:"source_group_ids,omitempty"`
+	TargetGroupIDs      []int64 `mapstructure:"target_group_ids" json:"target_group_ids,omitempty"`
 	NodeCooldownSeconds int     `mapstructure:"node_cooldown_seconds" json:"node_cooldown_seconds"`
 	RotateNodes         bool    `mapstructure:"rotate_nodes" json:"rotate_nodes"`
 	MaxNodeAttempts     int     `mapstructure:"max_node_attempts" json:"max_node_attempts"`
@@ -32,6 +38,9 @@ type CodexGatewayPinConfig struct {
 }
 
 func (c CodexGatewayPinConfig) Validate() error {
+	if err := c.ValidateSelections(); err != nil {
+		return err
+	}
 	if c.NodeCooldownSeconds != 0 && (c.NodeCooldownSeconds < 60 || c.NodeCooldownSeconds > 86400) {
 		return fmt.Errorf("astra node cooldown must be 60-86400 seconds")
 	}
@@ -44,7 +53,13 @@ func (c CodexGatewayPinConfig) Validate() error {
 	if !c.Enabled {
 		return nil
 	}
-	if len(c.SourceAccountIDs) == 0 || len(c.TargetAccountIDs) == 0 || len(c.SourceAccountIDs) > 64 || len(c.TargetAccountIDs) > 64 {
+	if c.SourceSelection == "groups" {
+		c.SourceAccountIDs = nil
+	}
+	if c.TargetSelection == "groups" {
+		c.TargetAccountIDs = nil
+	}
+	if (c.SourceSelection != "groups" && len(c.SourceAccountIDs) == 0) || (c.TargetSelection != "groups" && len(c.TargetAccountIDs) == 0) || len(c.SourceAccountIDs) > 64 || len(c.TargetAccountIDs) > 64 {
 		return fmt.Errorf("gateway.codex_gateway_pin requires 1-64 source_account_ids and target_account_ids")
 	}
 	seen := map[int64]bool{}
@@ -115,6 +130,13 @@ func (s AstraRoutingSettings) Validate() error {
 	}
 	if s.AccountScheduling && s.SchedulingMode == "groups" && len(s.SchedulingGroupIDs) == 0 {
 		return fmt.Errorf("select scheduling groups")
+	}
+	if (s.CookiePool.Enabled || s.WSSession.Enabled) && s.AccountScheduling && s.SchedulingMode == "groups" && s.CookiePool.TargetSelection == "groups" {
+		for _, id := range s.CookiePool.TargetGroupIDs {
+			if slices.Contains(s.SchedulingGroupIDs, id) {
+				return fmt.Errorf("astra_selection_scheduling_conflict")
+			}
+		}
 	}
 	if err := s.CookiePool.Validate(); err != nil {
 		return err

@@ -387,11 +387,16 @@ func fireOpenAICodexStateShotRequest(ctx context.Context, headers http.Header, m
 		return out, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, openAICodexStateProbeMaxBody+1))
+	var data []byte
+	if out.status == http.StatusOK {
+		data, err = readOpenAICodexStateProbeStream(resp.Body)
+	} else {
+		data, err = io.ReadAll(io.LimitReader(resp.Body, openAICodexStateProbeMaxBody+1))
+	}
+	if shotCtx.Err() != nil {
+		return out, shotCtx.Err()
+	}
 	if err != nil {
-		if shotCtx.Err() != nil {
-			return out, shotCtx.Err()
-		}
 		out.streamErr = errors.New("probe response incomplete")
 		return out, nil
 	}

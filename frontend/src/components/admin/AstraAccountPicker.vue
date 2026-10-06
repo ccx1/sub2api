@@ -4,7 +4,7 @@
     <input v-model="search" type="search" class="input mb-3 w-full" :aria-label="t('admin.astraGateway.search')" :placeholder="t('admin.astraGateway.search')" />
     <div class="max-h-52 space-y-1 overflow-y-auto">
       <label v-for="account in filtered" :key="account.id" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-700">
-        <input type="checkbox" :checked="modelValue.includes(account.id)" :disabled="disabled || (!modelValue.includes(account.id) && modelValue.length >= 64)" @change="select(account.id, ($event.target as HTMLInputElement).checked)" />
+        <input type="checkbox" :value="account.id" :checked="modelValue.includes(account.id)" :disabled="disabled || (!modelValue.includes(account.id) && modelValue.length >= 64)" @change="select(account.id, ($event.target as HTMLInputElement).checked)" />
         <span class="min-w-0 break-words text-gray-700 dark:text-gray-200">#{{ account.id }} · {{ account.name }}</span>
       </label>
       <p v-if="!filtered.length" class="py-3 text-sm text-gray-500">{{ t('admin.astraGateway.noAccounts') }}</p>

@@ -4,9 +4,15 @@ export interface AstraGatewaySettings {
   account_scheduling?: boolean
   scheduling_mode?: 'account' | 'model' | 'groups'
   scheduling_group_ids?: number[]
-  cookie_pool: { node_cooldown_seconds?: number; rotate_nodes?: boolean; max_node_attempts?: number; ip_affinity?: boolean; ttl_seconds?: number; enabled: boolean; source_account_ids: number[]; target_account_ids: number[] }
+  cookie_pool: {
+    node_cooldown_seconds?: number; rotate_nodes?: boolean; max_node_attempts?: number; ip_affinity?: boolean; ttl_seconds?: number; enabled: boolean
+    source_selection?: 'accounts' | 'groups'; target_selection?: 'accounts' | 'groups'
+    source_group_ids?: number[]; target_group_ids?: number[]
+    source_account_ids: number[]; target_account_ids: number[]
+  }
   ws_session: { ttl_seconds?: number; enabled: boolean; account_ids: number[] }
   revision: string
+  selection_error?: string
 }
 export function normalizeAstraGateway(value: AstraGatewaySettings): AstraGatewaySettings {
   return {
@@ -15,6 +21,10 @@ export function normalizeAstraGateway(value: AstraGatewaySettings): AstraGateway
     scheduling_group_ids: [...(value.scheduling_group_ids || [])],
     cookie_pool: {
       enabled: value.cookie_pool.enabled,
+      source_selection: value.cookie_pool.source_selection || 'accounts',
+      target_selection: value.cookie_pool.target_selection || 'accounts',
+      source_group_ids: [...(value.cookie_pool.source_group_ids || [])],
+      target_group_ids: [...(value.cookie_pool.target_group_ids || [])],
       ip_affinity: value.cookie_pool.ip_affinity ?? false,
       rotate_nodes: value.cookie_pool.rotate_nodes ?? false,
       max_node_attempts: value.cookie_pool.max_node_attempts || 3,
@@ -24,7 +34,8 @@ export function normalizeAstraGateway(value: AstraGatewaySettings): AstraGateway
       target_account_ids: [...(value.cookie_pool.target_account_ids || [])]
     },
     ws_session: { ttl_seconds: value.ws_session.ttl_seconds || 3600, enabled: value.ws_session.enabled, account_ids: [...(value.ws_session.account_ids || [])] },
-    revision: value.revision || ''
+    revision: value.revision || '',
+    selection_error: value.selection_error || ''
   }
 }
 export async function getAstraGateway(): Promise<AstraGatewaySettings> {
@@ -80,7 +91,21 @@ export function resolveAstraDependencies(value: AstraGatewaySettings): AstraGate
   if (next.cookie_pool.rotate_nodes) next.cookie_pool.ip_affinity = true
   if (next.ws_session.enabled) {
     next.cookie_pool.enabled = true
-    next.cookie_pool.target_account_ids = [...new Set([...next.cookie_pool.target_account_ids, ...next.ws_session.account_ids.filter(id => !next.cookie_pool.source_account_ids.includes(id))])]
+    if (next.cookie_pool.target_selection !== 'groups') {
+      next.cookie_pool.target_account_ids = [...new Set([...next.cookie_pool.target_account_ids, ...next.ws_session.account_ids.filter(id => !next.cookie_pool.source_account_ids.includes(id))])]
+    }
+  }
+  next.cookie_pool.target_account_ids = next.cookie_pool.target_account_ids.filter(id => !next.cookie_pool.source_account_ids.includes(id))
+  return next
+}
+
+export function astraGatewayPayload(value: AstraGatewaySettings): AstraGatewaySettings {
+  const next = resolveAstraDependencies(value)
+  delete next.selection_error
+  for (const side of ['source', 'target'] as const) {
+    // 分组成员由后端实时解析，不能把页面预览固化成账号选择。
+    if (next.cookie_pool[`${side}_selection`] === 'groups') next.cookie_pool[`${side}_account_ids`] = []
+    else next.cookie_pool[`${side}_group_ids`] = []
   }
   return next
 }

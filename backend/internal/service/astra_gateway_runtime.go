@@ -133,7 +133,11 @@ func (s *AccountTestService) AstraGatewayStatus(ctx context.Context) AstraGatewa
 		row := AstraWSStatus{AccountID: id, Reason: "disabled"}
 		a, err := s.accountRepo.GetByID(ctx, id)
 		if settings.WSSession.Enabled {
-			if err != nil || a == nil || !a.IsOpenAIOAuthLike() {
+			if settings.SelectionError != "" {
+				row.Reason = settings.SelectionError
+			} else if settings.CookiePool.UsesGroups() && !slices.Contains(settings.CookiePool.SourceAccountIDs, id) && !slices.Contains(settings.CookiePool.TargetAccountIDs, id) {
+				row.Reason = "astra_ws_outside_targets"
+			} else if err != nil || a == nil || !a.IsOpenAIOAuthLike() {
 				row.Reason = "account_unavailable"
 			} else if d := NewOpenAIWSProtocolResolver(s.cfg).Resolve(a); d.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 				row.Reason = d.Reason
@@ -148,7 +152,7 @@ func (s *AccountTestService) AstraGatewayStatus(ctx context.Context) AstraGatewa
 			store := &s.openaiGatewayService.codexWSAnchors
 			store.mu.Lock()
 			for k, e := range store.entries {
-				if k.account == id && time.Now().Before(e.expires) && strings.HasSuffix(k.scope, ":"+settings.Revision) {
+				if settings.SelectionError == "" && k.account == id && time.Now().Before(e.expires) && strings.HasSuffix(k.scope, ":"+astraWSAnchorRevision(settings)) {
 					row.ActiveSessions++
 					expiry := e.expires
 					if row.ExpiresAt == nil || expiry.Before(*row.ExpiresAt) {
@@ -172,6 +176,12 @@ func (s *AccountTestService) AstraGatewayStatus(ctx context.Context) AstraGatewa
 	s.astraSetupMu.Lock()
 	result.Setup = s.astraSetupStatus
 	s.astraSetupMu.Unlock()
+	if settings.SelectionError != "" {
+		result.Setup.State = "failed"
+		result.Setup.Revision = settings.Revision
+		result.Setup.Phase = ""
+		result.Setup.Reason = settings.SelectionError
+	}
 	return result
 }
 func (s *AccountTestService) TestAstraGateway(ctx context.Context, action string, id int64, adminID int64, kinds ...string) (AstraGatewayTestResult, error) {

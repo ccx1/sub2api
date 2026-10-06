@@ -6,7 +6,10 @@
           <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('codexTicketSettings.title') }}</h1>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('codexTicketSettings.description') }}</p>
         </div>
-        <RouterLink to="/admin/settings#gateway" class="btn btn-secondary">{{ t('codexTicketSettings.proxySettings') }}</RouterLink>
+        <div class="flex flex-wrap gap-2">
+          <RouterLink to="/admin/borrowing-policy" class="btn btn-secondary">{{ t('admin.astraGateway.policyTitle') }}</RouterLink>
+          <RouterLink to="/admin/settings#gateway" class="btn btn-secondary">{{ t('codexTicketSettings.proxySettings') }}</RouterLink>
+        </div>
       </header>
       <p v-if="loading" role="status" class="py-12 text-center text-sm text-gray-500">{{ t('codexTicketSettings.loading') }}</p>
       <div v-else-if="loadError" role="alert" class="card flex flex-wrap items-center justify-between gap-3 p-5">
@@ -249,7 +252,6 @@
           <div class="flex justify-end"><button type="submit" class="btn btn-primary" data-testid="save-settings" :disabled="saving || !!validationError">{{ t(saving ? 'codexTicketSettings.saving' : 'codexTicketSettings.save') }}</button></div>
         </footer>
       </form>
-      <HarvestGatewayBorrowPanel />
     </div>
   </AppLayout>
 </template>
@@ -261,7 +263,6 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CodexTicketTagSelect from '@/components/admin/CodexTicketTagSelect.vue'
 import CodexTicketIPProtection from '@/components/admin/CodexTicketIPProtection.vue'
-import HarvestGatewayBorrowPanel from '@/components/admin/HarvestGatewayBorrowPanel.vue'
 import { getCodexTicketSettings, saveCodexTicketSettings, type CodexTicketSettings } from '@/api/admin/codexTicketSettings'
 import { defaultTicketProtection, readTicketProtection, splitTicketList, ticketCookieFields, ticketNumericGroups, ticketProtectionFields, ticketRejectionRetryFields, validateTicketSettings } from '@/components/admin/codexTicketSettingsForm'
 import { readTicketTierSelections, writeTicketTierSelections, ticketTierOptions, ticketModelOptions, type TicketTierRow } from '@/components/admin/codexTicketSelections'

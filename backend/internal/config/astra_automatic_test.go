@@ -44,3 +44,24 @@ func TestAstraNodeCooldownBounds(t *testing.T) {
 		require.NoError(t, (CodexGatewayPinConfig{NodeCooldownSeconds: seconds}).Validate())
 	}
 }
+
+func TestAstraAutomaticSourcesTakePriorityOverTargets(t *testing.T) {
+	for _, ws := range []bool{false, true} {
+		value := AstraRoutingSettings{CookiePool: CodexGatewayPinConfig{Enabled: true, SourceAccountIDs: []int64{1, 3}, TargetAccountIDs: []int64{3, 2, 1, 4}}, WSSession: CodexWSAnchorConfig{Enabled: ws, AccountIDs: []int64{1, 2}}}
+		resolved, err := ResolveAstraDependencies(value)
+		require.NoError(t, err)
+		require.Equal(t, []int64{2, 4}, resolved.CookiePool.TargetAccountIDs)
+		require.Equal(t, []int64{1, 3}, resolved.CookiePool.SourceAccountIDs)
+		require.Equal(t, []int64{3, 2, 1, 4}, value.CookiePool.TargetAccountIDs, "normalization must not mutate the caller")
+	}
+}
+
+func TestAstraAutomaticExcludingSourcesRequiresRemainingTarget(t *testing.T) {
+	value := AstraRoutingSettings{CookiePool: CodexGatewayPinConfig{Enabled: true, SourceAccountIDs: []int64{1}, TargetAccountIDs: []int64{1}}}
+	_, err := ResolveAstraDependencies(value)
+	require.ErrorContains(t, err, "astra_target_required")
+	value.CookiePool.Enabled = false
+	resolved, err := ResolveAstraDependencies(value)
+	require.NoError(t, err)
+	require.Empty(t, resolved.CookiePool.TargetAccountIDs)
+}

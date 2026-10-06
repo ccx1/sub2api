@@ -234,6 +234,19 @@ describe('observer and proxy-quality route boundaries', () => {
     else expect(next).toHaveBeenCalledWith('/dashboard')
   })
 
+  it.each(['user', 'observer', 'admin'])('limits the independent borrowing policy to administrators for %s', async role => {
+    authStore.isAdmin = role === 'admin'
+    authStore.isObserver = role === 'observer'
+    authStore.canManageAccounts = role !== 'user'
+    const route = routerHarness.routes.find(item => item.path === '/admin/borrowing-policy')
+    expect(route?.meta?.requiresAuth).toBe(true)
+    expect(route?.meta?.requiresAdmin).toBe(true)
+    const { navigation, next } = runGuard(route!.meta!, route!.path)
+    await navigation
+    if (role === 'admin') expect(next).toHaveBeenCalledWith()
+    else expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
   it('keeps account management available to observers in backend mode', async () => {
     authStore.isObserver = true
     authStore.canManageAccounts = true

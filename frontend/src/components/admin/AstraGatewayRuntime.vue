@@ -2,11 +2,12 @@
   <section class="card space-y-4 p-5" aria-labelledby="astra-runtime-title">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div><h2 id="astra-runtime-title" class="font-semibold">{{ t(`${p}.runtimeTitle`) }}</h2><p class="mt-1 text-xs text-gray-500">{{ t(`${p}.runtimeHint`) }}</p></div>
-      <button type="button" class="btn btn-primary btn-sm" data-testid="prepare" :disabled="busy || setupBusy || dirty || !settings?.cookie_pool.enabled" @click="run('prepare')">{{ t(busy ? `${p}.testing` : `${p}.prepare`) }}</button>
+      <button type="button" class="btn btn-primary btn-sm" data-testid="prepare" :disabled="busy || setupBusy || dirty || !settings?.cookie_pool.enabled" @click="run('prepare')">{{ t(busy || setupBusy ? `${p}.testing` : `${p}.prepare`) }}</button>
     </div>
     <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
     <p v-if="dirty" class="text-sm text-amber-600">{{ t(`${p}.saveFirst`) }}</p>
     <p class="text-xs text-gray-500" data-testid="probe-hint">{{ t(`${p}.probeHint`) }}</p>
+    <p v-if="busy || setupBusy" role="status" aria-live="polite" data-testid="current-test" class="rounded-lg bg-primary-50 p-3 text-sm dark:bg-primary-900/20">{{ t(busy ? `${p}.manualTesting` : `${p}.automaticTesting`) }}<span v-if="activeAccount"> · #{{ activeAccount }}</span> {{ t(`${p}.testingHint`) }}</p>
     <template v-if="runtime">
       <div v-if="runtime.setup?.state" class="rounded-xl border p-3 text-sm dark:border-dark-600" data-testid="setup-status">
         {{ t(`${p}.automaticStatus`) }}：{{ t(`${p}.setupStates.${runtime.setup.state}`) }}
@@ -14,7 +15,7 @@
         <span v-if="runtime.setup.account_id"> #{{ runtime.setup.account_id }}</span>
         <span v-if="runtime.setup.reason"> · {{ reason(runtime.setup.reason) }}</span>
       </div>
-      <p class="text-sm" :class="runtime.ready_routes ? 'text-emerald-600' : 'text-amber-600'">{{ t(`${p}.readyRoutes`, { n: runtime.ready_routes }) }} · {{ t(runtime.preparing ? `${p}.preparing` : `${p}.idle`) }}</p>
+      <p class="text-sm" :class="runtime.ready_routes ? 'text-emerald-600' : 'text-amber-600'">{{ t(`${p}.readyRoutes`, { n: runtime.ready_routes }) }} · {{ t(busy || setupBusy ? `${p}.testing` : runtime.preparing ? `${p}.preparing` : `${p}.idle`) }}</p>
       <div v-if="runtime.cooldowns?.length" class="rounded-xl border p-3 text-sm dark:border-dark-600" data-testid="rotation-cooldowns">
         <h3 class="font-medium">{{ t(`${p}.cooldownTitle`) }}</h3>
         <p v-for="row in runtime.cooldowns" :key="`${row.account_id}:${row.gateway}`" class="mt-2 break-all">#{{ row.account_id }} · {{ row.gateway }} · {{ remaining(row.retry_at) }} s</p>
@@ -51,8 +52,10 @@
           <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || setupBusy || dirty || !row.ready" @click="run('ws', row.account_id)">{{ t(`${p}.verifyWS`) }}</button>
         </div>
       </div>
-      <div v-if="runtime.last_test" role="status" class="space-y-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+      <div v-if="runtime.last_test" role="status" data-testid="last-test" class="space-y-2 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+        <h3 class="font-medium">{{ t(`${p}.lastTestTitle`) }}</h3>
         <p>{{ clock(runtime.last_test.checked_at) }} · {{ runtime.last_test.action }} <span v-if="runtime.last_test.account_id">#{{ runtime.last_test.account_id }}</span> · {{ reason(runtime.last_test.reason) }} · {{ (runtime.last_test.duration_ms / 1000).toFixed(1) }} s</p>
+        <p class="text-xs text-gray-500">{{ t(`${p}.lastTestHint`) }}</p>
       </div>
     </template>
   </section>
@@ -61,6 +64,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getAstraGatewayRuntime, testAstraGateway, type AstraGatewayRuntime, type AstraGatewaySettings } from '@/api/admin/astraGateway'
+import { astraSelectionErrorKey } from '@/utils/astraBorrowingSelection'
 defineProps<{ settings?: AstraGatewaySettings; dirty: boolean }>()
 const { t, te } = useI18n()
 const p = 'admin.astraGateway'
@@ -69,13 +73,19 @@ const runtime = ref<AstraGatewayRuntime>()
 const repeatedGatewayHits = computed(() => runtime.value?.gateways?.reduce((sum, node) => sum + node.repeated_hits, 0) || 0)
 const error = ref('')
 const busy = ref(false)
+const activeAccount = ref(0)
 const setupBusy = computed(() => ['queued', 'running'].includes(runtime.value?.setup?.state || ''))
 const now = ref(Date.now())
 let poll: ReturnType<typeof setInterval> | undefined
 let tick: ReturnType<typeof setInterval> | undefined
 let alive = true
 let refreshing = false
-function reason(code: string) { const key = `${p}.reasons.${code}`; return te(key) ? t(key) : code }
+function reason(code: string) {
+  const selectionKey = astraSelectionErrorKey(code)
+  if (selectionKey !== 'selectionInvalid' || code === 'astra_selection_invalid' || code === 'astra_group_selection_invalid') return t(`${p}.${selectionKey}`)
+  const key = `${p}.reasons.${code}`
+  return te(key) ? t(key) : code
+}
 function routeLifetime(row: { state?: string; expires_at?: string }) { return row.state === 'ready' && row.expires_at && remaining(row.expires_at) > 0 ? `${remaining(row.expires_at)} s` : '—' }
 function clock(value?: string) { return value ? new Date(value).toLocaleString() : '—' }
 function remaining(expiry?: string) { return expiry ? Math.max(0, Math.ceil((Date.parse(expiry) - now.value) / 1000)) : 0 }
@@ -87,10 +97,11 @@ async function refresh() {
   finally { refreshing = false }
 }
 async function run(action: 'prepare' | 'verify' | 'ws', account = 0) {
-  busy.value = true; error.value = ''
-  try { const result = await testAstraGateway(action, account, 'state_probe'); await refresh(); if (runtime.value) runtime.value.last_test = result }
+  if (busy.value || setupBusy.value) return
+  busy.value = true; activeAccount.value = account; error.value = ''
+  try { const result = await testAstraGateway(action, account, 'state_probe'); await refresh(); if (alive && runtime.value) runtime.value.last_test = result }
   catch { error.value = t(`${p}.testError`) }
-  finally { busy.value = false }
+  finally { busy.value = false; activeAccount.value = 0 }
 }
 onMounted(() => { void refresh(); poll = setInterval(refresh, 5000); tick = setInterval(() => { now.value = Date.now() }, 1000) })
 onUnmounted(() => { alive = false; clearInterval(poll); clearInterval(tick) })

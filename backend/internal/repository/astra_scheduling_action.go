@@ -44,7 +44,13 @@ func (r *accountRepository) ApplyAstraScheduling(ctx context.Context, id int64, 
 	if err = json.Unmarshal(raw, &actual); err != nil {
 		return result, err
 	}
-	if !actual.AccountScheduling || !reflect.DeepEqual(actual, s) || !slices.Contains(s.CookiePool.TargetAccountIDs, id) {
+	actual.SelectionError, s.SelectionError = "", ""
+	policyMatches := reflect.DeepEqual(config.AstraStoredSettings(actual), config.AstraStoredSettings(s))
+	if actual.CookiePool.UsesGroups() && s.CookiePool.UsesGroups() {
+		// 动态来源会扣除手选目标；完整配置必须在锁内解析后比较。
+		policyMatches = actual.Revision == s.Revision
+	}
+	if !actual.AccountScheduling || !policyMatches || !slices.Contains(s.CookiePool.TargetAccountIDs, id) {
 		return result, errors.New("configuration_changed")
 	}
 	var mapping, extraRaw []byte
@@ -55,6 +61,13 @@ func (r *accountRepository) ApplyAstraScheduling(ctx context.Context, id int64, 
  FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).Scan(&mapping, &extraRaw, &sched, &version, &eligible)
 	if err != nil {
 		return result, err
+	}
+	if actual.CookiePool.UsesGroups() {
+		// 取得账号行锁后重读成员，不能使用等待锁之前的分组快照决定停调/恢复。
+		actual, err = resolveAstraRoutingAccounts(ctx, tx, actual)
+		if err != nil || !reflect.DeepEqual(actual, s) || !slices.Contains(actual.CookiePool.TargetAccountIDs, id) {
+			return result, errors.New("configuration_changed")
+		}
 	}
 	ready = ready && eligible
 	result.Allowed = ready
